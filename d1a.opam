@@ -1,0 +1,15 @@
+opam-version: "2.0"
+maintainer: "Benno Stein <bennostein@colorado.edu>"
+authors: "Benno Stein <bennostein@colorado.edu>"
+dev-repo: "git://github.com/cuplv/d1a.git"
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]
+depends: [
+  "ocaml"
+  "core"
+  "dune" {>= "2.1.2" build}
+  "yojson"
+]
+synopsis: "Demand-first analysis"
+description: "Demand-first analysis"
