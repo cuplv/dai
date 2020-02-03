@@ -1,24 +1,27 @@
+let seeded_hash = Hashtbl.seeded_hash
+
 open Import
 open Ast
+open Adapton
+module Engine = Engine.Make (Engine.Default_params)
+module ArtLib = Engine.ArtLib
 
-type truthiness = [ `T | `F | `Either ]
+type truthiness = [ `Neither | `T | `F | `Either ]
 
 module type Domain = sig
-  type t [@@derivin1g equal, hash]
+  include Data.S
 
-  val pp : t pp
+  include Articulated.S
 
   val init : t
 
   val join : t -> t -> t
 
   val exec_stmt : t -> Stmt.t -> t option
-
-  val truth_value : t -> Expr.t -> truthiness
 end
 
 module type Abstract_value = sig
-  type t [@@deriving equal, hash]
+  include Adapton.Data.S
 
   val pp : t pp
 
@@ -26,70 +29,165 @@ module type Abstract_value = sig
 
   val eval_binop : t -> Binop.t -> t -> t
 
+  val of_lit : Lit.t -> t
+
   val eval_unop : Unop.t -> t -> t
 
   val truthiness : t -> truthiness
 end
 
 module Set_of_concrete : Abstract_value = struct
-  type t = Set.M(Lit).t [@@deriving equal, hash]
+  type t = Set.M(Lit).t [@@deriving compare, equal]
 
   let pp = Set.pp Lit.pp
 
+  let show = Format.asprintf "%a" pp
+
+  let sanitize x = x
+
+  let hash = seeded_hash
+
   let join = Set.union
 
-  let eval_binop _ _ _ = failwith "unimplemented"
+  let bottom = Set.empty (module Lit)
 
-  let eval_unop _ _ = failwith "unimplemented"
+  let of_lit = Set.singleton (Set.comparator_s bottom)
 
-  let truthiness _vals = failwith "unimplemented"
+  let eval_binop l op r =
+    let concrete_op l r =
+      match (op, l, r) with
+      | Binop.Plus, Lit.Int l, Lit.Int r -> Lit.Int (l + r)
+      | Binop.Plus, Lit.Float l, Lit.Float r -> Lit.Float (l +. r)
+      | Binop.Plus, Lit.String l, Lit.String r -> Lit.String (l ^ r)
+      | Binop.Minus, Lit.Int l, Lit.Int r -> Lit.Int (l - r)
+      | Binop.Minus, Lit.Float l, Lit.Float r -> Lit.Float (l -. r)
+      | _ ->
+          failwith
+            (Format.asprintf "Unimplemented binary operation: \"%a %a %a\""
+               Lit.pp l Binop.pp op Lit.pp r)
+    in
+    Set.fold l ~init:bottom ~f:(fun acc curr_l ->
+        Set.fold r ~init:acc ~f:(fun acc curr_r ->
+            Set.add acc (concrete_op curr_l curr_r)))
+
+  let eval_unop op v =
+    let concrete_op v =
+      match (op, v) with
+      | Unop.Not, Lit.Bool b -> Lit.Bool (not b)
+      | Unop.Neg, Lit.Float f -> Lit.Float (Float.neg f)
+      | Unop.Neg, Lit.Int i -> Lit.Int (Int.neg i)
+      | _ ->
+          failwith
+            (Format.asprintf "Unimplemented unary operation: \"%a %a\"" Unop.pp
+               op Lit.pp v)
+    in
+    Set.fold v ~init:bottom ~f:(fun acc curr -> Set.add acc (concrete_op curr))
+
+  let truthiness =
+    Set.fold ~init:`Neither ~f:(fun acc curr ->
+        let curr =
+          match curr with
+          | Lit.Bool b -> b
+          | Lit.Int i -> i <> 0
+          | Lit.Float f -> not @@ Float.equal f 0.0
+          | Lit.String _ -> true
+          | Lit.Null | Lit.Undefined -> false
+        in
+        match (acc, curr) with
+        | `Neither, true | `T, true -> `T
+        | `Neither, false | `F, false -> `F
+        | `T, false | `F, true | `Either, _ -> `Either)
 end
 
-module Env (Val : Abstract_value) : Domain = struct
-  type t = Val.t Map.M(String).t [@@deriving equal, hash]
+module EnvNonInc (Val : Abstract_value) : Domain = struct
+  module Env = Trie.Map.MakeNonInc (Name) (Engine.ArtLib) (Types.String) (Val)
+  include Env
 
-  let pp fs env =
+  let pp fs (env : t) =
     let pp_string_color color str =
       Format.fprintf fs "%s%s%s" color str Colors.reset
     in
-    Format.open_hovbox 0;
     pp_string_color Colors.cyan "{";
-    Map.iteri env ~f:(fun ~key ~data ->
-        Format.fprintf fs "%s %s->%s %a %s;%s@ " key Colors.blue Colors.reset
-          Val.pp data Colors.red Colors.reset);
-    pp_string_color Colors.cyan "}";
-    Format.close_box ()
+    Format.open_hovbox 0;
+    Format.print_space ();
+    List.iter (to_list env) ~f:(fun (k, v) ->
+        Format.fprintf fs "%s%s%s -> %a %s;%s@ " Colors.cyan k Colors.reset
+          Val.pp v Colors.red Colors.reset);
+    Format.close_box ();
+    pp_string_color Colors.cyan "}"
 
-  let init = Map.empty (module String)
+  let init = of_list []
 
   let join =
-    Map.fold2 ~init ~f:(fun ~key ~data acc ->
-        match data with
-        | `Both (x, y) -> Map.add_exn acc ~key ~data:(Val.join x y)
-        | `Left x -> Map.add_exn acc ~key ~data:x
-        | `Right x -> Map.add_exn acc ~key ~data:x)
+    fold (fun acc k v ->
+        match find acc k with
+        | Some acc_v -> add acc k (Val.join v acc_v)
+        | None -> add acc k v)
 
-  let eval_expr _state _expr = failwith "unimplemented"
+  (*    let mfn =
+      Art.mk_mfn
+        (Name.of_string "interpreter#env#join")
+        (module Types.Tuple2 (Env) (Env))
+        (fun _mfn (l, r) ->
+          Env.fold
+            (fun acc k v ->
+              match Env.find acc k with
+              | Some acc_v -> failwith "todo"
+              | None -> 
+            l r)
+    in
+    fun l r -> mfn.mfn_data (l, r)*)
 
-  let truth_value _env _expr = failwith ""
+  let rec eval_expr env = function
+    | Expr.Var v -> (
+        match find env v with
+        | Some value -> value
+        | None -> Val.of_lit Lit.Undefined )
+    | Expr.Lit l -> Val.of_lit l
+    | Expr.Binop { l; op; r } ->
+        Val.eval_binop (eval_expr env l) op (eval_expr env r)
+    | Expr.Unop { op; e } -> Val.eval_unop op (eval_expr env e)
 
-  let rec exec_stmt st stmt =
+  (*    | Call of { fn : t; actuals : t list }*)
+  (*    | MemberAccess { rcvr=_ ; prop=_ } -> 
+          | Array _xs -> failwith "todo"*)
+
+  let rec exec_stmt env stmt =
     let open Stmt in
     match stmt with
-    | Seq (l, r) -> exec_stmt st l >>= flip exec_stmt r
+    | Seq (l, r) -> exec_stmt env l >>= flip exec_stmt r
     | If { cond; then_body; else_body } -> (
-        match truth_value st cond with
-        | `T -> exec_stmt st then_body
-        | `F -> exec_stmt st else_body
+        match Val.truthiness @@ eval_expr env cond with
+        | `T -> exec_stmt env then_body
+        | `F -> exec_stmt env else_body
         | `Either ->
-            let then_res = exec_stmt st then_body in
-            let else_res = exec_stmt st else_body in
-            Option.merge then_res else_res join )
+            let then_res = exec_stmt env then_body in
+            let else_res = exec_stmt env else_body in
+            Option.merge then_res else_res join
+        | `Neither -> None )
     | Assign { lhs; rhs } ->
-        let rhs = eval_expr st rhs in
-        Map.change st lhs ~f:(fun _ -> rhs) |> Option.some
+        let rhs = eval_expr env rhs in
+        Some (add env lhs rhs)
     | Throw { exn = _ } -> None
-    | Expr _ | Skip -> Some st
+    | Expr _ | Skip -> Some env
 end
 
-module Make (Dom : Domain) = struct end
+module ENI = EnvNonInc (Set_of_concrete)
+
+let prgm0 = Parser.(stmt_list arith0)
+
+let prgm1 = Parser.(stmt_list arith1)
+
+let prgm2 = Parser.(stmt_list arith2)
+
+let%test "interpret" =
+  Option.iter (ENI.exec_stmt ENI.init prgm0) ~f:(Format.printf "\n\n%a" ENI.pp);
+  false
+
+let%test "interpret" =
+  Option.iter (ENI.exec_stmt ENI.init prgm1) ~f:(Format.printf "\n\n%a" ENI.pp);
+  false
+
+let%test "interpret" =
+  Option.iter (ENI.exec_stmt ENI.init prgm2) ~f:(Format.printf "\n\n%a" ENI.pp);
+  false

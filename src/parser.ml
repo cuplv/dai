@@ -6,9 +6,6 @@ open Ast
 let json_of_file file =
   from_string Shell.(run_full "semantic" [ "parse"; "--json"; file ])
 
-let test_json =
-  json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/foo.js"
-
 let ident_of_json = member "name" >> to_string
 
 let rec expr_of_json json =
@@ -72,6 +69,29 @@ let stmt_list =
   member "trees" >> to_list >> List.hd_exn >> member "tree"
   >> member "statements" >> convert_each stmt_of_json >> Ast.seqify_list
 
-let%test "dummy" = String.equal ("Hello, " ^ "world!") "Hello, world!"
+let arith0 =
+  json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js"
 
-let _ = stmt_list test_json |> Stmt.pp Format.std_formatter
+let arith1 =
+  json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith1.js"
+
+let arith2 =
+  json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith2.js"
+
+let%test "parse" =
+  stmt_list arith0 |> Stmt.pp Format.std_formatter;
+  Format.print_newline ();
+  Format.print_newline ();
+  true
+
+let%test "parse" =
+  stmt_list arith1 |> Stmt.pp Format.std_formatter;
+  Format.print_newline ();
+  Format.print_newline ();
+  true
+
+let%test "parse" =
+  stmt_list arith2 |> Stmt.pp Format.std_formatter;
+  Format.print_newline ();
+  Format.print_newline ();
+  true

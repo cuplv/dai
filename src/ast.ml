@@ -84,14 +84,14 @@ module Binop = struct
 end
 
 module Unop = struct
-  type t = UPlus | UNeg | Not | BNot | Incr | Decr | Typeof
+  type t = Plus | Neg | Not | BNot | Incr | Decr | Typeof
   [@@deriving compare, equal, hash]
 
   let pp fs =
     let ps = Format.pp_print_string fs in
     function
-    | UPlus -> ps "+"
-    | UNeg -> ps "-"
+    | Plus -> ps "+"
+    | Neg -> ps "-"
     | Not -> ps "!"
     | BNot -> ps "~"
     | Incr -> ps "++"
@@ -106,8 +106,8 @@ module Expr = struct
     (*    | Call of { fn : t; actuals : t list }*)
     | Binop of { l : t; op : Binop.t; r : t }
     | Unop of { op : Unop.t; e : t }
-    | MemberAccess of { rcvr : t; prop : t }
-    | Array of t list
+  (*    | MemberAccess of { rcvr : t; prop : t }
+    | Array of t list*)
   [@@deriving equal, compare, hash]
 
   let rec pp fs e =
@@ -119,8 +119,9 @@ module Expr = struct
     | Binop { l; op; r } ->
         Format.fprintf fs "@[%a@ %a@ %a@]" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
-    | MemberAccess { rcvr; prop } -> Format.fprintf fs "%a[%a]" pp rcvr pp prop
-    | Array contents -> (List.pp ~pre:"[" ~suf:"]" ",@ " pp) fs contents
+
+  (*    | MemberAccess { rcvr; prop } -> Format.fprintf fs "%a[%a]" pp rcvr pp prop
+    | Array contents -> (List.pp ~pre:"[" ~suf:"]" ",@ " pp) fs contents*)
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
   let hash_fold_int acc curr =
