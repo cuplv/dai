@@ -3,15 +3,11 @@ let seeded_hash = Hashtbl.seeded_hash
 open Import
 open Ast
 open Adapton
-module Engine = Engine.Make (Engine.Default_params)
-module ArtLib = Engine.ArtLib
 
 type truthiness = [ `Neither | `T | `F | `Either ]
 
 module type Domain = sig
   include Data.S
-
-  include Articulated.S
 
   val init : t
 
@@ -99,9 +95,14 @@ module Set_of_concrete : Abstract_value = struct
         | `T, false | `F, true | `Either, _ -> `Either)
 end
 
-module EnvNonInc (Val : Abstract_value) : Domain = struct
-  module Env = Trie.Map.MakeNonInc (Name) (Engine.ArtLib) (Types.String) (Val)
-  include Env
+module EnvNonInc (Val : Abstract_value) : sig
+  include Domain
+
+  val eval_expr : t -> Expr.t -> Val.t
+
+  val add : t -> string -> Val.t -> t
+end = struct
+  include Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Types.String) (Val)
 
   let pp fs (env : t) =
     let pp_string_color color str =
@@ -171,23 +172,3 @@ module EnvNonInc (Val : Abstract_value) : Domain = struct
     | Throw { exn = _ } -> None
     | Expr _ | Skip -> Some env
 end
-
-module ENI = EnvNonInc (Set_of_concrete)
-
-let prgm0 = Parser.(stmt_list arith0)
-
-let prgm1 = Parser.(stmt_list arith1)
-
-let prgm2 = Parser.(stmt_list arith2)
-
-let%test "interpret" =
-  Option.iter (ENI.exec_stmt ENI.init prgm0) ~f:(Format.printf "\n\n%a" ENI.pp);
-  false
-
-let%test "interpret" =
-  Option.iter (ENI.exec_stmt ENI.init prgm1) ~f:(Format.printf "\n\n%a" ENI.pp);
-  false
-
-let%test "interpret" =
-  Option.iter (ENI.exec_stmt ENI.init prgm2) ~f:(Format.printf "\n\n%a" ENI.pp);
-  false

@@ -99,3 +99,12 @@ module Colors = struct
 
   let reset = "\x1b[0m"
 end
+
+module Engine = Adapton.Engine.Make (Adapton.Engine.Default_params)
+module DefaultArtLib = Engine.ArtLib
+
+module Name = struct
+  include Adapton.Name
+
+  let extend nm str = pair nm (of_string str)
+end
