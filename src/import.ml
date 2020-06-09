@@ -108,3 +108,5 @@ module Name = struct
 
   let extend nm str = pair nm (of_string str)
 end
+
+module Graph = Graphlib.Std.Graphlib

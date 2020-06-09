@@ -8,6 +8,8 @@ build: [
 depends: [
   "ocaml"
   "core"
+  "regular"
+  "graphlib"
   "dune" {>= "2.1.2" build}
   "yojson"
 ]

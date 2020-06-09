@@ -17,12 +17,6 @@ module Lit = struct
   include T
   include Comparable.Make (T)
 
-  (*  module Set = struct include (
-                 Set : module type of Set with type ('elt, 'cmp) t := ('elt, 'cmp) Set.t)
-                      type t = Set.M(T).t [@@deriving compare, equal, sexp, hash]
-                      let empty = Set.empty (module T)
-               end*)
-
   let pp fs = function
     | Bool b -> Format.pp_print_bool fs b
     | Int i -> Format.pp_print_int fs i
@@ -131,30 +125,22 @@ end
 
 module Stmt = struct
   type t =
-    | Seq of t * t
-    | If of { cond : Expr.t; then_body : t; else_body : t }
     | Assign of { lhs : string; rhs : Expr.t }
     | Throw of { exn : Expr.t }
     | Expr of Expr.t
+    | Assume of Expr.t
     | Skip
-  [@@deriving equal]
+  [@@deriving compare, equal, hash]
 
-  let seq fst snd =
-    match (fst, snd) with Skip, _ -> snd | _, Skip -> fst | _ -> Seq (fst, snd)
-
-  let rec pp fs stmt =
+  let pp fs stmt =
     match stmt with
-    | Seq (l, r) -> Format.fprintf fs "@[<v>%a;@ %a@]" pp l pp r
-    | If { cond; then_body; else_body } ->
-        Format.fprintf fs
-          "@[<v>if(%a){@   @[<v 2>%a@]@ } else {@   @[<v 2>%a@]@ }@]" Expr.pp
-          cond pp then_body pp else_body
     | Assign { lhs; rhs } -> Format.fprintf fs "@[%s@ =@ %a@]" lhs Expr.pp rhs
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
+    | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
     | Skip -> Format.pp_print_string fs "skip"
+
+  let to_string stmt : string =
+    Format.fprintf Format.str_formatter "%a" pp stmt;
+    Format.flush_str_formatter ()
 end
-
-(*type t = Stmt.t list*)
-
-let seqify_list = List.fold ~init:Stmt.Skip ~f:Stmt.seq

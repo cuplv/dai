@@ -1,2 +1,5 @@
 _build
 src/.merlin
+
+*.dot
+*.png
