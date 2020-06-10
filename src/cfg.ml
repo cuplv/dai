@@ -5,15 +5,21 @@ module Loc : sig
 
   val compare : t -> t -> int
 
+  val equal : t -> t -> bool
+
   val hash : t -> int
 
   val init : t
 
   val fresh : unit -> t
+
+  val pp : t pp
 end = struct
   type t = int
 
   let compare = Int.compare
+
+  let equal = Int.equal
 
   let hash i = Hashtbl.hash i
 
@@ -25,6 +31,8 @@ end = struct
     let curr = !next in
     next := curr + 1;
     curr
+
+  let pp fs l = Format.fprintf fs "l%i" l
 end
 
 module G =

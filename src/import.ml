@@ -110,3 +110,4 @@ module Name = struct
 end
 
 module Graph = Graphlib.Std.Graphlib
+module Seq = Regular.Std.Seq

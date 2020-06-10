@@ -153,16 +153,19 @@ let%test "back edge classification" =
     cfg_of_json
     @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js"
   in
-  Int.equal 1 @@ Graph.depth_first_search
-    (module Cfg.G)
-    ~start:Cfg.Loc.init
-    ~leave_edge:(function
-      | `Back ->
-          fun e acc ->
-            Format.fprintf Format.std_formatter "Back edge: %a\n" Ast.Stmt.pp
-              (Cfg.G.Edge.label e); acc + 1
-      | _ ->
-          fun e acc ->
-            Format.fprintf Format.std_formatter "Forward edge: %a\n" Ast.Stmt.pp
-              (Cfg.G.Edge.label e); acc)
-    ~init:0 cfg
+  Int.equal 1
+  @@ Graph.depth_first_search
+       (module Cfg.G)
+       ~start:Cfg.Loc.init
+       ~leave_edge:(function
+         | `Back ->
+             fun e acc ->
+               Format.fprintf Format.std_formatter "Back edge: %a\n" Ast.Stmt.pp
+                 (Cfg.G.Edge.label e);
+               acc + 1
+         | _ ->
+             fun e acc ->
+               Format.fprintf Format.std_formatter "Forward edge: %a\n"
+                 Ast.Stmt.pp (Cfg.G.Edge.label e);
+               acc)
+       ~init:0 cfg

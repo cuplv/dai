@@ -1,7 +1,11 @@
+open Import
+
 module type Dom = sig
   type t [@@deriving compare, hash]
 
   include Adapton.Data.S with type t := t
+
+  val pp : t pp
 
   val init : t
 

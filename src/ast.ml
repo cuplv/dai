@@ -130,7 +130,7 @@ module Stmt = struct
     | Expr of Expr.t
     | Assume of Expr.t
     | Skip
-  [@@deriving compare, equal, hash]
+  [@@deriving compare, equal]
 
   let pp fs stmt =
     match stmt with
@@ -143,4 +143,10 @@ module Stmt = struct
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;
     Format.flush_str_formatter ()
+
+  let sanitize = failwith "todo"
+
+  let show = failwith "todo"
+
+  let hash = failwith "todo"
 end
