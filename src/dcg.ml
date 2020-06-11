@@ -130,7 +130,7 @@ module Make (Dom : Abstract.Dom) = struct
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
   let edit_stmt (_nm : Name.t) (_stmt : Ast.Stmt.t) (_g : t) = failwith "todo"
 
-  (** IMPURE --*)
+  (** IMPURE -- see [edit_stmt] *)
   let delete_stmt (nm : Name.t) (g : t) = edit_stmt nm Ast.Stmt.Skip g
 
   let add_stmt (_loc : Cfg.Loc.t) (_stmt : Ast.Stmt.t) (_g : t) =

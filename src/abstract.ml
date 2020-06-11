@@ -29,7 +29,8 @@ module type Dom = sig
 
   val pp : t pp
 
-  val init : t
+  (* [unit -> t] type allows for lazy apron manager allocation, unlike [t] *)
+  val init : unit -> t
 
   val interpret : Ast.Stmt.t -> t -> t
 

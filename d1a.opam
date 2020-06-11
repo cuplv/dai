@@ -12,6 +12,7 @@ depends: [
   "graphlib"
   "dune" {>= "2.1.2" build}
   "yojson"
+  "apron"
 ]
 synopsis: "Demand-first analysis"
 description: "Demand-first analysis"

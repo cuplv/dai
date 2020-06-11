@@ -10,6 +10,10 @@ let ( $> ) x f =
   f x;
   x
 
+let uncurry f (x, y) = f x y
+
+let curry f x y = f (x, y)
+
 module Option = struct
   include Base.Option
 

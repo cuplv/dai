@@ -89,7 +89,9 @@ module Interpreter (Dom : Abstract.Dom) = struct
 
   (* fully path-sensitive; terminates iff cfg's state space is finite *)
   let collect (cfg : G.t) : Set.M(State).t =
-    let worklist = ref (Set.singleton (module State) (Loc.entry, Dom.init)) in
+    let worklist =
+      ref (Set.singleton (module State) (Loc.entry, Dom.init ()))
+    in
     let accum = ref !worklist in
     (* make a (nondeterministic) small step from [state];
      *  - add new non-bottom states to both the worklist and the collecting semantics

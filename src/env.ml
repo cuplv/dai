@@ -29,7 +29,7 @@ module Make (Val : Abstract.Val) : Abstract.Dom = struct
 
   let hash_fold_t seed = hash 0 >> Ppx_hash_lib.Std.Hash.fold_int seed
 
-  let init = Some (Env.of_list [])
+  let init () = Some (Env.of_list [])
 
   let is_bot = Option.is_none
 
