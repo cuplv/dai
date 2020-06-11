@@ -144,9 +144,11 @@ module Stmt = struct
     Format.fprintf Format.str_formatter "%a" pp stmt;
     Format.flush_str_formatter ()
 
-  let sanitize = failwith "todo"
+  let sanitize x = x
 
-  let show = failwith "todo"
+  let show x =
+    pp Format.str_formatter x;
+    Format.flush_str_formatter ()
 
-  let hash = failwith "todo"
+  let hash = seeded_hash
 end

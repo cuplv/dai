@@ -125,9 +125,10 @@ let cfg_of_json json : Cfg.t =
         failwith @@ "Malformed statement JSON: no \"term\" element; content: "
         ^ show json
   in
+  Cfg.Loc.reset ();
   Graph.create
     (module Cfg.G)
-    ~edges:(edge_list_of_json (Cfg.Loc.fresh ()) (Cfg.Loc.fresh ()) json)
+    ~edges:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit json)
     ()
 
 let%test "cfg_parse and dump dot: arith0.js" =
@@ -156,16 +157,40 @@ let%test "back edge classification" =
   Int.equal 1
   @@ Graph.depth_first_search
        (module Cfg.G)
-       ~start:Cfg.Loc.init
+       ~start:Cfg.Loc.entry
        ~leave_edge:(function
          | `Back ->
              fun e acc ->
-               Format.fprintf Format.std_formatter "Back edge: %a\n" Ast.Stmt.pp
-                 (Cfg.G.Edge.label e);
+               Format.printf "Back edge: %a\n" Ast.Stmt.pp (Cfg.G.Edge.label e);
                acc + 1
          | _ ->
              fun e acc ->
-               Format.fprintf Format.std_formatter "Forward edge: %a\n"
-                 Ast.Stmt.pp (Cfg.G.Edge.label e);
+               Format.printf "Forward edge: %a\n" Ast.Stmt.pp
+                 (Cfg.G.Edge.label e);
                acc)
        ~init:0 cfg
+
+module Soc_interpreter = Cfg.Interpreter (Set_of_concrete.Env)
+
+let%test "collecting semantics: arith0.js" =
+  let cfg =
+    cfg_of_json
+    @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js"
+  in
+  let collection = Soc_interpreter.collect cfg in
+  Set.pp Soc_interpreter.State.pp Format.std_formatter collection;
+  match Set.find collection ~f:(fst >> Cfg.Loc.equal Cfg.Loc.exit) with
+  | Some (_, state) ->
+      let expected =
+        Sexp.(
+          List
+            [
+              List [ Atom "b"; List [ List [ Atom "Bool"; Atom "true" ] ] ];
+              List [ Atom "x"; List [ List [ Atom "Float"; Atom "1" ] ] ];
+            ])
+      in
+      Format.printf "\nEXPECTED: %a\n" Sexp.pp expected;
+      Format.printf "ACTUAL:   %a\n" Sexp.pp
+        (Set_of_concrete.Env.sexp_of_t state);
+      Sexp.equal expected (Set_of_concrete.Env.sexp_of_t state)
+  | None -> false

@@ -1,6 +1,3 @@
-(* stashing because Import shadows Hashtbl *)
-let seeded_hash = Hashtbl.seeded_hash
-
 open Import
 
 module Comp = struct
@@ -41,7 +38,7 @@ module Name = struct
     | Iterate (n, idx) -> Format.fprintf fs "%a^%i" pp n idx
 end
 
-module Make (Dom : Domain_intf.Dom) = struct
+module Make (Dom : Abstract.Dom) = struct
   module Ref = struct
     type t =
       | Stmt of { mutable stmt : Ast.Stmt.t; name : Name.t }

@@ -1,3 +1,5 @@
+let seeded_hash = Hashtbl.seeded_hash
+
 include Core
 
 let ( >> ) f g x = g (f x)
