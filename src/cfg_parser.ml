@@ -34,8 +34,7 @@ let rec expr_of_json json =
   | Some "LessThan" -> binop Ast.Binop.Lt json
   | Some "Not" -> unop Ast.Unop.Not json
   | Some t ->
-      failwith @@ "Unrecognized expression with term: \"" ^ t
-      ^ "\" and content: " ^ show json
+      failwith @@ "Unrecognized expression with term: \"" ^ t ^ "\" and content: " ^ show json
   | None -> failwith "Malformed expression JSON: no \"term\" element"
 
 and binop op json =
@@ -63,9 +62,7 @@ let cfg_of_json json : Cfg.t =
           | [ last ] -> edge_list_of_json curr_loc exit last
           | curr :: rest ->
               let next_loc = Cfg.Loc.fresh () in
-              List.append
-                (edge_list_of_json curr_loc next_loc curr)
-                (of_json_list rest next_loc)
+              List.append (edge_list_of_json curr_loc next_loc curr) (of_json_list rest next_loc)
           | [] -> [ (curr_loc, exit, Ast.Stmt.Skip) ]
           (* this case only reachable if initial list empty *)
         in
@@ -81,20 +78,14 @@ let cfg_of_json json : Cfg.t =
           | [] -> [ (curr_loc, exit, Ast.Stmt.Skip) ]
           (* this case only reachable if initial list empty *)
         in
-        of_assign_list
-          (member "variableDeclarations" json |> convert_each assign_of_json)
-          entry
+        of_assign_list (member "variableDeclarations" json |> convert_each assign_of_json) entry
     | Some "If" ->
         let if_head = Cfg.Loc.fresh () in
         let else_head = Cfg.Loc.fresh () in
         let cond = member "ifCondition" json |> expr_of_json in
         let cond_neg = Ast.Expr.Unop { op = Ast.Unop.Not; e = cond } in
-        let if_branch =
-          edge_list_of_json if_head exit (member "ifThenBody" json)
-        in
-        let else_branch =
-          edge_list_of_json else_head exit (member "ifElseBody" json)
-        in
+        let if_branch = edge_list_of_json if_head exit (member "ifThenBody" json) in
+        let else_branch = edge_list_of_json else_head exit (member "ifElseBody" json) in
         (* edge into if-branch, assuming condition *)
         (entry, if_head, Ast.Stmt.Assume cond)
         :: (entry, else_head, Ast.Stmt.Assume cond_neg)
@@ -107,8 +98,7 @@ let cfg_of_json json : Cfg.t =
         let cond = member "whileCondition" json |> expr_of_json in
         let cond_neg = Ast.Expr.Unop { op = Ast.Unop.Not; e = cond } in
         let loop_body =
-          edge_list_of_json loop_body_entry loop_body_exit
-            (member "whileBody" json)
+          edge_list_of_json loop_body_entry loop_body_exit (member "whileBody" json)
         in
         (* edge from loop head into loop body, assuming loop condition *)
         (* edge from loop head to exit, assuming loop condition's negation *)
@@ -119,41 +109,24 @@ let cfg_of_json json : Cfg.t =
            loop_body
         (* loop body *)
     | Some t ->
-        failwith @@ "Unrecognized statement with term : \"" ^ t
-        ^ "\" and content: " ^ show json
-    | None ->
-        failwith @@ "Malformed statement JSON: no \"term\" element; content: "
-        ^ show json
+        failwith @@ "Unrecognized statement with term : \"" ^ t ^ "\" and content: " ^ show json
+    | None -> failwith @@ "Malformed statement JSON: no \"term\" element; content: " ^ show json
   in
   Cfg.Loc.reset ();
-  Graph.create
-    (module Cfg.G)
-    ~edges:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit json)
-    ()
+  Graph.create (module Cfg.G) ~edges:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit json) ()
 
 let%test "cfg_parse and dump dot: arith0.js" =
-  let cfg =
-    cfg_of_json
-    @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js"
-  in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith0.dot"
-    ~print:true;
+  let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js" in
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith0.dot" ~print:true;
   true
 
 let%test "cfg_parse and dump dot: while.js" =
-  let cfg =
-    cfg_of_json
-    @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js"
-  in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot"
-    ~print:true;
+  let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js" in
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot" ~print:true;
   true
 
 let%test "back edge classification" =
-  let cfg =
-    cfg_of_json
-    @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js"
-  in
+  let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js" in
   Int.equal 1
   @@ Graph.depth_first_search
        (module Cfg.G)
@@ -165,18 +138,14 @@ let%test "back edge classification" =
                acc + 1
          | _ ->
              fun e acc ->
-               Format.printf "Forward edge: %a\n" Ast.Stmt.pp
-                 (Cfg.G.Edge.label e);
+               Format.printf "Forward edge: %a\n" Ast.Stmt.pp (Cfg.G.Edge.label e);
                acc)
        ~init:0 cfg
 
 module Soc_interpreter = Cfg.Interpreter (Set_of_concrete.Env)
 
 let%test "collecting semantics: arith0.js" =
-  let cfg =
-    cfg_of_json
-    @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js"
-  in
+  let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js" in
   let collection = Soc_interpreter.collect cfg in
   Set.pp Soc_interpreter.State.pp Format.std_formatter collection;
   match Set.find collection ~f:(fst >> Cfg.Loc.equal Cfg.Loc.exit) with

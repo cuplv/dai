@@ -51,9 +51,7 @@ let bindings (itv : t) =
   Array.zip_exn vars box.interval_array
 
 let pp fs =
-  let pp_pair a_pp b_pp fs (a, b) =
-    Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b
-  in
+  let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b in
   bindings >> Array.pp "@," (pp_pair Var.print Interval.print) fs
 
 let sexp_of_t (itv : t) =
@@ -74,8 +72,7 @@ let t_of_sexp = function
       let constraint_of_sexp = function
         | Sexp.List [ Sexp.Atom v; Sexp.Atom inf; Sexp.Atom sup ] ->
             ( Var.of_string v,
-              ( Scalar.Float (Float.of_string inf),
-                Scalar.Float (Float.of_string sup) ) )
+              (Scalar.Float (Float.of_string inf), Scalar.Float (Float.of_string sup)) )
         | _ -> failwith "malformed interval sexp contents"
       in
       let vars, itvs =

@@ -19,9 +19,7 @@ let pair x y = (x, y)
 module Option = struct
   include Base.Option
 
-  let pp fmt pp_elt fs = function
-    | Some x -> Format.fprintf fs fmt pp_elt x
-    | None -> ()
+  let pp fmt pp_elt fs = function Some x -> Format.fprintf fs fmt pp_elt x | None -> ()
 
   let cons xo xs = match xo with Some x -> x :: xs | None -> xs
 
@@ -43,18 +41,14 @@ module List = struct
     | x :: xs ->
         Option.iter pre ~f:(Format.fprintf fs);
         pp_elt fs x;
-        ( match xs with
-        | [] -> ()
-        | xs -> Format.fprintf fs "%( %)%a" sep (pp sep pp_elt) xs );
+        (match xs with [] -> () | xs -> Format.fprintf fs "%( %)%a" sep (pp sep pp_elt) xs);
         Option.iter suf ~f:(Format.fprintf fs)
 end
 
 module Result = struct
   include Base.Result
 
-  let pp fmt pp_elt fs = function
-    | Ok x -> Format.fprintf fs fmt pp_elt x
-    | Error _ -> ()
+  let pp fmt pp_elt fs = function Ok x -> Format.fprintf fs fmt pp_elt x | Error _ -> ()
 end
 
 module Set = struct
@@ -77,9 +71,7 @@ module Set = struct
   let union x y =
     let xy = union x y in
     let xy_tree = to_tree xy in
-    if phys_equal xy_tree (to_tree x) then x
-    else if phys_equal xy_tree (to_tree y) then y
-    else xy
+    if phys_equal xy_tree (to_tree x) then x else if phys_equal xy_tree (to_tree y) then y else xy
 end
 
 module Array = struct

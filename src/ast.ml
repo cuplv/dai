@@ -4,13 +4,7 @@ type ident = string [@@deriving equal, hash, compare]
 
 module Lit = struct
   module T = struct
-    type t =
-      | Bool of bool
-      | Int of int
-      | Float of float
-      | Null
-      | String of string
-      | Undefined
+    type t = Bool of bool | Int of int | Float of float | Null | String of string | Undefined
     [@@deriving equal, compare, sexp, hash]
   end
 
@@ -78,8 +72,7 @@ module Binop = struct
 end
 
 module Unop = struct
-  type t = Plus | Neg | Not | BNot | Incr | Decr | Typeof
-  [@@deriving compare, equal, hash]
+  type t = Plus | Neg | Not | BNot | Incr | Decr | Typeof [@@deriving compare, equal, hash]
 
   let pp fs =
     let ps = Format.pp_print_string fs in
@@ -110,8 +103,7 @@ module Expr = struct
     | Lit l -> Lit.pp fs l
     (*    | Call { fn; actuals } ->
         Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
-    | Binop { l; op; r } ->
-        Format.fprintf fs "@[%a@ %a@ %a@]" pp l Binop.pp op pp r
+    | Binop { l; op; r } -> Format.fprintf fs "@[%a@ %a@ %a@]" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
 
   (*    | MemberAccess { rcvr; prop } -> Format.fprintf fs "%a[%a]" pp rcvr pp prop

@@ -1,8 +1,7 @@
 open Import
 
 module Comp = struct
-  type t = [ `Transfer | `Join | `Widen | `Fix ]
-  [@@deriving compare, equal, hash]
+  type t = [ `Transfer | `Join | `Widen | `Fix ] [@@deriving compare, equal, hash]
 
   let pp fs = function
     | `Transfer -> Format.fprintf fs "transfer"
@@ -45,9 +44,7 @@ module Make (Dom : Abstract.Dom) = struct
       | AState of { mutable state : Dom.t option; name : Name.t }
     [@@deriving compare, equal]
 
-    let name = function
-      | Stmt { stmt = _; name } -> name
-      | AState { state = _; name } -> name
+    let name = function Stmt { stmt = _; name } -> name | AState { state = _; name } -> name
 
     let hash = name >> Name.hash
 
@@ -59,14 +56,11 @@ module Make (Dom : Abstract.Dom) = struct
 
     let stmt_exn = function
       | Stmt { stmt; name = _ } -> stmt
-      | _ ->
-          failwith "Error: stmt_exn called on reference cell with no statement"
+      | _ -> failwith "Error: stmt_exn called on reference cell with no statement"
 
     let astate_exn = function
       | AState { state = Some phi; name = _ } -> phi
-      | _ ->
-          failwith
-            "Error: astate_exn called on reference cell with no abstract state"
+      | _ -> failwith "Error: astate_exn called on reference cell with no abstract state"
   end
 
   module Opaque_ref = struct
@@ -105,9 +99,7 @@ module Make (Dom : Abstract.Dom) = struct
         (module Cfg.G)
         ~init:([], [])
         ~leave_edge:(fun kind e (f_acc, b_acc) ->
-          match kind with
-          | `Back -> (f_acc, e :: b_acc)
-          | _ -> (e :: f_acc, b_acc))
+          match kind with `Back -> (f_acc, e :: b_acc) | _ -> (e :: f_acc, b_acc))
         cfg
     in
 
@@ -125,28 +117,21 @@ module Make (Dom : Abstract.Dom) = struct
     in
     let forward_edges_to l =
       Seq.to_list (Cfg.G.Node.inputs l cfg)
-      |> List.filter ~f:(fun e ->
-             not @@ List.mem back_edges e ~equal:Cfg.G.Edge.equal)
+      |> List.filter ~f:(fun e -> not @@ List.mem back_edges e ~equal:Cfg.G.Edge.equal)
       |> List.mapi ~f:pair
     in
 
     (* R_\mathit{Stmt} *)
     let stmt_refs : Ref.t list =
       let backedge =
-        back_edges >>| fun e ->
-        Ref.Stmt { stmt = Cfg.G.Edge.label e; name = name_of_edge e }
+        back_edges >>| fun e -> Ref.Stmt { stmt = Cfg.G.Edge.label e; name = name_of_edge e }
       and straightline =
-        nonjoin_locs >>= (flip Cfg.G.Node.inputs cfg >> Seq.to_list)
-        >>| fun e ->
+        nonjoin_locs >>= (flip Cfg.G.Node.inputs cfg >> Seq.to_list) >>| fun e ->
         Ref.Stmt { stmt = Cfg.G.Edge.label e; name = name_of_edge e }
       and disambiguated =
         join_locs >>= fun n ->
         forward_edges_to n >>| fun (i, e) ->
-        Ref.Stmt
-          {
-            stmt = Cfg.G.Edge.label e;
-            name = Name.(Prod (Idx i, name_of_edge e));
-          }
+        Ref.Stmt { stmt = Cfg.G.Edge.label e; name = Name.(Prod (Idx i, name_of_edge e)) }
       in
       List.(append backedge (append straightline disambiguated))
     in
@@ -157,8 +142,7 @@ module Make (Dom : Abstract.Dom) = struct
         Seq.to_list (Cfg.G.nodes cfg) >>| fun l ->
         Ref.AState
           {
-            state =
-              (if Cfg.Loc.(equal entry l) then Some (Dom.init ()) else None);
+            state = (if Cfg.Loc.(equal entry l) then Some (Dom.init ()) else None);
             name = name_of_loc l;
           }
       and pre_joins =
@@ -168,11 +152,7 @@ module Make (Dom : Abstract.Dom) = struct
       and pre_widens =
         back_edges >>| fun e ->
         Ref.AState
-          {
-            state = None;
-            name =
-              Name.(Prod (Iterate (dst_name e, 0), Iterate (dst_name e, 1)));
-          }
+          { state = None; name = Name.(Prod (Iterate (dst_name e, 0), Iterate (dst_name e, 1))) }
       in
       List.(append at_locs (append pre_joins pre_widens))
     in
@@ -195,10 +175,7 @@ module Make (Dom : Abstract.Dom) = struct
     Graph.create
       (module G)
       ~nodes:List.(append stmt_refs (append astate_refs cycle_refs))
-      ~edges:
-        List.(
-          append transfer_comps
-            (append join_comps (append fix_comps widen_comps)))
+      ~edges:List.(append transfer_comps (append join_comps (append fix_comps widen_comps)))
       ()
 
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
@@ -213,24 +190,19 @@ module Make (Dom : Abstract.Dom) = struct
         let preds =
           G.Node.preds r g
           |> Seq.map ~f:(flip get g)
-          |> Seq.to_list
-          |> List.sort ~compare:Ref.compare
+          |> Seq.to_list |> List.sort ~compare:Ref.compare
         in
         (* [hd_exn] call is safe because empty ref cells always have parents by DCG well-formedness *)
         let result =
           match G.Edge.label (Seq.hd_exn (G.Node.inputs r g)) with
           | `Transfer -> (
               match preds with
-              | [ s; phi ] ->
-                  Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi)
+              | [ s; phi ] -> Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi)
               | _ ->
                   failwith
-                    "malformed DCG: transfer function must have one Stmt and \
-                     one AState input" )
-          | `Join ->
-              List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.join
-          | `Widen ->
-              List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.widen
+                    "malformed DCG: transfer function must have one Stmt and one AState input" )
+          | `Join -> List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.join
+          | `Widen -> List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.widen
           | `Fix -> failwith "todo"
         in
         phi.state <- Some result );
@@ -243,8 +215,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Some r -> get r g
     | None ->
         failwith
-          ( Format.fprintf Format.str_formatter
-              "No reference cell found with name %a" Name.pp nm;
+          ( Format.fprintf Format.str_formatter "No reference cell found with name %a" Name.pp nm;
             Format.flush_str_formatter () )
 
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
@@ -253,6 +224,5 @@ module Make (Dom : Abstract.Dom) = struct
   (** IMPURE -- see [edit_stmt] *)
   let delete_stmt (nm : Name.t) (g : t) = edit_stmt nm Ast.Stmt.Skip g
 
-  let add_stmt (_loc : Cfg.Loc.t) (_stmt : Ast.Stmt.t) (_g : t) =
-    failwith "todo"
+  let add_stmt (_loc : Cfg.Loc.t) (_stmt : Ast.Stmt.t) (_g : t) = failwith "todo"
 end

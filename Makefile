@@ -16,7 +16,7 @@ clean:
 
 .PHONY: fmt
 fmt:
-	ocamlformat src/*.ml -i --enable-outside-detected-project
+	ocamlformat src/*.ml -i --enable-outside-detected-project -m 100
 
 .PHONY: repl
 repl:

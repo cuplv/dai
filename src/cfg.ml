@@ -58,8 +58,7 @@ let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
 let dump_dot ?print ~filename cfg =
   let output_fd =
-    if Option.is_some print then Unix.stdout
-    else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
+    if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
   in
   Graph.to_dot
     (module G)
@@ -89,9 +88,7 @@ module Interpreter (Dom : Abstract.Dom) = struct
 
   (* fully path-sensitive; terminates iff cfg's state space is finite *)
   let collect (cfg : G.t) : Set.M(State).t =
-    let worklist =
-      ref (Set.singleton (module State) (Loc.entry, Dom.init ()))
-    in
+    let worklist = ref (Set.singleton (module State) (Loc.entry, Dom.init ())) in
     let accum = ref !worklist in
     (* make a (nondeterministic) small step from [state];
      *  - add new non-bottom states to both the worklist and the collecting semantics
@@ -106,9 +103,7 @@ module Interpreter (Dom : Abstract.Dom) = struct
     in
     while not @@ Set.is_empty !worklist do
       (* step all states in the worklist *)
-      let new_worklist =
-        Set.fold !worklist ~init:(Set.empty (module State)) ~f:process_state
-      in
+      let new_worklist = Set.fold !worklist ~init:(Set.empty (module State)) ~f:process_state in
       worklist := new_worklist
     done;
     !accum

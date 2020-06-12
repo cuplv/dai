@@ -32,12 +32,11 @@ module Val : Abstract.Val = struct
       | Binop.Minus, Lit.Float l, Lit.Float r -> Lit.Float (l -. r)
       | _ ->
           failwith
-            (Format.asprintf "Unimplemented binary operation: \"%a %a %a\""
-               Lit.pp l Binop.pp op Lit.pp r)
+            (Format.asprintf "Unimplemented binary operation: \"%a %a %a\"" Lit.pp l Binop.pp op
+               Lit.pp r)
     in
     Set.fold l ~init:bottom ~f:(fun acc curr_l ->
-        Set.fold r ~init:acc ~f:(fun acc curr_r ->
-            Set.add acc (concrete_op curr_l curr_r)))
+        Set.fold r ~init:acc ~f:(fun acc curr_r -> Set.add acc (concrete_op curr_l curr_r)))
 
   let eval_unop op v =
     let concrete_op v =
@@ -46,9 +45,7 @@ module Val : Abstract.Val = struct
       | Unop.Neg, Lit.Float f -> Lit.Float (Float.neg f)
       | Unop.Neg, Lit.Int i -> Lit.Int (Int.neg i)
       | _ ->
-          failwith
-            (Format.asprintf "Unimplemented unary operation: \"%a %a\"" Unop.pp
-               op Lit.pp v)
+          failwith (Format.asprintf "Unimplemented unary operation: \"%a %a\"" Unop.pp op Lit.pp v)
     in
     Set.fold v ~init:bottom ~f:(fun acc curr -> Set.add acc (concrete_op curr))
 
@@ -70,8 +67,7 @@ module Val : Abstract.Val = struct
   let sexp_of_t v = Sexp.List (List.map (Set.to_list v) ~f:Lit.sexp_of_t)
 
   let t_of_sexp = function
-    | Sexp.List l ->
-        List.fold l ~init:bottom ~f:(fun a c -> Set.add a (Lit.t_of_sexp c))
+    | Sexp.List l -> List.fold l ~init:bottom ~f:(fun a c -> Set.add a (Lit.t_of_sexp c))
     | _ -> failwith "malformed set_of_concrete sexp"
 end
 
