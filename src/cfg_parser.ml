@@ -189,8 +189,5 @@ let%test "collecting semantics: arith0.js" =
               List [ Atom "x"; List [ List [ Atom "Float"; Atom "1" ] ] ];
             ])
       in
-      Format.printf "\nEXPECTED: %a\n" Sexp.pp expected;
-      Format.printf "ACTUAL:   %a\n" Sexp.pp
-        (Set_of_concrete.Env.sexp_of_t state);
       Sexp.equal expected (Set_of_concrete.Env.sexp_of_t state)
   | None -> false

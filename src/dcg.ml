@@ -17,7 +17,7 @@ module Name = struct
     | Fn of Comp.t
     | Idx of int
     | Prod of t * t
-    (* todo: do something fancier for nested loops *)
+    (* todo: do something fancier (set of loop/iteration pairs?) for nested loops -- for now, assuming loop bodies are disjoint, so just one iteration count needed *)
     | Iterate of t * int
   [@@deriving compare, equal]
 
@@ -75,11 +75,131 @@ module Make (Dom : Abstract.Dom) = struct
     type t = Ref.t
   end
 
-  let of_cfg (_cfg : Cfg.t) = failwith "todo"
-
   module G = Graph.Make (Opaque_ref) (Comp)
 
   type t = G.t
+
+  type edge = Ref.t * Ref.t * Comp.t
+
+  (** Directly implements the DCG Encoding procedure of Section 4.2; OCaml variables are labelled by LaTeX equivalents where applicable *)
+  let of_cfg (cfg : Cfg.t) : t =
+    let open List.Monad_infix in
+    let dom_tree = Graph.dominators (module Cfg.G) cfg Cfg.Loc.entry in
+    let name_of_edge e = Name.(Prod (Loc (Cfg.src e), Loc (Cfg.dst e))) in
+    let dst_name e = Name.Loc (Cfg.dst e) in
+
+    (* L_\not\sqcup, L_\sqcup *)
+    let nonjoin_locs, join_locs =
+      Graph.depth_first_search
+        (module Cfg.G)
+        ~init:([], [])
+        ~leave_node:(fun _order n (nj_acc, j_acc) ->
+          if Cfg.G.Node.degree ~dir:`In n cfg <= 1 then (n :: nj_acc, j_acc)
+          else (nj_acc, n :: j_acc))
+        cfg
+    in
+
+    (* E_f, E_b *)
+    let _forward_edges, back_edges =
+      Graph.depth_first_search
+        (module Cfg.G)
+        ~init:([], [])
+        ~leave_edge:(fun kind e (f_acc, b_acc) ->
+          match kind with
+          | `Back -> (f_acc, e :: b_acc)
+          | _ -> (e :: f_acc, b_acc))
+        cfg
+    in
+
+    let loop_heads = back_edges >>| Cfg.dst in
+    let loop_head_dominators =
+      Graphlib.Std.Tree.ancestors dom_tree
+      >> Seq.filter ~f:(fun d -> List.mem loop_heads d ~equal:Cfg.Loc.equal)
+      >> Seq.to_list
+    in
+    let name_of_loc l =
+      match loop_head_dominators l with
+      | [] -> Name.Loc l
+      | [ _loop_head ] -> Name.(Iterate (Loc l, 0))
+      | _ -> failwith "Nested loops not yet supported."
+    in
+    let forward_edges_to l =
+      Seq.to_list (Cfg.G.Node.inputs l cfg)
+      |> List.filter ~f:(fun e ->
+             not @@ List.mem back_edges e ~equal:Cfg.G.Edge.equal)
+      |> List.mapi ~f:pair
+    in
+
+    (* R_\mathit{Stmt} *)
+    let stmt_refs : Ref.t list =
+      let backedge =
+        back_edges >>| fun e ->
+        Ref.Stmt { stmt = Cfg.G.Edge.label e; name = name_of_edge e }
+      and straightline =
+        nonjoin_locs >>= (flip Cfg.G.Node.inputs cfg >> Seq.to_list)
+        >>| fun e ->
+        Ref.Stmt { stmt = Cfg.G.Edge.label e; name = name_of_edge e }
+      and disambiguated =
+        join_locs >>= fun n ->
+        forward_edges_to n >>| fun (i, e) ->
+        Ref.Stmt
+          {
+            stmt = Cfg.G.Edge.label e;
+            name = Name.(Prod (Idx i, name_of_edge e));
+          }
+      in
+      List.(append backedge (append straightline disambiguated))
+    in
+
+    (* R_{\Sigma^\sharp} *)
+    let astate_refs : Ref.t list =
+      let at_locs =
+        Seq.to_list (Cfg.G.nodes cfg) >>| fun l ->
+        Ref.AState
+          {
+            state =
+              (if Cfg.Loc.(equal entry l) then Some (Dom.init ()) else None);
+            name = name_of_loc l;
+          }
+      and pre_joins =
+        join_locs >>= fun l ->
+        forward_edges_to l >>| fun (i, _) ->
+        Ref.AState { state = None; name = Name.(Prod (Idx i, name_of_loc l)) }
+      and pre_widens =
+        back_edges >>| fun e ->
+        Ref.AState
+          {
+            state = None;
+            name =
+              Name.(Prod (Iterate (dst_name e, 0), Iterate (dst_name e, 1)));
+          }
+      in
+      List.(append at_locs (append pre_joins pre_widens))
+    in
+    (* R_\circlearrowleft *)
+    let cycle_refs : Ref.t list =
+      back_edges >>= fun e ->
+      [
+        Ref.AState { state = None; name = Name.Iterate (dst_name e, 0) };
+        Ref.AState { state = None; name = Name.Iterate (dst_name e, 1) };
+      ]
+    in
+    (* C_{\denote\cdot^\sharp}*)
+    let transfer_comps : edge list = failwith "todo" in
+    (* C_\sqcup *)
+    let join_comps : edge list = failwith "todo" in
+    (* C_\textsf{fix} *)
+    let fix_comps : edge list = failwith "todo" in
+    (* C_\nabla *)
+    let widen_comps : edge list = failwith "todo" in
+    Graph.create
+      (module G)
+      ~nodes:List.(append stmt_refs (append astate_refs cycle_refs))
+      ~edges:
+        List.(
+          append transfer_comps
+            (append join_comps (append fix_comps widen_comps)))
+      ()
 
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a [Ref.t] guaranteed to be non-empty

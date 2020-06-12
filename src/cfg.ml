@@ -52,9 +52,9 @@ module G =
 
 type t = G.t
 
-let src : G.Edge.t -> Loc.t = G.Edge.src >> G.Node.label
+let src : G.Edge.t -> Loc.t = G.Edge.src
 
-let dst : G.Edge.t -> Loc.t = G.Edge.dst >> G.Node.label
+let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
 let dump_dot ?print ~filename cfg =
   let output_fd =
@@ -65,7 +65,7 @@ let dump_dot ?print ~filename cfg =
     (module G)
     cfg ~filename
     ~channel:(Unix.out_channel_of_descr output_fd)
-    ~string_of_node:(G.Node.label >> Loc.to_string)
+    ~string_of_node:Loc.to_string
     ~string_of_edge:(G.Edge.label >> Ast.Stmt.to_string);
   if Option.is_none print then Unix.close output_fd
 

@@ -14,6 +14,8 @@ let uncurry f (x, y) = f x y
 
 let curry f x y = f (x, y)
 
+let pair x y = (x, y)
+
 module Option = struct
   include Base.Option
 
