@@ -98,23 +98,24 @@ let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
 (** Algorithm given in 2nd ed. Dragon book section 9.6.6, MODIFIED TO EXCLUDE THE LOOP HEAD ITSELF *)
 let natural_loop backedge cfg =
-  let wl = ref (Loc.Set.singleton (src backedge)) in
-  let loop = ref !wl in
-  let visited loc =
-    Loc.equal loc (src backedge) || Loc.equal loc (dst backedge) || Set.mem !loop loc
+  let rec nat_loop_impl (wl, loop) =
+    if Set.is_empty wl then loop
+    else
+      let process_node (wl, loop) loc =
+        Seq.fold (G.Node.preds loc cfg) ~init:(wl, loop) ~f:(fun (acc_wl, acc_loop) pred ->
+            if
+              not
+                ( Loc.equal pred (src backedge)
+                || Loc.equal pred (dst backedge)
+                || Set.mem acc_loop pred )
+            then (Set.add acc_wl pred, Set.add acc_loop pred)
+            else (acc_wl, acc_loop))
+      in
+      nat_loop_impl (Set.fold wl ~init:(Loc.Set.empty, loop) ~f:process_node)
   in
-  let process_node wl loc =
-    Seq.fold (G.Node.preds loc cfg) ~init:wl ~f:(fun wl pred ->
-        if not @@ visited pred then (
-          loop := Set.add !loop pred;
-          Set.add wl pred )
-        else wl)
-  in
-  while not @@ Set.is_empty !wl do
-    let new_wl = Set.fold !wl ~init:Loc.Set.empty ~f:process_node in
-    wl := new_wl
-  done;
-  !loop
+
+  let loop_tail_singleton = Loc.Set.singleton (src backedge) in
+  nat_loop_impl @@ pair loop_tail_singleton loop_tail_singleton
 
 let back_edges =
   Graph.depth_first_search
