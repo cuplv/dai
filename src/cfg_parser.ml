@@ -117,12 +117,12 @@ let cfg_of_json json : Cfg.t =
 
 let%test "cfg_parse and dump dot: arith0.js" =
   let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js" in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith0.dot" ~print:true;
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith0.dot";
   true
 
 let%test "cfg_parse and dump dot: while.js" =
   let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while.js" in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot" ~print:true;
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot";
   true
 
 let%test "back edge classification" =
@@ -131,15 +131,7 @@ let%test "back edge classification" =
   @@ Graph.depth_first_search
        (module Cfg.G)
        ~start:Cfg.Loc.entry
-       ~leave_edge:(function
-         | `Back ->
-             fun e acc ->
-               Format.printf "Back edge: %a\n" Ast.Stmt.pp (Cfg.G.Edge.label e);
-               acc + 1
-         | _ ->
-             fun e acc ->
-               Format.printf "Forward edge: %a\n" Ast.Stmt.pp (Cfg.G.Edge.label e);
-               acc)
+       ~leave_edge:(function `Back -> fun _e acc -> acc + 1 | _ -> fun _e acc -> acc)
        ~init:0 cfg
 
 module Soc_interpreter = Cfg.Interpreter (Set_of_concrete.Env)
@@ -147,7 +139,6 @@ module Soc_interpreter = Cfg.Interpreter (Set_of_concrete.Env)
 let%test "collecting semantics: arith0.js" =
   let cfg = cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js" in
   let collection = Soc_interpreter.collect cfg in
-  Set.pp Soc_interpreter.State.pp Format.std_formatter collection;
   match Set.find collection ~f:(fst >> Cfg.Loc.equal Cfg.Loc.exit) with
   | Some (_, state) ->
       let expected =

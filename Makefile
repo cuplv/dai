@@ -7,7 +7,7 @@ build: fmt
 	dune build
 
 .PHONY: test
-test:
+test: build
 	dune runtest
 
 .PHONY: clean

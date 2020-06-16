@@ -30,6 +30,8 @@ module Val : Abstract.Val = struct
       | Binop.Plus, Lit.String l, Lit.String r -> Lit.String (l ^ r)
       | Binop.Minus, Lit.Int l, Lit.Int r -> Lit.Int (l - r)
       | Binop.Minus, Lit.Float l, Lit.Float r -> Lit.Float (l -. r)
+      | Binop.Lt, Lit.Int l, Lit.Int r -> Lit.Bool(l < r)
+      | Binop.Lt, Lit.Float l, Lit.Float r -> Lit.Bool(l <. r)
       | _ ->
           failwith
             (Format.asprintf "Unimplemented binary operation: \"%a %a %a\"" Lit.pp l Binop.pp op

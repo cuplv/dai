@@ -84,14 +84,7 @@ module Make (Val : Abstract.Val) : Abstract.Dom = struct
   let pp fs (env : t) =
     match env with
     | Some env ->
-        let pp_string_color color str = Format.fprintf fs "%s%s%s" color str Colors.reset in
-        pp_string_color Colors.cyan "{";
-        Format.open_hovbox 0;
-        Format.print_space ();
-        List.iter (Env.to_list env) ~f:(fun (k, v) ->
-            Format.fprintf fs "%s%s%s -> %a %s;%s@ " Colors.cyan k Colors.reset Val.pp v Colors.red
-              Colors.reset);
-        Format.close_box ();
-        pp_string_color Colors.cyan "}"
+        let pp_binding fs (k, v) = Format.fprintf fs "%s -> %a" k Val.pp v in
+        List.pp ~pre:"{" ~suf:"}" ";@ " pp_binding fs (Env.to_list env)
     | None -> Format.print_string "bottom"
 end
