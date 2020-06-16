@@ -1,44 +1,77 @@
 open Import
 
-module Loc : sig
-  type t [@@deriving equal, compare, hash, sexp]
+module Loc = struct
+  module T : sig
+    type t [@@deriving equal, compare, hash, sexp]
 
-  val entry : t
+    val entry : t
 
-  val exit : t
+    val exit : t
 
-  val fresh : unit -> t
+    val fresh : unit -> t
 
-  val reset : unit -> unit
+    val reset : unit -> unit
 
-  val pp : t pp
+    val pp : t pp
 
-  val to_string : t -> string
-end = struct
-  type t = int [@@deriving equal, compare, hash, sexp]
+    val to_string : t -> string
+  end = struct
+    type t = int [@@deriving equal, compare, hash, sexp]
 
-  let entry = 0
+    let entry = 0
 
-  let exit = -1
+    let exit = -1
 
-  let next = ref 1
+    let next = ref 1
 
-  let reset () = next := 1
+    let reset () = next := 1
 
-  let fresh () =
-    let curr = !next in
-    next := curr + 1;
-    curr
+    let fresh () =
+      let curr = !next in
+      next := curr + 1;
+      curr
 
-  let pp fs l =
-    match l with
-    | 0 -> Format.fprintf fs "entry"
-    | -1 -> Format.fprintf fs "exit"
-    | _ -> Format.fprintf fs "l%i" l
+    let pp fs l =
+      match l with
+      | 0 -> Format.fprintf fs "entry"
+      | -1 -> Format.fprintf fs "exit"
+      | _ -> Format.fprintf fs "l%i" l
 
-  let to_string l =
-    pp Format.str_formatter l;
-    Format.flush_str_formatter ()
+    let to_string l =
+      pp Format.str_formatter l;
+      Format.flush_str_formatter ()
+  end
+
+  include T
+
+  module T_comparator : sig
+    type t = T.t
+
+    type comparator_witness
+
+    val comparator : (t, comparator_witness) Comparator.t
+  end = struct
+    include T
+    include Comparator.Make (T)
+  end
+
+  module Set = struct
+    include (Set : module type of Set with type ('a, 'cmp) t := ('a, 'cmp) Set.t)
+
+    type t = Set.M(T_comparator).t [@@deriving compare]
+
+    let empty = Set.empty (module T_comparator)
+
+    let singleton = Set.singleton (module T_comparator)
+  end
+
+  module Map = struct
+    include (Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
+
+    type 'v t = 'v Map.M(T_comparator).t
+
+    let empty = Map.empty (module T_comparator)
+  end
 end
 
 module G =
