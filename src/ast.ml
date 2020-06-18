@@ -1,6 +1,6 @@
 open Import
 
-type ident = string [@@deriving equal, hash, compare]
+type ident = string [@@deriving equal, hash, compare, sexp_of]
 
 module Lit = struct
   module T = struct
@@ -27,6 +27,7 @@ module Binop = struct
     | Gt
     | Ge
     | Eq
+    | NEq
     | SEq
     | Plus
     | Minus
@@ -43,7 +44,7 @@ module Binop = struct
     | RShift
     | URShift
     | Instanceof
-  [@@deriving equal, hash, compare]
+  [@@deriving equal, hash, compare, sexp_of]
 
   let pp fs =
     let ps = Format.pp_print_string fs in
@@ -53,6 +54,7 @@ module Binop = struct
     | Gt -> ps ">"
     | Ge -> ps ">="
     | Eq -> ps "=="
+    | NEq -> ps "!="
     | SEq -> ps "==="
     | Plus -> ps "+"
     | Minus -> ps "-"
@@ -72,7 +74,8 @@ module Binop = struct
 end
 
 module Unop = struct
-  type t = Plus | Neg | Not | BNot | Incr | Decr | Typeof [@@deriving compare, equal, hash]
+  type t = Plus | Neg | Not | BNot | Incr | Decr | Typeof
+  [@@deriving compare, equal, hash, sexp_of]
 
   let pp fs =
     let ps = Format.pp_print_string fs in
@@ -95,7 +98,7 @@ module Expr = struct
     | Unop of { op : Unop.t; e : t }
   (*    | MemberAccess of { rcvr : t; prop : t }
     | Array of t list*)
-  [@@deriving equal, compare, hash]
+  [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
     match e with
@@ -103,7 +106,7 @@ module Expr = struct
     | Lit l -> Lit.pp fs l
     (*    | Call { fn; actuals } ->
         Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
-    | Binop { l; op; r } -> Format.fprintf fs "@[%a@ %a@ %a@]" pp l Binop.pp op pp r
+    | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
 
   (*    | MemberAccess { rcvr; prop } -> Format.fprintf fs "%a[%a]" pp rcvr pp prop
@@ -122,11 +125,11 @@ module Stmt = struct
     | Expr of Expr.t
     | Assume of Expr.t
     | Skip
-  [@@deriving compare, equal]
+  [@@deriving compare, equal, sexp_of]
 
   let pp fs stmt =
     match stmt with
-    | Assign { lhs; rhs } -> Format.fprintf fs "@[%s@ =@ %a@]" lhs Expr.pp rhs
+    | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
