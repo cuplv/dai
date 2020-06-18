@@ -14,6 +14,10 @@ let uncurry f (x, y) = f x y
 
 let curry f x y = f (x, y)
 
+let uncurry3 f (x, y, z) = f x y z
+
+let curry3 f x y z = f (x, y, z)
+
 let pair x y = (x, y)
 
 module Option = struct
