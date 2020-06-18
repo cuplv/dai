@@ -101,8 +101,8 @@ let natural_loop backedge cfg =
   let rec nat_loop_impl (wl, loop) =
     if Set.is_empty wl then loop
     else
-      let process_node (wl, loop) loc =
-        Seq.fold (G.Node.preds loc cfg) ~init:(wl, loop) ~f:(fun (acc_wl, acc_loop) pred ->
+      let process_node acc loc =
+        Seq.fold (G.Node.preds loc cfg) ~init:acc ~f:(fun (acc_wl, acc_loop) pred ->
             if
               not
                 ( Loc.equal pred (src backedge)
