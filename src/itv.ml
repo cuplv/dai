@@ -96,12 +96,6 @@ let t_of_sexp = function
 
 let init () = Abstract1.top (Lazy.force man) (Environment.make [||] [||])
 
-let apron_unop_of_unop = function
-  | Ast.Unop.Neg -> Some Texpr1.Neg
-  | op ->
-      Format.fprintf Format.err_formatter "Unary op %a has no APRON equivalent" Ast.Unop.pp op;
-      None
-
 (* abstractly evaluate boolean binary operation [l op r] at interval [itv] by translating it to [(l - r) op 0]
    (since apron can only solve booleran constraints of that form), and intersecting the result with [itv].
    If that intersection is  ...
@@ -123,6 +117,8 @@ let mk_bool_binop itv op l r =
 (* Helper function for [eval_expr], converts a native AST expression into an APRON tree expression *)
 let rec texpr_of_expr itv =
   let open Ast in
+  let mk_arith_binop op l r = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Rnd)) in
+  let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
   | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
   | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int i)))
@@ -131,25 +127,37 @@ let rec texpr_of_expr itv =
   | Expr.Binop { l; op; r } -> (
       texpr_of_expr itv l >>= fun l ->
       texpr_of_expr itv r >>= fun r ->
-      let mk_arith_binop op = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Rnd)) in
       match op with
-      | Plus -> mk_arith_binop Texpr1.Add
-      | Minus -> mk_arith_binop Texpr1.Sub
-      | Times -> mk_arith_binop Texpr1.Mul
-      | Divided_by -> mk_arith_binop Texpr1.Div
-      | Mod -> mk_arith_binop Texpr1.Mod
-      | Eq -> Some (mk_bool_binop itv Tcons0.EQ l r)
-      | NEq -> Some (mk_bool_binop itv Tcons0.DISEQ l r)
-      | Gt -> Some (mk_bool_binop itv Tcons0.SUP l r)
-      | Ge -> Some (mk_bool_binop itv Tcons0.SUPEQ l r)
-      | Lt -> Some (mk_bool_binop itv Tcons0.SUP r l)
-      | Le -> Some (mk_bool_binop itv Tcons0.SUPEQ r l)
+      | Plus -> mk_arith_binop Texpr1.Add l r
+      | Minus -> mk_arith_binop Texpr1.Sub l r
+      | Times -> mk_arith_binop Texpr1.Mul l r
+      | Divided_by -> mk_arith_binop Texpr1.Div l r
+      | Mod -> mk_arith_binop Texpr1.Mod l r
+      | Eq -> mk_bool_binop itv Tcons0.EQ l r
+      | NEq -> mk_bool_binop itv Tcons0.DISEQ l r
+      | Gt -> mk_bool_binop itv Tcons0.SUP l r
+      | Ge -> mk_bool_binop itv Tcons0.SUPEQ l r
+      | Lt -> mk_bool_binop itv Tcons0.SUP r l
+      | Le -> mk_bool_binop itv Tcons0.SUPEQ r l
       | _ ->
-          Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent" Binop.pp op;
+          Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
           None )
-  | Expr.Unop { op; e } ->
-      texpr_of_expr itv e >>= fun e ->
-      apron_unop_of_unop op >>= fun op -> Some (Texpr1.Unop (op, e, Texpr1.Double, Texpr0.Rnd))
+  | Expr.Unop { op; e } -> (
+      (* Translate to equivalent expressions for unops with no APRON equivalent (i.e. everything but [Neg]):
+       * !e -> e==0
+       * +e -> e
+       * e++ -> e+1
+       * e-- -> e-1
+       *)
+      texpr_of_expr itv e
+      >>= fun e ->
+      match op with
+      | Unop.Neg -> Some (Texpr1.Unop (Texpr1.Neg, e, Texpr1.Double, Texpr0.Rnd))
+      | Unop.Not -> mk_bool_binop itv Tcons0.EQ e (Texpr1.Cst (Coeff.s_of_float 0.))
+      | Unop.Plus -> Some e
+      | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
+      | Unop.Decr -> mk_arith_binop Texpr1.Sub e (Texpr1.Cst (Coeff.s_of_float 1.))
+      | Unop.Typeof | Unop.BNot -> None )
 
 let eval_expr expr itv =
   let env = Abstract1.env itv in
@@ -182,7 +190,7 @@ let interpret stmt itv =
             (Texpr1.of_expr new_env rhs_texpr)
             None
       | None ->
-          Format.fprintf Format.err_formatter "Unable to abstractly evaluate %a; sending to top"
+          Format.fprintf Format.err_formatter "Unable to abstractly evaluate %a; sending to top\n"
             Ast.Expr.pp rhs;
           if Environment.mem_var env lhs then
             (* lhs was constrained, quantify that out *)

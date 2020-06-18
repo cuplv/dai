@@ -425,8 +425,6 @@ module Make (Dom : Abstract.Dom) = struct
     let g_without_fix_edges = Seq.fold (G.Node.inputs fixpoint g) ~init:g ~f:(flip G.Edge.remove) in
     List.fold all_new_edges ~init:g_without_fix_edges ~f:(flip G.Edge.insert)
 
-    res
-
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a pair ([Ref.t] guaranteed to be non-empty, [t] reflecting possible changes to the DAIG structure
    *)
