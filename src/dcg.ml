@@ -483,7 +483,7 @@ module Make (Dom : Abstract.Dom) = struct
   let add_stmt (_loc : Cfg.Loc.t) (_stmt : Ast.Stmt.t) (_g : t) = failwith "todo"
 end
 
-module Daig = Make (Itv)
+module Daig = Make (Incr.Make (Itv))
 
 let%test "build dcg and dump dot: arith0.js" =
   let cfg =

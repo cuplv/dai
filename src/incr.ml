@@ -1,6 +1,28 @@
 open Import
 
-module Make (Val : Abstract.Val) : Abstract.Dom = struct
+module Make (Dom : Abstract.Dom) : Abstract.Dom = struct
+  module Art = Adapton.MakeArt.Of (Name) (Dom)
+  include Dom
+
+  (* Lift a binary [op]eration of the abstract domain to an adapton-memoized equivalent *)
+  let mk_memoized_binary_op op nm =
+    let mfn = Art.mk_mfn nm (module Adapton.Types.Tuple2 (Dom) (Dom)) (fun _mfn (l, r) -> op l r) in
+    fun l r -> mfn.mfn_data (l, r)
+
+  let widen = mk_memoized_binary_op Dom.widen (Name.of_string "Dom#widen")
+
+  let join = mk_memoized_binary_op Dom.join (Name.of_string "Dom#join")
+
+  let interpret =
+    let mfn =
+      Art.mk_mfn (Name.of_string "Dom#interpret")
+        (module Adapton.Types.Tuple2 (Ast.Stmt) (Dom))
+        (fun _mfn (stmt, env) -> Dom.interpret stmt env)
+    in
+    fun l r -> mfn.mfn_data (l, r)
+end
+
+module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
   module Env = Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (Val)
   include Adapton.Types.Option (Env)
   module Art = Adapton.MakeArt.Of (Name) (Adapton.Types.Option (Env))

@@ -73,4 +73,4 @@ module Val : Abstract.Val = struct
     | _ -> failwith "malformed set_of_concrete sexp"
 end
 
-module Env : Abstract.Dom = Env.Make (Val)
+module Env : Abstract.Dom = Incr.Make_env (Val)
