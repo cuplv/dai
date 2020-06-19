@@ -114,6 +114,8 @@ module Make (Dom : Abstract.Dom) = struct
             failwith
               (Format.asprintf
                  "Error: astate_exn called on reference cell %a with no abstract state" pp r)
+
+      let is_empty = function AState { state = None; name = _ } -> true | _ -> false
     end
 
     include T
@@ -475,7 +477,52 @@ module Make (Dom : Abstract.Dom) = struct
             Format.flush_str_formatter () )
 
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
-  let edit_stmt (_nm : Name.t) (_stmt : Ast.Stmt.t) (_g : t) = failwith "todo"
+  let edit_stmt (nm : Name.t) (stmt : Ast.Stmt.t) (g : t) =
+    match ref_by_name nm g with
+    | Some (Ref.Stmt cell as r) ->
+        cell.stmt <- stmt;
+        (* traverse control-flow-reachable ref cells, clearing their values and accumulating
+          all encountered loop fixpoints for the next step. NB: DAIG-reachability alone is
+          unsound due to cyclic control flow, so also jump back to loop heads as needed *)
+        let propagate acc n =
+          Seq.fold (G.Node.outputs n g) ~init:acc ~f:(fun (f, lh_fps) e ->
+              let succ = G.Edge.dst e in
+              if Ref.is_empty succ then (f, lh_fps)
+              else if Comp.equal `Fix (G.Edge.label e) then
+                match Ref.name succ with
+                | Name.Loc l -> (
+                    match ref_by_name_exn Name.(Iterate (Loc l, 0)) g with
+                    | Ref.AState { state = Some _; name = _ } as lh ->
+                        (lh :: succ :: f, succ :: lh_fps)
+                    | _ -> (succ :: f, succ :: lh_fps) )
+                | _ ->
+                    failwith
+                      "malformed DAIG -- the destination of a `Fix edge is always the loop fixpoint"
+              else (succ :: f, lh_fps))
+        in
+        let rec change_prop frontier loop_head_fixpoints =
+          if List.is_empty frontier then loop_head_fixpoints
+          else
+            (uncurry change_prop) (List.fold frontier ~init:([], loop_head_fixpoints) ~f:propagate)
+        in
+        (* For each encountered (and therefore dirtied) loop fixpoint, reset its fix edges to the 0th and 1st iterates *)
+        List.fold
+          (change_prop [ r ] [])
+          ~init:g
+          ~f:(fun g -> function
+            | Ref.AState { state = _; name = Name.Loc _ as l } as loop_fp ->
+                let iter0 = ref_by_name_exn (Name.Iterate (l, 0)) g in
+                let iter1 = ref_by_name_exn (Name.Iterate (l, 1)) g in
+                Seq.fold (G.Node.inputs loop_fp g) ~init:g ~f:(flip G.Edge.remove)
+                |> G.Edge.insert (G.Edge.create iter0 loop_fp `Fix)
+                |> G.Edge.insert (G.Edge.create iter1 loop_fp `Fix)
+            | _ ->
+                failwith
+                  "malformed DAIG -- loop fixpoints are always named by their syntactic location")
+    (* un-unroll containing and forwards-reachable loops, backing "fix" edges up to their initial positions*)
+    | Some (Ref.AState _) ->
+        failwith "Ill-typed edit -- can't store a statement in an abstract state reference"
+    | None -> failwith (Format.asprintf "No statement with name %a found in DAIG" Name.pp nm)
 
   (** IMPURE -- see [edit_stmt] *)
   let delete_stmt (nm : Name.t) (g : t) = edit_stmt nm Ast.Stmt.Skip g
