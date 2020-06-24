@@ -96,7 +96,7 @@ module Expr = struct
     | Binop of { l : t; op : Binop.t; r : t }
     | Unop of { op : Unop.t; e : t }
     | Deref of { rcvr : t; field : t }
-    | Array of t list
+    | Array of { elts : t list; alloc_site : int * int }
   [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
@@ -108,7 +108,9 @@ module Expr = struct
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
     | Deref { rcvr; field } -> Format.fprintf fs "%a[%a]" pp rcvr pp field
-    | Array es -> (List.pp ", " ~pre:"[" ~suf:"]" pp) fs es
+    | Array { elts; alloc_site = line, col } ->
+        (List.pp ", " ~pre:"[" ~suf:"]" pp) fs elts;
+        Format.fprintf fs "%@(%i,%i)" line col
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
   let hash_fold_int acc curr =

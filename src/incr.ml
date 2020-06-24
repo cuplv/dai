@@ -198,8 +198,8 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         (fun _mfn (stmt, (env, heap)) ->
           let open Ast.Stmt in
           match stmt with
-          | Assign { lhs; rhs = Ast.Expr.Array elts } ->
-              let addr = Addr.fresh () in
+          | Assign { lhs; rhs = Ast.Expr.Array { elts; alloc_site } } ->
+              let addr = Addr.of_alloc_site alloc_site in
               let abstract_addr = AAddr_or_val.InL (Addr.Abstract.singleton addr) in
               let env = Env.add env lhs abstract_addr in
               let heap =

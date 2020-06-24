@@ -2,6 +2,8 @@ let seeded_hash = Hashtbl.seeded_hash
 
 include Core
 
+type 'a pp = Formatter.t -> 'a -> unit
+
 let ( >> ) f g x = g (f x)
 
 let flip f x y = f y x
@@ -20,10 +22,12 @@ let curry3 f x y z = f (x, y, z)
 
 let pair x y = (x, y)
 
+let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b
+
 module Option = struct
   include Base.Option
 
-  let pp fmt pp_elt fs = function Some x -> Format.fprintf fs fmt pp_elt x | None -> ()
+  let pp pp_elt fs = function Some x -> pp_elt fs x | None -> ()
 
   let cons xo xs = match xo with Some x -> x :: xs | None -> xs
 
@@ -83,8 +87,6 @@ module Array = struct
 
   let pp sep pp_elt fs a = List.pp sep pp_elt fs (to_list a)
 end
-
-type 'a pp = Formatter.t -> 'a -> unit
 
 type ('a, 'b) fmt = ('a, Formatter.t, unit, 'b) format4
 

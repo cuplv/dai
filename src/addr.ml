@@ -7,20 +7,15 @@ module T : sig
 
   val pp : t pp
 
-  val fresh : unit -> t
+  val of_alloc_site : int * int -> t
 
   val hash : int -> t -> int
 end = struct
-  type t = int [@@deriving compare, equal, hash, sexp]
+  type t = int * int [@@deriving compare, equal, hash, sexp]
 
-  let next = ref 0
+  let of_alloc_site i = i
 
-  let fresh () =
-    let curr = !next in
-    next := curr + 1;
-    curr
-
-  let pp fs a = Format.fprintf fs "a%i" a
+  let pp fs (line, col) = Format.fprintf fs "(%i,%i)" line col
 
   let show a =
     pp Format.str_formatter a;
@@ -34,7 +29,7 @@ end
 include T
 
 module T_comparator : sig
-  type t = T.t
+  type t = T.t [@@deriving sexp]
 
   type comparator_witness
 
@@ -47,7 +42,7 @@ end
 module Set = struct
   include (Set : module type of Set with type ('a, 'cmp) t := ('a, 'cmp) Set.t)
 
-  type t = Set.M(T_comparator).t [@@deriving compare]
+  type t = Set.M(T_comparator).t [@@deriving compare, sexp]
 
   let empty = Set.empty (module T_comparator)
 
@@ -73,7 +68,7 @@ module Map = struct
 end
 
 module Abstract = struct
-  include Set
+  include Set [@@deriving sexp]
 
   let hash = seeded_hash
 end

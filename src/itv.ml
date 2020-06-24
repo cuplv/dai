@@ -58,9 +58,7 @@ let bindings (itv : t) =
 
 let pp fs itv =
   if is_bot itv then Format.fprintf fs "bottom"
-  else
-    let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b in
-    bindings itv |> Array.pp "@," (pp_pair Var.print Interval.print) fs
+  else bindings itv |> Array.pp "@," (pp_pair Var.print Interval.print) fs
 
 let sexp_of_t (itv : t) =
   let sexps =

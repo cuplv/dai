@@ -36,7 +36,15 @@ let rec expr_of_json json =
       let rcvr = member "lhs" json |> expr_of_json in
       let field = member "rhs" json |> index 0 |> expr_of_json in
       Ast.Expr.Deref { rcvr; field }
-  | Some "Array" -> Ast.Expr.Array (convert_each expr_of_json (member "arrayElements" json))
+  | Some "Array" -> (
+      match convert_each to_int (member "sourceSpan" json |> member "start") with
+      | [ line; col ] ->
+          Ast.Expr.Array
+            {
+              elts = convert_each expr_of_json (member "arrayElements" json);
+              alloc_site = (line, col);
+            }
+      | _ -> failwith "malformed expression json: no source location info" )
   | Some "Plus" -> binop Ast.Binop.Plus json
   | Some "Minus" -> binop Ast.Binop.Minus json
   | Some "Times" -> binop Ast.Binop.Times json
