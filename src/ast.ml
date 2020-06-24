@@ -18,14 +18,6 @@ module Lit = struct
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\"" ^ s ^ "\"")
     | Undefined -> Format.pp_print_string fs "undefined"
-
-  let sanitize l = l
-
-  let show l =
-    pp Format.str_formatter l;
-    Format.flush_str_formatter ()
-
-  let hash = seeded_hash
 end
 
 module Binop = struct

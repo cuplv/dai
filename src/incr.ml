@@ -116,41 +116,8 @@ module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
 end
 
 module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
-  module Addr : sig
-    type t [@@deriving compare, equal, sexp]
-
-    include Adapton.Data.S with type t := t
-
-    val pp : t pp
-
-    val fresh : unit -> t
-
-    val hash : int -> t -> int
-  end = struct
-    type t = int [@@deriving equal, compare, sexp]
-
-    let next = ref 0
-
-    let fresh () =
-      let curr = !next in
-      next := curr + 1;
-      curr
-
-    let pp fs a = Format.fprintf fs "a%i" a
-
-    let show a =
-      pp Format.str_formatter a;
-      Format.flush_str_formatter ()
-
-    let sanitize a = a
-
-    let hash = seeded_hash
-  end
-
-  module AAddr = Adapton.Trie.Set.MakeNonInc (Name) (DefaultArtLib) (Addr)
-
   module AAddr_or_val = struct
-    include Adapton.Types.Sum2 (AAddr) (Val)
+    include Adapton.Types.Sum2 (Addr.Abstract) (Val)
 
     let apply_pointwise addr_op val_op aov1 aov2 =
       match (aov1, aov2) with
@@ -167,7 +134,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (AAddr_or_val)
   module Heap =
     Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib)
-      (Adapton.Types.Tuple2 (Addr) (Ast.Lit))
+      (Adapton.Types.Tuple2 (Addr) (Adapton.Types.Int))
       (AAddr_or_val)
   module AState = Adapton.Types.Tuple2 (Env) (Heap)
   include Adapton.Types.Option (AState)
@@ -202,21 +169,23 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
             Heap.fold
               (fun acc (obj, k) -> function
                 | AAddr_or_val.InR v ->
-                    if AAddr.mem addrs obj && Val.models field k then
-                      match acc with
-                      | Some acc -> Some (Val.join acc v)
-                      | None -> Some (Val.of_lit k)
+                    if Addr.Abstract.mem addrs obj && Val.models field (Ast.Lit.Int k) then
+                      match acc with Some acc -> Some (Val.join acc v) | None -> Some v
                     else acc | _ -> acc)
               None heap
             |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
         | _ -> None )
-    | Expr.Array _ -> failwith "array literals not supported when nested within compound expression"
+    | Expr.Array _ ->
+        (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
+          eval_expr so we can store elements there and then return the addr
+        *)
+        failwith "array literals not supported when nested within compound expression"
 
   let weak_update heap aaddr field new_v =
     Heap.fold
       (fun acc (addr, k) v ->
-        if AAddr.mem aaddr addr && Val.models field k then
-          match AAddr_or_val.apply_pointwise AAddr.union Val.join v new_v with
+        if Addr.Abstract.mem aaddr addr && Val.models field (Ast.Lit.Int k) then
+          match AAddr_or_val.apply_pointwise Addr.Abstract.union Val.join v new_v with
           | Some v -> Heap.add acc (addr, k) v
           | None -> acc
         else acc)
@@ -231,12 +200,12 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
           match stmt with
           | Assign { lhs; rhs = Ast.Expr.Array elts } ->
               let addr = Addr.fresh () in
-              let abstract_addr = AAddr_or_val.InL (AAddr.singleton addr) in
+              let abstract_addr = AAddr_or_val.InL (Addr.Abstract.singleton addr) in
               let env = Env.add env lhs abstract_addr in
               let heap =
                 List.foldi elts ~init:heap ~f:(fun i acc curr ->
                     match eval_expr env heap curr with
-                    | Some v -> Heap.add acc (addr, Ast.Lit.Int i) v
+                    | Some v -> Heap.add acc (addr, i) v
                     | None -> acc)
               in
               Some (env, heap)
@@ -278,14 +247,14 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
   let widen =
     make_memoized_pointwise_binary_op (Name.of_string "Dom#widen") (fun l r ->
         match (l, r) with
-        | AAddr_or_val.InL a1, AAddr_or_val.InL a2 -> AAddr_or_val.InL (AAddr.union a1 a2)
+        | AAddr_or_val.InL a1, AAddr_or_val.InL a2 -> AAddr_or_val.InL (Addr.Abstract.union a1 a2)
         | AAddr_or_val.InR v1, AAddr_or_val.InR v2 -> AAddr_or_val.InR (Val.widen v1 v2)
         | _ -> failwith "This domain functor assumes static separation of arrays and scalars")
 
   let join =
     make_memoized_pointwise_binary_op (Name.of_string "Dom#join") (fun l r ->
         match (l, r) with
-        | AAddr_or_val.InL a1, AAddr_or_val.InL a2 -> AAddr_or_val.InL (AAddr.union a1 a2)
+        | AAddr_or_val.InL a1, AAddr_or_val.InL a2 -> AAddr_or_val.InL (Addr.Abstract.union a1 a2)
         | AAddr_or_val.InR v1, AAddr_or_val.InR v2 -> AAddr_or_val.InR (Val.join v1 v2)
         | _ -> failwith "This domain functor assumes static separation of arrays and scalars")
 
@@ -296,7 +265,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     let sexp_of_v = function
       | AAddr_or_val.InL aaddr ->
           let addrs_sexp =
-            List (AAddr.fold (fun acc addr -> Addr.sexp_of_t addr :: acc) [] aaddr)
+            List (Addr.Abstract.fold ~f:(fun acc addr -> Addr.sexp_of_t addr :: acc) ~init:[] aaddr)
           in
           List [ Atom "AAddr"; addrs_sexp ]
       | AAddr_or_val.InR v -> List [ Atom "Val"; Val.sexp_of_t v ]
@@ -308,8 +277,8 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         let heap_sexp =
           List
             (Heap.fold
-               (fun a (obj, fld) v ->
-                 List [ Addr.sexp_of_t obj; Ast.Lit.sexp_of_t fld; sexp_of_v v ] :: a)
+               (fun a (obj, idx) v ->
+                 List [ Addr.sexp_of_t obj; Int.sexp_of_t idx; sexp_of_v v ] :: a)
                [] heap)
         in
         List [ env_sexp; heap_sexp ]
@@ -319,8 +288,8 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     let v_of_sexp = function
       | List [ Atom "AAddr"; List addrs ] ->
           AAddr_or_val.InL
-            (List.fold addrs ~init:(AAddr.empty ~min_depth:2) ~f:(fun acc addr ->
-                 AAddr.add acc (Addr.t_of_sexp addr)))
+            (List.fold addrs ~init:Addr.Abstract.empty ~f:(fun acc addr ->
+                 Addr.Abstract.add acc (Addr.t_of_sexp addr)))
       | List [ Atom "Val"; v ] -> AAddr_or_val.InR (Val.t_of_sexp v)
       | _ -> failwith "malformed environment s-expression"
     in
@@ -337,7 +306,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
           List.fold heap_sexp ~init:(Heap.of_list []) ~f:(fun heap ->
             function
             | List [ obj; fld; v ] ->
-                Heap.add heap (Addr.t_of_sexp obj, Ast.Lit.t_of_sexp fld) (v_of_sexp v)
+                Heap.add heap (Addr.t_of_sexp obj, Int.t_of_sexp fld) (v_of_sexp v)
             | _ -> failwith "malformed environment s-expression")
         in
         Some (env, heap)
