@@ -532,19 +532,19 @@ end
 
 module Daig = Make (Incr.Make (Itv))
 
-let%test "build dcg and dump dot: arith0.js" =
+let%test "build dcg and dump dot: arith_syntax.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/arith0.js"
+      "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
   let daig = Daig.of_cfg cfg in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/arith0_daig.dot";
+  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/arith_daig.dot";
   true
 
-let%test "build dcg and issue queries: while.js" =
+let%test "build dcg and issue queries: while_syntax.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/while.js"
+      "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
   let l1 = Name.Loc (Cfg.Loc.of_int_unsafe 1) in
   let daig = Daig.of_cfg cfg in

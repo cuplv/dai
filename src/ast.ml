@@ -18,6 +18,14 @@ module Lit = struct
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\"" ^ s ^ "\"")
     | Undefined -> Format.pp_print_string fs "undefined"
+
+  let sanitize l = l
+
+  let show l =
+    pp Format.str_formatter l;
+    Format.flush_str_formatter ()
+
+  let hash = seeded_hash
 end
 
 module Binop = struct
@@ -93,11 +101,10 @@ module Expr = struct
   type t =
     | Var of ident
     | Lit of Lit.t
-    (*    | Call of { fn : t; actuals : t list }*)
     | Binop of { l : t; op : Binop.t; r : t }
     | Unop of { op : Unop.t; e : t }
-  (*    | MemberAccess of { rcvr : t; prop : t }
-    | Array of t list*)
+    | Deref of { rcvr : t; field : t }
+    | Array of t list
   [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
@@ -108,9 +115,8 @@ module Expr = struct
         Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
-
-  (*    | MemberAccess { rcvr; prop } -> Format.fprintf fs "%a[%a]" pp rcvr pp prop
-    | Array contents -> (List.pp ~pre:"[" ~suf:"]" ",@ " pp) fs contents*)
+    | Deref { rcvr; field } -> Format.fprintf fs "%a[%a]" pp rcvr pp field
+    | Array es -> (List.pp ", " ~pre:"[" ~suf:"]" pp) fs es
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
   let hash_fold_int acc curr =
@@ -121,6 +127,7 @@ end
 module Stmt = struct
   type t =
     | Assign of { lhs : string; rhs : Expr.t }
+    | ArrayWrite of { rcvr : string; idx : Expr.t; rhs : Expr.t }
     | Throw of { exn : Expr.t }
     | Expr of Expr.t
     | Assume of Expr.t
@@ -130,6 +137,7 @@ module Stmt = struct
   let pp fs stmt =
     match stmt with
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
+    | ArrayWrite { rcvr; idx; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp idx Expr.pp rhs
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e

@@ -22,6 +22,8 @@ module Val : Abstract.Val = struct
 
   let of_lit = Set.singleton (Set.comparator_s bottom)
 
+  let models = Set.mem
+
   let eval_binop l op r =
     let concrete_op l r =
       match (op, l, r) with

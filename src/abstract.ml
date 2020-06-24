@@ -20,6 +20,8 @@ module type Val = sig
   val of_lit : Ast.Lit.t -> t
 
   val truthiness : t -> [ `Neither | `T | `F | `Either ]
+
+  val models : t -> Ast.Lit.t -> bool
 end
 
 module type Dom = sig

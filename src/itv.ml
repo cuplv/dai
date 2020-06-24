@@ -123,6 +123,7 @@ let rec texpr_of_expr itv =
   | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
   | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int i)))
   | Expr.Lit (Float f) -> Some (Texpr1.Cst (Coeff.s_of_float f))
+  | Expr.Lit (Bool b) -> Some (Texpr1.Cst (Coeff.s_of_float (if b then 1. else 0.)))
   | Expr.Lit _ -> None
   | Expr.Binop { l; op; r } -> (
       texpr_of_expr itv l >>= fun l ->
@@ -158,6 +159,7 @@ let rec texpr_of_expr itv =
       | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
       | Unop.Decr -> mk_arith_binop Texpr1.Sub e (Texpr1.Cst (Coeff.s_of_float 1.))
       | Unop.Typeof | Unop.BNot -> None )
+  | Expr.Deref _ | Expr.Array _ -> None
 
 let eval_expr expr itv =
   let env = Abstract1.env itv in
@@ -166,7 +168,7 @@ let eval_expr expr itv =
 let interpret stmt itv =
   let open Ast.Stmt in
   match stmt with
-  | Skip | Expr _ -> itv
+  | ArrayWrite _ | Skip | Expr _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom (Lazy.force man) (Abstract1.env itv)
   | Assume e -> (
       match eval_expr e itv with
