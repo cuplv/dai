@@ -147,11 +147,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     let hash = seeded_hash
   end
 
-  module AAddr = struct
-    include Adapton.Trie.Set.MakeNonInc (Name) (DefaultArtLib) (Addr)
-
-    let fresh () = singleton (Addr.fresh ())
-  end
+  module AAddr = Adapton.Trie.Set.MakeNonInc (Name) (DefaultArtLib) (Addr)
 
   module AAddr_or_val = struct
     include Adapton.Types.Sum2 (AAddr) (Val)
