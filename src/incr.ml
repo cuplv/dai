@@ -78,7 +78,7 @@ module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
               match Val.truthiness (eval_expr env e) with
               | `T | `Either -> Some env
               | `F | `Neither -> None )
-          | Expr _ | Skip | ArrayWrite _ -> Some env)
+          | Expr _ | Skip | Write _ -> Some env)
     in
     fun stmt -> flip ( >>= ) (fun env -> mfn.Art.mfn_data (stmt, env))
 
@@ -210,10 +210,10 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               in
               Some (env, heap)
           | Assign { lhs; rhs } -> eval_expr env heap rhs >>| fun r -> (Env.add env lhs r, heap)
-          | ArrayWrite { rcvr; idx; rhs } ->
+          | Write { rcvr; field; rhs } ->
               Env.find env rcvr >>= AAddr_or_val.addr >>= fun rcvr ->
-              eval_expr env heap idx >>= AAddr_or_val.value >>= fun idx ->
-              eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr idx rhs)
+              eval_expr env heap field >>= AAddr_or_val.value >>= fun field ->
+              eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr field rhs)
           | Throw _ -> None
           | Assume e -> (
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function

@@ -1,5 +1,7 @@
 let seeded_hash = Hashtbl.seeded_hash
 
+let systime = Sys.time
+
 include Core
 
 type 'a pp = Formatter.t -> 'a -> unit
@@ -23,6 +25,14 @@ let curry3 f x y z = f (x, y, z)
 let pair x y = (x, y)
 
 let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b
+
+let range i j =
+  let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in
+  aux j []
+
+let time ~f ~x fs descr =
+  let st = systime () in
+  f x $> fun _ -> Format.fprintf fs "%s \t%.3fms\n" descr (1000. *. (systime () -. st))
 
 module Option = struct
   include Base.Option

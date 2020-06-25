@@ -115,6 +115,10 @@ module Make (Dom : Abstract.Dom) = struct
               (Format.asprintf
                  "Error: astate_exn called on reference cell %a with no abstract state" pp r)
 
+      let is_astate = function AState _ -> true | _ -> false
+
+      let is_stmt = is_astate >> not
+
       let is_empty = function AState { state = None; name = _ } -> true | _ -> false
     end
 

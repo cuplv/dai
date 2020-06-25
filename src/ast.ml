@@ -121,7 +121,7 @@ end
 module Stmt = struct
   type t =
     | Assign of { lhs : string; rhs : Expr.t }
-    | ArrayWrite of { rcvr : string; idx : Expr.t; rhs : Expr.t }
+    | Write of { rcvr : string; field : Expr.t; rhs : Expr.t }
     | Throw of { exn : Expr.t }
     | Expr of Expr.t
     | Assume of Expr.t
@@ -131,7 +131,7 @@ module Stmt = struct
   let pp fs stmt =
     match stmt with
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
-    | ArrayWrite { rcvr; idx; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp idx Expr.pp rhs
+    | Write { rcvr; field; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp field Expr.pp rhs
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e

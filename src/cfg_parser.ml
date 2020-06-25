@@ -48,7 +48,13 @@ let rec expr_of_json json =
   | Some "Plus" -> binop Ast.Binop.Plus json
   | Some "Minus" -> binop Ast.Binop.Minus json
   | Some "Times" -> binop Ast.Binop.Times json
+  | Some "Equal" -> binop Ast.Binop.Eq json
   | Some "LessThan" -> binop Ast.Binop.Lt json
+  | Some "GreaterThan" -> binop Ast.Binop.Gt json
+  | Some "LessThanEqual" -> binop Ast.Binop.Le json
+  | Some "GreaterThanEqual" -> binop Ast.Binop.Ge json
+  | Some "And" -> binop Ast.Binop.And json
+  | Some "Or" -> binop Ast.Binop.Or json
   | Some "Not" -> unop Ast.Unop.Not json
   | Some t ->
       failwith @@ "Unrecognized expression with term: \"" ^ t ^ "\" and content: " ^ show json
@@ -72,8 +78,8 @@ let assign_of_json json =
       Ast.Stmt.Assign { lhs; rhs }
   | Some "Subscript" | Some "MemberAccess" ->
       let rcvr = member "lhs" lhs |> member "name" |> to_string in
-      let idx = member "rhs" lhs |> index 0 |> expr_of_json in
-      Ast.Stmt.ArrayWrite { rcvr; idx; rhs }
+      let field = member "rhs" lhs |> index 0 |> expr_of_json in
+      Ast.Stmt.Write { rcvr; field; rhs }
   | _ -> failwith "malformed assignment JSON"
 
 type edge_list = (Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t) list
@@ -139,8 +145,8 @@ let cfg_of_json json : Cfg.t =
         (* "return e" statement is interpreted as an edge to program exit with "RETVAL := e"*)
         let rval = member "value" json |> expr_of_json in
         [ (entry, ret, Ast.Stmt.Assign { lhs = "RETVAL"; rhs = rval }) ]
-    | Some "Context" ->
-        (* comment, just treat as skip *)
+    | Some "Context" | Some "Empty" ->
+        (* "Context" statements are comments; "Empty" statements are else-branches of else-branch-less conditionals *)
         [ (entry, exit, Ast.Stmt.Skip) ]
     | Some t ->
         failwith @@ "Unrecognized statement with term : \"" ^ t ^ "\" and content: " ^ show json

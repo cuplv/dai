@@ -13,11 +13,17 @@ test: build
 .PHONY: clean
 clean:
 	dune clean
+	rm -f out/cfg/* out/log/* out/daig/*
 
 .PHONY: fmt
 fmt:
-	ocamlformat src/*.ml -i --enable-outside-detected-project -m 100
+	ocamlformat src/*.ml* -i --enable-outside-detected-project -m 100
+	ocamlformat experiments/*.ml* -i --enable-outside-detected-project -m 100
 
 .PHONY: repl
 repl:
 	dune utop
+
+.PHONY: experiments
+experiments:
+	dune runtest experiments
