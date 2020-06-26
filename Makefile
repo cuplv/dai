@@ -8,7 +8,7 @@ build: fmt
 
 .PHONY: test
 test: build
-	dune runtest
+	dune runtest src
 
 .PHONY: clean
 clean:

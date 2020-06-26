@@ -56,6 +56,7 @@ let rec expr_of_json json =
   | Some "And" -> binop Ast.Binop.And json
   | Some "Or" -> binop Ast.Binop.Or json
   | Some "Not" -> unop Ast.Unop.Not json
+  | Some "Negate" -> unop Ast.Unop.Neg json
   | Some t ->
       failwith @@ "Unrecognized expression with term: \"" ^ t ^ "\" and content: " ^ show json
   | None -> failwith "Malformed expression JSON: no \"term\" element"
@@ -145,8 +146,11 @@ let cfg_of_json json : Cfg.t =
         (* "return e" statement is interpreted as an edge to program exit with "RETVAL := e"*)
         let rval = member "value" json |> expr_of_json in
         [ (entry, ret, Ast.Stmt.Assign { lhs = "RETVAL"; rhs = rval }) ]
-    | Some "Context" | Some "Empty" ->
-        (* "Context" statements are comments; "Empty" statements are else-branches of else-branch-less conditionals *)
+    | Some "Context" ->
+        (* "Context" packages a comment and a statement; ignore the comment and just parse the statement *)
+        edge_list_of_json entry exit ret (member "contextSubject" json)
+    | Some "Empty" ->
+        (* "Empty" statements are else-branches of else-branch-less conditionals *)
         [ (entry, exit, Ast.Stmt.Skip) ]
     | Some t ->
         failwith @@ "Unrecognized statement with term : \"" ^ t ^ "\" and content: " ^ show json

@@ -37,7 +37,7 @@ let time ~f ~x fs descr =
 module Option = struct
   include Base.Option
 
-  let pp pp_elt fs = function Some x -> pp_elt fs x | None -> ()
+  let pp pp_elt default fs = function Some x -> pp_elt fs x | None -> Format.fprintf fs default
 
   let cons xo xs = match xo with Some x -> x :: xs | None -> xs
 

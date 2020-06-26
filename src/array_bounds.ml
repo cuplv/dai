@@ -48,13 +48,24 @@ let apron_var_of_array_len addr = Var.of_string (Format.asprintf "%a.len" Addr.p
 
 let texpr_of_expr expr (am, itv) =
   let man = Itv.get_man () in
-  let join_itv (itv1 : Interval.t) (itv2 : Interval.t) =
+  let join_intervals (itv1 : Interval.t) (itv2 : Interval.t) =
     let inf = if Scalar.cmp itv1.inf itv2.inf < 0 then itv1.inf else itv2.inf in
     let sup = if Scalar.cmp itv1.sup itv2.sup > 0 then itv1.sup else itv2.sup in
     Interval.of_infsup inf sup
   in
   let rec handle_array_expr itv = function
+    | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field = Ast.Expr.Var "length" } ->
+        Map.find am rcvr_ident >>= fun aaddr ->
+        if Set.is_empty aaddr then None
+        else
+          Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
+              let len = apron_var_of_array_len addr in
+              if Environment.mem_var (Abstract1.env itv) len then
+                join_intervals acc (Abstract1.bound_variable man itv len)
+              else acc)
+          |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
     | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field } ->
+        Format.fprintf Format.std_formatter "Handling deref: %s[%a]" rcvr_ident Ast.Expr.pp field;
         Itv.texpr_of_expr ~fallback:handle_array_expr itv field >>| Itv.eval_texpr itv
         >>= fun { inf; sup } ->
         Map.find am rcvr_ident >>= fun aaddr ->
@@ -76,7 +87,7 @@ let texpr_of_expr expr (am, itv) =
                 let av = apron_var_of_array_cell addr idx in
                 if Environment.mem_var (Abstract1.env itv) av then
                   let value = Abstract1.bound_variable man itv av in
-                  join_itv a value
+                  join_intervals a value
                 else a))
         |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
     | Ast.Expr.Array { elts = _; alloc_site = _ } ->
@@ -91,6 +102,8 @@ let interpret stmt phi =
   phi >>= fun (am, itv) ->
   let open Ast.Stmt in
   match stmt with
+  | Assign { lhs; rhs = Ast.Expr.Var v } when Map.mem am v ->
+      Some (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
   | Assign { lhs; rhs = Ast.Expr.Array { elts; alloc_site } } ->
       let addr = Addr.of_alloc_site alloc_site in
       let am =
@@ -148,12 +161,12 @@ let interpret stmt phi =
           else (* lhs was unconstrained, treat as a `skip`*) Some (am, itv) )
   | Throw { exn = _ } -> None
   | Assume e -> (
-      match texpr_of_expr e (am, itv) >>| Itv.eval_texpr itv with
-      | Some cond when Interval.is_zero cond -> None
-      | _ -> Some (am, itv) )
+      match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
+      | itv when Abstract1.is_bottom man itv -> None
+      | itv -> Some (am, itv) )
   | Expr _ | Write _ | Skip -> Some (am, itv)
 
-let pp = Option.pp (pp_pair Addr_map.pp Itv.pp)
+let pp = Option.pp (pp_pair Addr_map.pp Itv.pp) "bottom"
 
 let sanitize x = x
 
@@ -188,8 +201,6 @@ let hash_fold_t seed = function
     None indicates it could be either
 *)
 let is_in_bounds addr (idx : Interval.t) itv =
-  Format.fprintf Format.std_formatter "checking array access %a[%a] in state %a\n" Addr.pp addr
-    Interval.print idx Itv.pp itv;
   let env = Abstract1.env itv in
   let len_itv =
     Texpr1.of_expr env (Texpr1.Var (apron_var_of_array_len addr))
@@ -203,15 +214,17 @@ let is_in_bounds addr (idx : Interval.t) itv =
 
 (** Lift [is_in_bounds] to take a receiver variable and index expression, and return a value of the same form *)
 let is_safe var idx state =
-  state >>= fun (am, itv) ->
-  if not @@ Map.mem am var then (
-    Format.fprintf Format.std_formatter "No array address information available for %s\n" var;
-    None )
-  else
-    Map.find am var >>= fun aaddr ->
-    texpr_of_expr idx (am, itv) >>| Itv.eval_texpr itv >>= fun idx ->
-    assert (not @@ Set.is_empty aaddr);
-    Set.to_list aaddr
-    |> List.map ~f:(fun a -> is_in_bounds a idx itv)
-    |> List.reduce_exn ~f:(fun x y ->
-           match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
+  match state with
+  | None -> Some true (* state is unreachable so access is safe *)
+  | Some (am, itv) ->
+      if not @@ Map.mem am var then (
+        Format.fprintf Format.std_formatter "No array address information available for %s\n" var;
+        None )
+      else
+        Map.find am var >>= fun aaddr ->
+        texpr_of_expr idx (am, itv) >>| Itv.eval_texpr itv >>= fun idx ->
+        assert (not @@ Set.is_empty aaddr);
+        Set.to_list aaddr
+        |> List.map ~f:(fun a -> is_in_bounds a idx itv)
+        |> List.reduce_exn ~f:(fun x y ->
+               match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)

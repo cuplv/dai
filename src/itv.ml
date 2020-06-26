@@ -97,6 +97,11 @@ let t_of_sexp = function
 
 let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
 
+(* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
+let mk_tcons env op l r =
+  let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Rnd) in
+  Tcons1.make (Texpr1.of_expr env l_minus_r) op
+
 (* abstractly evaluate boolean binary operation [l op r] at interval [itv] by translating it to [(l - r) op 0]
    (since apron can only solve booleran constraints of that form), and intersecting the result with [itv].
    If that intersection is  ...
@@ -107,9 +112,8 @@ let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
 *)
 let mk_bool_binop itv op l r =
   let env = Abstract1.env itv in
-  let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Rnd) in
-  let l_minus_r_op_0 = Tcons1.make (Texpr1.of_expr env l_minus_r) op in
-  let tcons_array = Tcons1.array_make env 1 $> fun a -> Tcons1.array_set a 0 l_minus_r_op_0 in
+  let tcons = mk_tcons env op l r in
+  let tcons_array = Tcons1.array_make env 1 $> fun a -> Tcons1.array_set a 0 tcons in
   let intersection = Abstract1.meet_tcons_array (get_man ()) itv tcons_array in
   if is_bot intersection then Texpr1.Cst (Coeff.s_of_float 0.)
   else if equal intersection itv then Texpr1.Cst (Coeff.s_of_float 1.)
@@ -164,8 +168,55 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       | Unop.Typeof | Unop.BNot -> None )
   | expr -> fallback itv expr
 
-(*let eval_expr ?(fallback = fun _ _ -> None) expr itv =
-  texpr_of_expr ~fallback itv expr*)
+let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
+  let open Ast.Expr in
+  let man = get_man () in
+  let meet_with_op itv op l r =
+    texpr_of_expr ~fallback itv l
+    >>= (fun l ->
+          texpr_of_expr ~fallback itv r >>| fun r ->
+          let tcons = mk_tcons (Abstract1.env itv) op l r in
+          let tcons_array =
+            Tcons1.array_make (Abstract1.env itv) 1 $> fun a -> Tcons1.array_set a 0 tcons
+          in
+          Abstract1.meet_tcons_array man itv tcons_array)
+    |> Option.value ~default:itv
+  in
+  function
+  | Unop { op = Not; e = Binop { l; op; r } } ->
+      (* apply demorgans to push negations out to leaves of boolean operators; flip equalities/inequalities *)
+      let open Ast.Binop in
+      let flipped_op =
+        match op with
+        | And -> Or
+        | Or -> And
+        | Eq -> NEq
+        | NEq -> Eq
+        | Gt -> Le
+        | Lt -> Ge
+        | Ge -> Lt
+        | Le -> Gt
+        | op -> failwith (Format.asprintf "unrecognized binary operator %a" pp op)
+      in
+      let new_l = if op = And || op = Or then Unop { op = Not; e = l } else l in
+      let new_r = if op = And || op = Or then Unop { op = Not; e = r } else r in
+      meet_with_constraint ~fallback itv (Binop { l = new_l; op = flipped_op; r = new_r })
+  | Binop { l; op = And; r } ->
+      let l = meet_with_constraint ~fallback itv l in
+      let r = meet_with_constraint ~fallback itv r in
+      Abstract1.meet man l r
+  | Binop { l; op = Or; r } ->
+      let l = meet_with_constraint ~fallback itv l in
+      let r = meet_with_constraint ~fallback itv r in
+      Abstract1.join man l r
+  | Binop { l; op = Eq; r } -> meet_with_op itv Tcons0.EQ l r
+  | Binop { l; op = NEq; r } -> meet_with_op itv Tcons0.DISEQ l r
+  | Binop { l; op = Gt; r } -> meet_with_op itv Tcons0.SUP l r
+  | Binop { l; op = Ge; r } -> meet_with_op itv Tcons0.SUPEQ l r
+  | Binop { l; op = Lt; r } -> meet_with_op itv Tcons0.SUP r l
+  | Binop { l; op = Le; r } -> meet_with_op itv Tcons0.SUPEQ r l
+  | Unop { op = Not; e } -> meet_with_op itv Tcons0.EQ e (Lit (Int 0))
+  | _ -> itv
 
 let eval_texpr itv =
   let env = Abstract1.env itv in
@@ -177,14 +228,7 @@ let interpret stmt itv =
   match stmt with
   | Write _ | Skip | Expr _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
-  | Assume e -> (
-      match texpr_of_expr itv e >>| eval_texpr itv with
-      | Some cond when Interval.is_zero cond -> Abstract1.bottom man (Abstract1.env itv)
-      | Some _ -> itv
-      | None ->
-          Format.fprintf Format.err_formatter
-            "Unable to compute guard condition %a; assuming possibly true." Ast.Expr.pp e;
-          itv )
+  | Assume e -> meet_with_constraint itv e
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
       let env = Abstract1.env itv in
