@@ -65,7 +65,6 @@ let texpr_of_expr expr (am, itv) =
               else acc)
           |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
     | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field } ->
-        Format.fprintf Format.std_formatter "Handling deref: %s[%a]" rcvr_ident Ast.Expr.pp field;
         Itv.texpr_of_expr ~fallback:handle_array_expr itv field >>| Itv.eval_texpr itv
         >>= fun { inf; sup } ->
         Map.find am rcvr_ident >>= fun aaddr ->
