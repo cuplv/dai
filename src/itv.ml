@@ -99,6 +99,12 @@ let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
 
 (* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
 let mk_tcons env op l r =
+  (* add tiny constant to right hand side to avoid float comparison wonkiness*)
+  let r =
+    if op = Tcons0.SUP then
+      Texpr1.Binop (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Rnd)
+    else r
+  in
   let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Rnd) in
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
