@@ -646,12 +646,12 @@ module Make (Dom : Abstract.Dom) = struct
     in
     if add_stmt_before then
       Seq.fold (G.Node.inputs old_loc_ref daig) ~init:daig ~f:(fun daig edge ->
-          daig |> G.Edge.remove edge
+          G.Edge.remove edge daig
           |> G.Edge.insert (G.Edge.create (G.Edge.src edge) new_loc_ref (G.Edge.label edge)))
       |> add_stmt new_loc loc stmt
     else
       Seq.fold (G.Node.outputs old_loc_ref daig) ~init:daig ~f:(fun daig edge ->
-          daig |> G.Edge.remove edge
+          G.Edge.remove edge daig
           |> G.Edge.insert (G.Edge.create new_loc_ref (G.Edge.dst edge) (G.Edge.label edge)))
       |> add_stmt loc new_loc stmt
 end
