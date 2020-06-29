@@ -16,7 +16,7 @@ module Lit = struct
     | Int i -> Format.pp_print_int fs i
     | Float f -> Format.pp_print_float fs f
     | Null -> Format.pp_print_string fs "null"
-    | String s -> Format.pp_print_string fs ("\"" ^ s ^ "\"")
+    | String s -> Format.pp_print_string fs ("\\\"" ^ s ^ "\\\"")
     | Undefined -> Format.pp_print_string fs "undefined"
 end
 

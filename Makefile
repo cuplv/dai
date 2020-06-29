@@ -13,7 +13,7 @@ test: build
 .PHONY: clean
 clean:
 	dune clean
-	rm -f out/cfg/* out/log/* out/daig/*
+	rm -f out/cfg/* out/log/* out/daig/* ./*.dot ./*.png
 
 .PHONY: fmt
 fmt:
