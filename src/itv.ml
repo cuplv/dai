@@ -35,22 +35,36 @@ let man = lazy (Box.manager_alloc ())
 
 let get_man () = Lazy.force man
 
+let combine_envs x y =
+  let new_env = Environment.lce (Abstract1.env x) (Abstract1.env y) in
+  pair
+    (Abstract1.change_environment (get_man ()) x new_env false)
+    (Abstract1.change_environment (get_man ()) y new_env false)
+
 (* Do not eta-reduce!  Will break lazy manager allocation *)
-let join l r = Abstract1.join (get_man ()) l r
+let join l r =
+  let l, r = combine_envs l r in
+  Abstract1.join (get_man ()) l r
 
 (* Do not eta-reduce! Will break lazy manager allocation
    APRON widening argument order is reversed from my expectation; this function widens [l] by [r],
    treating [l] as the accumulated result of previous joins/widens and [r] as the newest element of that sequence *)
-let widen l r = Abstract1.widening (get_man ()) r l
+let widen l r =
+  let l, r = combine_envs l r in
+  Abstract1.widening (get_man ()) r l
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
-let equal l r = Abstract1.is_eq (get_man ()) l r
+let equal l r =
+  let l, r = combine_envs l r in
+  Abstract1.is_eq (get_man ()) l r
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let is_bot itv = Abstract1.is_bottom (get_man ()) itv
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
-let implies l r = Abstract1.is_leq (get_man ()) l r
+let implies l r =
+  let l, r = combine_envs l r in
+  Abstract1.is_leq (get_man ()) l r
 
 let bindings (itv : t) =
   let man = get_man () in
@@ -156,6 +170,10 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
           None )
+  (* cancel out double-negations, arithmetic and boolean *)
+  | Expr.Unop { op = Unop.Neg; e = Expr.Unop { op = Unop.Neg; e } }
+  | Expr.Unop { op = Unop.Not; e = Expr.Unop { op = Unop.Not; e } } ->
+      texpr_of_expr ~fallback itv e
   | Expr.Unop { op; e } -> (
       (* Translate to equivalent expressions for unops with no APRON equivalent (i.e. everything but [Neg]):
        * !e -> e==0
