@@ -488,10 +488,7 @@ module Make (Dom : Abstract.Dom) = struct
       | Ref.Stmt _ -> failwith "dirty should only be called on AStates in a well-formed DAIG"
     in
     let change_prop_step acc n =
-      Format.fprintf Format.std_formatter "\n\n\n\nProcessing node %a \n" Ref.pp n;
       Seq.fold (G.Node.outputs n g) ~init:acc ~f:(fun (f, lh_fps) e ->
-          Format.fprintf Format.std_formatter "\tProcessing edge from %a to %a \n" Ref.pp
-            (G.Edge.src e) Ref.pp (G.Edge.dst e);
           let succ = G.Edge.dst e in
           if Ref.is_empty succ then (f, lh_fps)
           else if Comp.equal `Fix (G.Edge.label e) && (not @@ List.mem lh_fps succ ~equal:Ref.equal)
@@ -513,9 +510,6 @@ module Make (Dom : Abstract.Dom) = struct
             (succ :: f, lh_fps) ))
     in
     let rec change_prop frontier loop_head_fixpoints =
-      Format.fprintf Format.std_formatter "propagating changes...frontier:%a \n"
-        (List.pp ~pre:"[" ~suf:"]" ", " Ref.pp)
-        frontier;
       if List.is_empty frontier then loop_head_fixpoints
       else
         (uncurry change_prop)
@@ -527,7 +521,7 @@ module Make (Dom : Abstract.Dom) = struct
       (change_prop [ r ] [])
       ~init:g
       ~f:(fun g -> function
-        | Ref.AState { state = _; name = Name.Loc _ as l } as loop_fp ->
+        | Ref.AState { state = _; name = Name.Loc _ as l } as loop_fp -> (
             let iter0 = ref_by_name_exn (Name.Iterate (l, 0)) g in
             let iter1 = ref_by_name_exn (Name.Iterate (l, 1)) g in
             let daig =
@@ -535,17 +529,55 @@ module Make (Dom : Abstract.Dom) = struct
               |> G.Edge.insert (G.Edge.create iter0 loop_fp `Fix)
               |> G.Edge.insert (G.Edge.create iter1 loop_fp `Fix)
             in
-            let root_of_dangling_unrollings =
-              Seq.find_exn (G.Node.succs iter1 daig) ~f:(fun r ->
+            match
+              Seq.find (G.Node.succs iter1 daig) ~f:(fun r ->
                   match Ref.name r with Name.Iterate (_, 1) -> true | _ -> false)
-            in
-            Graph.fold_reachable
-              (module G)
-              daig root_of_dangling_unrollings ~init:daig
-              ~f:(fun daig n ->
-                Seq.fold ~init:(G.Node.remove n daig) ~f:(flip G.Edge.remove) (G.Node.inputs n daig))
+            with
+            | Some root_of_dangling_unrollings ->
+                Graph.fold_reachable
+                  (module G)
+                  daig root_of_dangling_unrollings ~init:daig
+                  ~f:(fun daig n ->
+                    Seq.fold ~init:(G.Node.remove n daig) ~f:(flip G.Edge.remove)
+                      (G.Node.inputs n daig))
+            | _ -> daig )
         | _ ->
             failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
+
+  let fixpoint_of astate_ref daig =
+    match Ref.name astate_ref with
+    | Name.Iterate (l, _) -> (
+        (* loop head fixpoint postdominates all refcells in the loop, so just follow any path to find it *)
+        let rec loop_head_fp refcell =
+          match Ref.name refcell with
+          | Name.Loc _ -> refcell
+          | _ -> G.Node.succs refcell daig |> Seq.hd_exn |> loop_head_fp
+        in
+        let loop_head_fp, daig = get (loop_head_fp astate_ref) daig in
+        let final_iterate =
+          G.Node.preds loop_head_fp daig
+          |> Seq.max_elt ~compare:(fun x y -> Name.compare (Ref.name x) (Ref.name y))
+        in
+        match Option.map ~f:Ref.name final_iterate with
+        | Some (Name.Iterate (_, k)) ->
+            let k = Int.max 0 (pred k) in
+            get_by_name (Name.Iterate (l, k)) daig
+        | _ ->
+            failwith
+              "error, malformed DAIG -- predecessors of the fixpoint are named in the above form" )
+    | _ -> get astate_ref daig
+
+  let get_by_loc l daig =
+    match ref_by_name Name.(Iterate (Loc l, 0)) daig with
+    | Some r -> fixpoint_of r daig
+    | None -> (
+        match ref_by_name (Name.Loc l) daig with
+        | Some r -> get r daig
+        | None ->
+            dump_dot ~filename:"/Users/benno/Documents/CU/code/d1a/error_dump.dot" daig;
+            failwith
+              (Format.asprintf "location %a not found; daig dumped at error_dump.dot" Cfg.Loc.pp l)
+        )
 
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
   let edit_stmt (r : Ref.t) (stmt : Ast.Stmt.t) (g : t) =
@@ -644,6 +676,7 @@ module Make (Dom : Abstract.Dom) = struct
           (new_loc, new_loc_ref, r, true)
       | None, None -> failwith "can't add statement at non-existent location"
     in
+    let daig = G.Node.insert new_loc_ref daig in
     if add_stmt_before then
       Seq.fold (G.Node.inputs old_loc_ref daig) ~init:daig ~f:(fun daig edge ->
           G.Edge.remove edge daig

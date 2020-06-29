@@ -10,6 +10,9 @@ module Loc = struct
 
     val fresh : unit -> t
 
+    val sample : unit -> t
+    (** Select at random a non-fresh location *)
+
     val of_int_unsafe : int -> t
     (** "Unsafe" in the sense that it can construct non-fresh names; future [fresh] names will still be fresh. *)
 
@@ -32,6 +35,8 @@ module Loc = struct
     let of_int_unsafe i =
       next := Int.max !next i;
       i
+
+    let sample () = Random.int !next
 
     let fresh () =
       let curr = !next in
@@ -95,6 +100,13 @@ type t = G.t
 let src : G.Edge.t -> Loc.t = G.Edge.src
 
 let dst : G.Edge.t -> Loc.t = G.Edge.dst
+
+let empty =
+  Loc.reset ();
+  Graph.create
+    (module G)
+    ~nodes:[ Loc.entry; Loc.exit ]
+    ~edges:[ (Loc.entry, Loc.exit, Ast.Stmt.Skip) ]
 
 (** Algorithm given in 2nd ed. Dragon book section 9.6.6, MODIFIED TO EXCLUDE THE LOOP HEAD ITSELF *)
 let natural_loop backedge cfg =

@@ -96,9 +96,33 @@ let texpr_of_expr expr (am, itv) =
   in
   Itv.texpr_of_expr itv ~fallback:handle_array_expr expr
 
+let extend_env_with_uses stmt (am, itv) =
+  let open Ast in
+  let env = Abstract1.env itv in
+  let man = Itv.get_man () in
+  let rec uses = function
+    | Expr.Var v when not @@ Map.mem am v -> String.Set.singleton v
+    | Expr.Binop { l; op = _; r } -> Set.union (uses l) (uses r)
+    | Expr.Unop { op = _; e } -> uses e
+    | Expr.Deref { rcvr; field } -> Set.union (uses rcvr) (uses field)
+    | Expr.Array { elts; alloc_site = _ } ->
+        List.fold elts ~init:String.Set.empty ~f:(fun a c -> Set.union a (uses c))
+    | _ -> String.Set.empty
+  in
+  ( match stmt with
+  | Stmt.Assign { lhs = _; rhs } -> uses rhs
+  | Stmt.Write { rcvr = _; field; rhs } -> Set.union (uses field) (uses rhs)
+  | Stmt.Throw { exn } -> uses exn
+  | Stmt.Expr e | Stmt.Assume e -> uses e
+  | Stmt.Skip -> String.Set.empty )
+  |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
+  |> Set.to_array |> Array.map ~f:Var.of_string
+  |> Environment.add env [||]
+  |> fun new_env -> (am, Abstract1.change_environment man itv new_env false)
+
 let interpret stmt phi =
   let man = Itv.get_man () in
-  phi >>= fun (am, itv) ->
+  phi >>| extend_env_with_uses stmt >>= fun (am, itv) ->
   let open Ast.Stmt in
   match stmt with
   | Assign { lhs; rhs = Ast.Expr.Var v } when Map.mem am v ->

@@ -30,6 +30,9 @@ let range i j =
   let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in
   aux j []
 
+let rec apply_n_times ~n ~init ~f =
+  if n <= 0 then init else apply_n_times ~n:(pred n) ~init:(f init) ~f
+
 let time ~f ~x fs descr =
   let st = systime () in
   f x $> fun _ -> Format.fprintf fs "%s \t%.3fms\n" descr (1000. *. (systime () -. st))

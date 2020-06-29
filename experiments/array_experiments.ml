@@ -22,27 +22,6 @@ module Arr_bounds_check = struct
     | Expr e | Assume e -> expr_derefs e
     | Skip -> []
 
-  let fixpoint_of astate_ref daig =
-    match Ref.name astate_ref with
-    | Daig.Name.Iterate (l, _) -> (
-        (* loop head fixpoint postdominates all refcells in the loop, so just follow any path to find it *)
-        let rec loop_head_fp refcell =
-          match Ref.name refcell with
-          | Daig.Name.Loc _ -> refcell
-          | _ -> G.Node.succs refcell daig |> Seq.hd_exn |> loop_head_fp
-        in
-        let loop_head_fp, daig = get (loop_head_fp astate_ref) daig in
-        let final_iterate =
-          G.Node.preds loop_head_fp daig
-          |> Seq.max_elt ~compare:(fun x y -> Daig.Name.compare (Ref.name x) (Ref.name y))
-        in
-        match Option.map ~f:Ref.name final_iterate with
-        | Some (Daig.Name.Iterate (_, k)) -> get_by_name (Daig.Name.Iterate (l, k)) daig
-        | _ ->
-            failwith
-              "error, malformed DAIG -- predecessors of the fixpoint are named in the above form" )
-    | _ -> get astate_ref daig
-
   let check_all_accesses daig fs =
     let candidates : ((Expr.t * Expr.t) list * Ref.t) Seq.t =
       Seq.filter_map (G.nodes daig) ~f:(function

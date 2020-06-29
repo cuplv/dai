@@ -13,14 +13,6 @@ module Make (Dom : Abstract.Dom) = struct
   module N = D.G.Node
   module Nm = Daig.Name
 
-  let gen_expr () = failwith "todo"
-
-  let gen_bool_expr () = failwith "todo"
-
-  let gen_arith_expr () = failwith "todo"
-
-  let gen_stmt () = failwith "todo"
-
   (** add an if-then-else construct to [daig] at location [l] *)
   let add_ite_at l ~cond ~if_stmt ~else_stmt daig =
     let l_ref, iter =
@@ -90,7 +82,11 @@ module Make (Dom : Abstract.Dom) = struct
       D.Ref.Stmt { stmt = Stmt.Assume cond; name = Nm.Prod (Loc l, Loc body_loc) }
     in
     let assume_neg_stmt_ref =
-      D.Ref.Stmt { stmt = Stmt.Assume (Expr.Unop {op = Unop.Not; e = cond}); name = Nm.Prod (Loc l, Loc exit_loc) }
+      D.Ref.Stmt
+        {
+          stmt = Stmt.Assume (Expr.Unop { op = Unop.Not; e = cond });
+          name = Nm.Prod (Loc l, Loc exit_loc);
+        }
     in
     let backedge_stmt_ref = D.Ref.Stmt { stmt = body; name = Nm.Prod (Loc body_loc, Loc l) } in
     (* first, shift incoming edges to l to instead go to its 0th iterate [l^(0)],
@@ -115,6 +111,137 @@ module Make (Dom : Abstract.Dom) = struct
     |> N.insert assume_neg_stmt_ref
     |> E.insert (E.create l_ref exit_ref `Transfer)
     |> E.insert (E.create assume_neg_stmt_ref exit_ref `Transfer)
+
+  (** For each [gen_*_ident], generate a new identifier 20% of time, sample a previously-generated one 80% of time *)
+  let arith_vars = ref 1
+
+  let gen_arith_ident () =
+    if phys_equal (Random.int 5) 4 then arith_vars := !arith_vars + 1;
+    "a" ^ Int.to_string @@ Random.int !arith_vars
+
+  let bool_vars = ref 1
+
+  let gen_bool_ident () =
+    if phys_equal (Random.int 5) 4 then bool_vars := !bool_vars + 1;
+    "b" ^ Int.to_string @@ Random.int !bool_vars
+
+  let array_vars = ref 1
+
+  let gen_array_ident () =
+    if phys_equal (Random.int 5) 4 then array_vars := !array_vars + 1;
+    "arr" ^ Int.to_string @@ Random.int !array_vars
+
+  (** Generate a random arithmetic [Ast.Expr.t], uniformly drawn from:
+   * number literal
+   * binop of two random arithmetic exprs
+   * negation of random arithmetic expr
+   * array access
+   * arithmetic variable
+   *)
+  let rec gen_arith_expr () =
+    let open Ast in
+    match Random.int 5 with
+    | 0 -> Expr.Lit (Lit.Int (Random.int 100))
+    | 1 ->
+        let op =
+          match Random.int 5 with
+          | 0 -> Binop.Plus
+          | 1 -> Binop.Minus
+          | 2 -> Binop.Times
+          | 3 -> Binop.Divided_by
+          | _ -> Binop.Mod
+        in
+        Expr.Binop { l = gen_arith_expr (); op; r = gen_arith_expr () }
+    | 2 -> Expr.Unop { op = Unop.Neg; e = gen_arith_expr () }
+    | 3 ->
+        Expr.Deref
+          {
+            rcvr = Expr.Var ("arr" ^ Int.to_string @@ Random.int !array_vars);
+            field = gen_arith_expr ();
+          }
+    | _ -> Expr.Var ("a" ^ Int.to_string @@ Random.int !arith_vars)
+
+  (** Generate a random boolean [Ast.Expr.t], uniformly drawn from:
+   * boolean literal
+   * inequality of two random arithmetic exprs
+   * negation of random boolean expr
+   * boolean variable
+*)
+  let rec gen_bool_expr () =
+    let open Ast in
+    match Random.int 4 with
+    | 0 -> Expr.Lit (Lit.Bool (Random.bool ()))
+    | 1 ->
+        let op =
+          match Random.int 6 with
+          | 0 -> Binop.Lt
+          | 1 -> Binop.Le
+          | 2 -> Binop.Gt
+          | 3 -> Binop.Ge
+          | 4 -> Binop.Eq
+          | _ -> Binop.NEq
+        in
+        Expr.Binop { l = gen_arith_expr (); op; r = gen_arith_expr () }
+    | 2 -> Expr.Unop { op = Unop.Not; e = gen_bool_expr () }
+    | _ -> Expr.Var ("b" ^ Int.to_string @@ Random.int !bool_vars)
+
+  (** Generate a random array [Ast.Expr.t]; 20% chance of new array literal, 80% chance of existing array variable*)
+  let gen_array_expr () =
+    match Random.int 5 with
+    | 0 ->
+        (* no source location so just generate at random *)
+        let alloc_site = pair (Random.int 100) (Random.int 100) in
+        let elts = List.map [ (); (); (); (); () ] ~f:gen_arith_expr in
+        Expr.Array { elts; alloc_site }
+    | _ -> Expr.Var ("arr" ^ Int.to_string @@ Random.int !array_vars)
+
+  (** Generate a single random [Ast.Stmt.t] with the following distribution:
+   * 40% [Assign] (x := e)
+     * 50% of assignments are to arithmetic variables, 25% each to bool/array variables
+   * 20% [Write] (x[i] := e)
+   * 10% [Skip] (skip)
+   * 10% [Throw] (throw e)
+   * 10% [Assume] (assume e)
+   *)
+  let gen_stmt () =
+    let open Ast.Stmt in
+    let i = Random.int 10 in
+    if i < 2 then Assign { lhs = gen_arith_ident (); rhs = gen_arith_expr () }
+    else if i < 3 then Assign { lhs = gen_bool_ident (); rhs = gen_bool_expr () }
+    else if i < 4 then Assign { lhs = gen_array_ident (); rhs = gen_array_expr () }
+    else if i < 6 then
+      Write { rcvr = gen_array_ident (); field = gen_arith_expr (); rhs = gen_arith_expr () }
+    else if i < 8 then Skip
+    else if i < 9 then Throw { exn = gen_arith_expr () }
+    else Assume (gen_bool_expr ())
+
+  (** Edit [daig]'s underlying program at random, according to the following distribution:
+      * 50% insert a statement 
+      * 20% modify a statement TODO
+      * 20% insert a conditional
+      * 10% insert a while loop
+   *)
+  let random_edit daig =
+    match Random.int 10 with
+    | 0 ->
+        (* no nested loops, so keep sampling locations until finding one not in any loop *)
+        let l = ref (Cfg.Loc.sample ()) in
+        while
+          (not (Cfg.Loc.equal !l Cfg.Loc.entry))
+          && Option.is_some (D.ref_by_name Nm.(Iterate (Loc !l, 0)) daig)
+        do
+          l := Cfg.Loc.sample ()
+        done;
+        add_loop_at !l ~cond:(gen_bool_expr ()) ~body:(gen_stmt ()) daig
+    | 1 | 2 ->
+        add_ite_at (Cfg.Loc.sample ()) ~cond:(gen_bool_expr ()) ~if_stmt:(gen_stmt ())
+          ~else_stmt:(gen_stmt ()) daig
+    (*    | 3 | 4 -> failwith "todo"*)
+    | _ -> D.add_stmt_at (Cfg.Loc.sample ()) (gen_stmt ()) daig
+
+  let issue_random_query daig = D.get_by_loc (Cfg.Loc.sample ()) daig |> snd
+
+  let issue_exit_query = D.get_by_loc Cfg.Loc.exit >> snd
 end
 
 module RE = Make (Array_bounds)
@@ -177,4 +304,12 @@ let%test "add a while in straightline code" =
   let daig = RE.D.of_cfg cfg in
   let edited_daig = RE.add_loop_at Cfg.Loc.(of_int_unsafe 1) ~cond ~body:stmt1 daig in
   RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test5.dot";
+  true
+
+let%test "fuzz 100 edits/queries" =
+  Cfg.Loc.reset ();
+  let init = RE.D.of_cfg @@ Cfg.empty () in
+  let _daig =
+    apply_n_times ~n:100 ~init ~f:(fun daig -> RE.(random_edit >> issue_random_query) daig)
+  in
   true
