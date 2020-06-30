@@ -22,7 +22,7 @@ module Name = struct
       | Idx of int
       | Prod of t * t
       (* todo: do something fancier (set of loop/iteration pairs?) for nested loops -- for now, assuming loop bodies are disjoint, so just one iteration count needed *)
-      | Iterate of t * int
+      | Iterate of int * t
     [@@deriving compare, equal, sexp_of]
 
     let rec hash : t -> int = function
@@ -31,14 +31,14 @@ module Name = struct
       | Idx i -> Hashtbl.hash (Hashtbl.hash i)
       (* doubly hashing to avoid collisions with Loc's, since both are isomorphic to int *)
       | Prod (n1, n2) -> seeded_hash (hash n1) n2
-      | Iterate (n, idx) -> seeded_hash idx n
+      | Iterate (idx, n) -> seeded_hash idx n
 
     let rec pp fs = function
       | Loc l -> Cfg.Loc.pp fs l
       | Fn c -> Comp.pp fs c
       | Idx i -> Format.fprintf fs "%i" i
       | Prod (n1, n2) -> Format.fprintf fs "(%a . %a)" pp n1 pp n2
-      | Iterate (n, idx) -> Format.fprintf fs "%a^%i" pp n idx
+      | Iterate (idx, n) -> Format.fprintf fs "%a^%i" pp n idx
 
     let to_string n =
       pp Format.str_formatter n;
@@ -81,13 +81,15 @@ module Make (Dom : Abstract.Dom) = struct
   module Ref = struct
     module T = struct
       type t =
-        | Stmt of { mutable stmt : Ast.Stmt.t; [@ignore] name : Name.t }
-        | AState of { mutable state : Dom.t option; [@ignore] name : Name.t }
-      [@@deriving compare, equal, sexp_of]
+        | Stmt of { mutable stmt : Ast.Stmt.t; name : Name.t }
+        | AState of { mutable state : Dom.t option; name : Name.t }
+      [@@deriving sexp_of]
 
       let name = function Stmt { stmt = _; name } -> name | AState { state = _; name } -> name
 
       let hash = name >> Name.hash
+
+      let equal r1 r2 = Name.equal (name r1) (name r2)
 
       let compare r1 r2 =
         match (r1, r2) with
@@ -206,10 +208,10 @@ module Make (Dom : Abstract.Dom) = struct
       ( match Map.find loop_head_map l with
       | None -> Name.Loc l
       | Some heads ->
-          if Int.equal (Set.length heads) 1 then Name.(Iterate (Loc l, 0))
+          if Int.equal (Set.length heads) 1 then Name.(Iterate (0, Loc l))
           else failwith "Nested loops not yet supported." )
       |> fun n ->
-      if dst && List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.Iterate (n, 0) else n
+      if dst && List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.Iterate (0, n) else n
     in
 
     let forward_edges_to l =
@@ -247,7 +249,7 @@ module Make (Dom : Abstract.Dom) = struct
       and pre_widens =
         back_edges >>| fun e ->
         let l_bar = Name.Loc (Cfg.dst e) in
-        Ref.AState { state = None; name = Name.(Prod (Iterate (l_bar, 0), Iterate (l_bar, 1))) }
+        Ref.AState { state = None; name = Name.(Prod (Iterate (0, l_bar), Iterate (1, l_bar))) }
       in
       List.(append at_locs (append pre_joins pre_widens))
     in
@@ -256,8 +258,8 @@ module Make (Dom : Abstract.Dom) = struct
       back_edges >>= fun e ->
       let l_bar = Name.Loc (Cfg.dst e) in
       [
-        Ref.AState { state = None; name = Name.Iterate (l_bar, 0) };
-        Ref.AState { state = None; name = Name.Iterate (l_bar, 1) };
+        Ref.AState { state = None; name = Name.Iterate (0, l_bar) };
+        Ref.AState { state = None; name = Name.Iterate (1, l_bar) };
       ]
     in
     let all_refs = List.(append stmt_refs (append astate_refs cycle_refs)) in
@@ -293,7 +295,7 @@ module Make (Dom : Abstract.Dom) = struct
             let src_astate =
               lookup_name
               @@
-              if is_into_loop_body then Name.Iterate (name_of_loc (Cfg.src cfg_edge), 0)
+              if is_into_loop_body then Name.Iterate (0, name_of_loc (Cfg.src cfg_edge))
               else name_of_loc (Cfg.src cfg_edge)
             in
             (stmt, dst_astate, `Transfer) :: (src_astate, dst_astate, `Transfer) :: dcg_edges)
@@ -315,7 +317,7 @@ module Make (Dom : Abstract.Dom) = struct
       let l_bar = name_of_loc l in
       let n =
         lookup_name
-        @@ if List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.Iterate (l_bar, 0) else l_bar
+        @@ if List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.Iterate (0, l_bar) else l_bar
       in
       let ith_input i = lookup_name (Name.Prod (Name.Idx i, l_bar)) in
       forward_edges_to l >>| fun (i, _) -> (ith_input i, n, `Join)
@@ -325,8 +327,8 @@ module Make (Dom : Abstract.Dom) = struct
     let loop_comps : edge list =
       back_edges >>= fun e ->
       let l = name_of_loc (Cfg.dst e) in
-      let l0 = Name.Iterate (l, 0) in
-      let l1 = Name.Iterate (l, 1) in
+      let l0 = Name.Iterate (0, l) in
+      let l1 = Name.Iterate (1, l) in
       let iter0 = lookup_name l0 in
       let iter1 = lookup_name l1 in
       let pre_widen = lookup_name (Name.Prod (l0, l1)) in
@@ -348,24 +350,24 @@ module Make (Dom : Abstract.Dom) = struct
 
   (* TODO: handle nested loops, increasing a given loop head's iteration count and holding others constant *)
   let increment_iteration _loop_head = function
-    | Name.Iterate (n, i) -> Name.Iterate (n, i + 1)
-    | Name.Prod (Name.Iterate (n, i), Name.Iterate (n_prime, i_prime)) ->
+    | Name.Iterate (i, n) -> Name.Iterate (i + 1, n)
+    | Name.Prod (Name.Iterate (i, n), Name.Iterate (i_prime, n_prime)) ->
         (* validate that this is a properly constructed-pre-widen name before incrementing its indices *)
         assert (Name.equal n n_prime);
         assert (Int.equal (i + 1) i_prime);
-        Name.Prod (Name.Iterate (n, i_prime), Name.Iterate (n, i_prime + 1))
+        Name.Prod (Name.Iterate (i_prime, n), Name.Iterate (i_prime + 1, n))
     | n -> n
 
   (* Transform the DAIG [g] by unrolling one step further the loop whose current abstract iterate is at [curr_iter] *)
   let unroll_loop (g : t) (curr_iter : Ref.t) =
     (* First, find the entire previous unrolling [loop_edges]: all DAIG edges backwards-reachable from [curr_iter] without going through the previous iteration *)
-    let loop_head, curr_idx =
+    let curr_idx, loop_head =
       match Ref.name curr_iter with
-      | Name.Iterate (l, n) -> (l, n)
+      | Name.Iterate (n, l) -> (n, l)
       | _ -> failwith "Current iterate [curr_iter] must be an iterate."
     in
     let fixpoint = ref_by_name_exn loop_head g in
-    let prev_iter = ref_by_name_exn (Name.Iterate (loop_head, curr_idx - 1)) g in
+    let prev_iter = ref_by_name_exn (Name.Iterate (curr_idx - 1, loop_head)) g in
     let next_iter =
       Ref.AState { state = None; name = increment_iteration loop_head (Ref.name curr_iter) }
     in
@@ -495,7 +497,7 @@ module Make (Dom : Abstract.Dom) = struct
           then
             match Ref.name succ with
             | Name.Loc l -> (
-                match ref_by_name_exn Name.(Iterate (Loc l, 0)) g with
+                match ref_by_name_exn Name.(Iterate (0, Loc l)) g with
                 | Ref.AState { state = Some _; name = _ } as lh ->
                     dirty succ;
                     (lh :: succ :: f, succ :: lh_fps)
@@ -522,8 +524,8 @@ module Make (Dom : Abstract.Dom) = struct
       ~init:g
       ~f:(fun g -> function
         | Ref.AState { state = _; name = Name.Loc _ as l } as loop_fp -> (
-            let iter0 = ref_by_name_exn (Name.Iterate (l, 0)) g in
-            let iter1 = ref_by_name_exn (Name.Iterate (l, 1)) g in
+            let iter0 = ref_by_name_exn (Name.Iterate (0, l)) g in
+            let iter1 = ref_by_name_exn (Name.Iterate (1, l)) g in
             let daig =
               Seq.fold (G.Node.inputs loop_fp g) ~init:g ~f:(flip G.Edge.remove)
               |> G.Edge.insert (G.Edge.create iter0 loop_fp `Fix)
@@ -531,7 +533,7 @@ module Make (Dom : Abstract.Dom) = struct
             in
             match
               Seq.find (G.Node.succs iter1 daig) ~f:(fun r ->
-                  match Ref.name r with Name.Iterate (_, 1) -> true | _ -> false)
+                  match Ref.name r with Name.Iterate (1, _) -> true | _ -> false)
             with
             | Some root_of_dangling_unrollings ->
                 Graph.fold_reachable
@@ -546,7 +548,7 @@ module Make (Dom : Abstract.Dom) = struct
 
   let fixpoint_of astate_ref daig =
     match Ref.name astate_ref with
-    | Name.Iterate (l, _) -> (
+    | Name.Iterate (_, l) -> (
         (* loop head fixpoint postdominates all refcells in the loop, so just follow any path to find it *)
         let rec loop_head_fp refcell =
           match Ref.name refcell with
@@ -559,20 +561,20 @@ module Make (Dom : Abstract.Dom) = struct
           |> Seq.max_elt ~compare:(fun x y -> Name.compare (Ref.name x) (Ref.name y))
         in
         match Option.map ~f:Ref.name final_iterate with
-        | Some (Name.Iterate (_, k)) ->
+        | Some (Name.Iterate (k, _)) ->
             let k = Int.max 0 (pred k) in
-            get_by_name (Name.Iterate (l, k)) daig
+            get_by_name (Name.Iterate (k, l)) daig
         | _ ->
             failwith
               "error, malformed DAIG -- predecessors of the fixpoint are named in the above form" )
     | _ -> get astate_ref daig
 
   let get_by_loc l daig =
-    match ref_by_name Name.(Iterate (Loc l, 0)) daig with
-    | Some r -> fixpoint_of r daig
+    match ref_by_name (Name.Loc l) daig with
+    | Some r -> get r daig
     | None -> (
-        match ref_by_name (Name.Loc l) daig with
-        | Some r -> get r daig
+        match ref_by_name Name.(Iterate (0, Loc l)) daig with
+        | Some r -> fixpoint_of r daig
         | None ->
             dump_dot ~filename:"/Users/benno/Documents/CU/code/d1a/error_dump.dot" daig;
             failwith
@@ -598,7 +600,7 @@ module Make (Dom : Abstract.Dom) = struct
   let add_stmt src_loc dst_loc stmt daig =
     assert (not @@ Cfg.Loc.equal src_loc dst_loc);
     let dst_ref =
-      match ref_by_name Name.(Iterate (Loc dst_loc, 0)) daig with
+      match ref_by_name Name.(Iterate (0, Loc dst_loc)) daig with
       | Some r -> r
       | None -> ref_by_name_exn (Name.Loc dst_loc) daig
     in
@@ -606,7 +608,7 @@ module Make (Dom : Abstract.Dom) = struct
       match Ref.name dst_ref with
       | Name.Loc _ -> ref_by_name_exn (Name.Loc src_loc) daig
       | _ -> (
-          match ref_by_name Name.(Iterate (Loc src_loc, 0)) daig with
+          match ref_by_name Name.(Iterate (0, Loc src_loc)) daig with
           | Some r -> r
           | None -> ref_by_name_exn (Name.Loc src_loc) daig )
     in
@@ -661,14 +663,14 @@ module Make (Dom : Abstract.Dom) = struct
   let add_stmt_at (loc : Cfg.Loc.t) (stmt : Ast.Stmt.t) (daig : t) =
     (* loc is either (case 1) not in any loop, (case 2) in the body of a loop, or (case 3) a loop head *)
     let new_loc, new_loc_ref, old_loc_ref, add_stmt_before =
-      match (ref_by_name Name.(Iterate (Loc loc, 0)) daig, ref_by_name (Name.Loc loc) daig) with
+      match (ref_by_name Name.(Iterate (0, Loc loc)) daig, ref_by_name (Name.Loc loc) daig) with
       | None, Some r ->
           let new_loc = Cfg.Loc.fresh () in
           let new_loc_ref = Ref.AState { state = None; name = Name.Loc new_loc } in
           (new_loc, new_loc_ref, r, Cfg.Loc.(equal exit loc))
       | Some r, None ->
           let new_loc = Cfg.Loc.fresh () in
-          let new_loc_ref = Ref.AState { state = None; name = Name.(Iterate (Loc new_loc, 0)) } in
+          let new_loc_ref = Ref.AState { state = None; name = Name.(Iterate (0, Loc new_loc)) } in
           (new_loc, new_loc_ref, r, false)
       | Some r, Some _ ->
           let new_loc = Cfg.Loc.fresh () in
@@ -687,6 +689,11 @@ module Make (Dom : Abstract.Dom) = struct
           G.Edge.remove edge daig
           |> G.Edge.insert (G.Edge.create new_loc_ref (G.Edge.dst edge) (G.Edge.label edge)))
       |> add_stmt loc new_loc stmt
+
+  let drop_cache d =
+    match ref_by_name (Name.Loc Cfg.Loc.entry) d with
+    | Some r -> dirty_from r d
+    | None -> failwith "no reference found for entry location"
 end
 
 module Daig = Make (Incr.Make (Itv))
@@ -708,7 +715,7 @@ let%test "build dcg and issue queries: while_syntax.js" =
   let l1 = Name.Loc (Cfg.Loc.of_int_unsafe 1) in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig.dot";
-  let _, daig = Daig.get_by_name Name.(Prod (Iterate (l1, 0), Iterate (l1, 1))) daig in
+  let _, daig = Daig.get_by_name Name.(Prod (Iterate (0, l1), Iterate (1, l1))) daig in
   Daig.dump_dot daig
     ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig_straightline_demand.dot";
   let _, daig = Daig.get_by_name (Name.Loc Cfg.Loc.exit) daig in

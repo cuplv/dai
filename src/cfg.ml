@@ -32,11 +32,10 @@ module Loc = struct
 
     let reset () = next := 1
 
-    let of_int_unsafe i =
-      next := Int.max !next i;
-      i
+    let of_int_unsafe i = i
 
-    let sample () = Random.int !next
+    (** Use Caml.Random instead of Base.Random to avoid interfering with program edit generation for experiments  *)
+    let sample () = Caml.Random.int !next
 
     let fresh () =
       let curr = !next in

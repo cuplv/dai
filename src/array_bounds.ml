@@ -176,8 +176,6 @@ let interpret stmt phi =
           Some
             (am, Abstract1.assign_texpr man itv_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None)
       | None ->
-          Format.fprintf Format.err_formatter "Unable to abstractly evaluate %a; sending to top\n"
-            Ast.Expr.pp rhs;
           if Environment.mem_var env lhs then
             (* lhs was constrained, quantify that out *)
             Some (am, Abstract1.forget_array man itv [| lhs |] false)

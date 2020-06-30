@@ -35,7 +35,7 @@ let rec apply_n_times ~n ~init ~f =
 
 let time ~f ~x fs descr =
   let st = systime () in
-  f x $> fun _ -> Format.fprintf fs "%s \t%.3fms\n" descr (1000. *. (systime () -. st))
+  f x $> fun _ -> Format.fprintf fs "%s%.3fms\n" descr (1000. *. (systime () -. st))
 
 module Option = struct
   include Base.Option

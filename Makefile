@@ -5,10 +5,15 @@ default: build
 build: fmt
 	cp `find ../adapton.ocaml/ -name bits.cmx` $(OPAM_SWITCH_PREFIX)/lib/adapton
 	dune build
+	cp ./_build/default/experiments/exec.exe ./run_d1a_experiment
 
 .PHONY: test
 test: build
 	dune runtest src
+
+.PHONY: test_exps
+test_exps: build
+	dune runtest experiments
 
 .PHONY: clean
 clean:
@@ -23,7 +28,3 @@ fmt:
 .PHONY: repl
 repl:
 	dune utop
-
-.PHONY: experiments
-experiments:
-	dune runtest experiments

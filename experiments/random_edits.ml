@@ -3,11 +3,6 @@ open Import
 open Ast
 
 module Make (Dom : Abstract.Dom) = struct
-  (* Inline tests require a fixed random seed *)
-
-  ;;
-  Random.init 8675309
-
   module D = Daig.Make (Dom)
   module E = D.G.Edge
   module N = D.G.Node
@@ -16,11 +11,12 @@ module Make (Dom : Abstract.Dom) = struct
   (** add an if-then-else construct to [daig] at location [l] *)
   let add_ite_at l ~cond ~if_stmt ~else_stmt daig =
     let l_ref, iter =
-      match (D.ref_by_name (Nm.Loc l) daig, D.ref_by_name Nm.(Iterate (Loc l, 0)) daig) with
+      match (D.ref_by_name (Nm.Loc l) daig, D.ref_by_name Nm.(Iterate (0, Loc l)) daig) with
       | Some r, _ -> (r, fun n -> n)
-      | _, Some r -> (r, fun n -> Nm.(Iterate (n, 0)))
+      | _, Some r -> (r, fun n -> Nm.(Iterate (0, n)))
       | None, None -> failwith "location does not exist"
     in
+    let daig = D.dirty_from l_ref daig in
     let post_loc = Cfg.Loc.fresh () in
     let if_loc = Cfg.Loc.fresh () in
     let else_loc = Cfg.Loc.fresh () in
@@ -65,18 +61,19 @@ module Make (Dom : Abstract.Dom) = struct
 
   let add_loop_at l ~cond ~body daig =
     let l_ref, contents =
-      match (D.ref_by_name (Nm.Loc l) daig, D.ref_by_name Nm.(Iterate (Loc l, 0)) daig) with
+      match (D.ref_by_name (Nm.Loc l) daig, D.ref_by_name Nm.(Iterate (0, Loc l)) daig) with
       | Some (AState { state; name = _ } as r), None -> (r, state)
       | _ -> failwith "Can only insert loops in straightline code"
     in
+    let daig = D.dirty_from l_ref daig in
     let body_loc = Cfg.Loc.fresh () in
     let exit_loc = Cfg.Loc.fresh () in
-    let body_ref = D.Ref.AState { state = None; name = Nm.(Iterate (Loc body_loc, 0)) } in
+    let body_ref = D.Ref.AState { state = None; name = Nm.(Iterate (0, Loc body_loc)) } in
     let exit_ref = D.Ref.AState { state = None; name = Nm.Loc exit_loc } in
-    let l_zero_ref = D.Ref.AState { state = contents; name = Nm.(Iterate (Loc l, 0)) } in
-    let l_one_ref = D.Ref.AState { state = None; name = Nm.(Iterate (Loc l, 1)) } in
+    let l_zero_ref = D.Ref.AState { state = contents; name = Nm.(Iterate (0, Loc l)) } in
+    let l_one_ref = D.Ref.AState { state = None; name = Nm.(Iterate (1, Loc l)) } in
     let prewiden_ref =
-      D.Ref.AState { state = None; name = Nm.(Prod (Iterate (Loc l, 0), Iterate (Loc l, 1))) }
+      D.Ref.AState { state = None; name = Nm.(Prod (Iterate (0, Loc l), Iterate (1, Loc l))) }
     in
     let assume_stmt_ref =
       D.Ref.Stmt { stmt = Stmt.Assume cond; name = Nm.Prod (Loc l, Loc body_loc) }
@@ -227,8 +224,8 @@ module Make (Dom : Abstract.Dom) = struct
         (* no nested loops, so keep sampling locations until finding one not in any loop *)
         let l = ref (Cfg.Loc.sample ()) in
         while
-          (not (Cfg.Loc.equal !l Cfg.Loc.entry))
-          && Option.is_some (D.ref_by_name Nm.(Iterate (Loc !l, 0)) daig)
+          Cfg.Loc.equal !l Cfg.Loc.entry
+          || Option.is_some (D.ref_by_name Nm.(Iterate (0, Loc !l)) daig)
         do
           l := Cfg.Loc.sample ()
         done;
@@ -244,7 +241,7 @@ module Make (Dom : Abstract.Dom) = struct
   let issue_exit_query = D.get_by_loc Cfg.Loc.exit >> snd
 end
 
-module RE = Make (Array_bounds)
+module AB = Make (Array_bounds)
 
 let cond = Expr.Var "cond"
 
@@ -253,63 +250,68 @@ let stmt1 = Stmt.Assign { lhs = "lorem"; rhs = Expr.Lit (Lit.String "ipsum") }
 let stmt2 = Stmt.Assign { lhs = "foo"; rhs = Expr.Lit (Lit.String "bar") }
 
 let%test "add an ite before a while loop" =
+  Random.init 12345;
+
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
-  let daig = RE.D.of_cfg cfg in
-  let edited_daig = RE.add_ite_at Cfg.Loc.entry ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig in
-  RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test1.dot";
+  let daig = AB.D.of_cfg cfg in
+  let edited_daig = AB.add_ite_at Cfg.Loc.entry ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig in
+  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test1.dot";
   true
 
 let%test "add an ite inside of a while loop" =
+  Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
-  let daig = RE.D.of_cfg cfg in
+  let daig = AB.D.of_cfg cfg in
   let edited_daig =
-    RE.add_ite_at Cfg.Loc.(of_int_unsafe 2) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
+    AB.add_ite_at Cfg.Loc.(of_int_unsafe 2) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
   in
-  RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test2.dot";
+  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test2.dot";
   true
 
 let%test "add an ite inside of an ite" =
+  Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  let daig = RE.D.of_cfg cfg in
+  let daig = AB.D.of_cfg cfg in
   let edited_daig =
-    RE.add_ite_at Cfg.Loc.(of_int_unsafe 3) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
+    AB.add_ite_at Cfg.Loc.(of_int_unsafe 3) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
   in
-  RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test3.dot";
+  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test3.dot";
   true
 
 let%test "add a while inside of an ite" =
+  Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  let daig = RE.D.of_cfg cfg in
-  let edited_daig = RE.add_loop_at Cfg.Loc.(of_int_unsafe 3) ~cond ~body:stmt1 daig in
-  RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test4.dot";
+  let daig = AB.D.of_cfg cfg in
+  let edited_daig = AB.add_loop_at Cfg.Loc.(of_int_unsafe 3) ~cond ~body:stmt1 daig in
+  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test4.dot";
   true
 
 let%test "add a while in straightline code" =
+  Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  let daig = RE.D.of_cfg cfg in
-  let edited_daig = RE.add_loop_at Cfg.Loc.(of_int_unsafe 1) ~cond ~body:stmt1 daig in
-  RE.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test5.dot";
+  let daig = AB.D.of_cfg cfg in
+  let edited_daig = AB.add_loop_at Cfg.Loc.(of_int_unsafe 1) ~cond ~body:stmt1 daig in
+  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test5.dot";
   true
 
 let%test "fuzz 100 edits/queries" =
+  Random.init 12345;
   Cfg.Loc.reset ();
-  let init = RE.D.of_cfg @@ Cfg.empty () in
-  let _daig =
-    apply_n_times ~n:100 ~init ~f:(fun daig -> RE.(random_edit >> issue_random_query) daig)
-  in
+  let init = AB.D.of_cfg @@ Cfg.empty () in
+  ignore @@ apply_n_times ~n:100 ~f:(AB.random_edit >> AB.issue_random_query) ~init;
   true
