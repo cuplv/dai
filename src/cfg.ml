@@ -35,7 +35,11 @@ module Loc = struct
     let of_int_unsafe i = i
 
     (** Use Caml.Random instead of Base.Random to avoid interfering with program edit generation for experiments  *)
-    let sample () = Caml.Random.int !next
+    let sample () =
+      let s = Caml.Random.get_state () in
+      let res = Caml.Random.int !next in
+      Caml.Random.set_state s;
+      res
 
     let fresh () =
       let curr = !next in
