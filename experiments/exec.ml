@@ -31,6 +31,16 @@ let do_n_edits_and_queries =
           Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
+
+        let gc_settings = Gc.get () in
+        (* disable heap compaction entirely *)
+        gc_settings.max_overhead <- 1000000;
+        (* per docs suggestion, switch to "best-fit" allocation when heap compaction is off *)
+        gc_settings.allocation_policy <- 2;
+        (* massively increase interval between GC cycles *)
+        gc_settings.space_overhead <- 8000;
+        Gc.set gc_settings;
+
         Random.init seed;
         Cfg.Loc.reset ();
         if dd && incr then

@@ -36,10 +36,13 @@ let man = lazy (Box.manager_alloc ())
 let get_man () = Lazy.force man
 
 let combine_envs x y =
+  let man = get_man () in
+  let x = Abstract1.minimize_environment man x in
+  let y = Abstract1.minimize_environment man y in
   let new_env = Environment.lce (Abstract1.env x) (Abstract1.env y) in
   pair
-    (Abstract1.change_environment (get_man ()) x new_env false)
-    (Abstract1.change_environment (get_man ()) y new_env false)
+    (Abstract1.change_environment man x new_env false)
+    (Abstract1.change_environment man y new_env false)
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let join l r =
@@ -116,10 +119,11 @@ let mk_tcons env op l r =
   (* add tiny constant to right hand side to avoid float comparison wonkiness*)
   let r =
     if op = Tcons0.SUP then
-      Texpr1.Binop (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Rnd)
+      Texpr1.Binop
+        (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Zero)
     else r
   in
-  let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Rnd) in
+  let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Zero) in
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
 (* abstractly evaluate boolean binary operation [l op r] at interval [itv] by translating it to [(l - r) op 0]
@@ -144,7 +148,7 @@ let mk_bool_binop itv op l r =
 *)
 let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
   let open Ast in
-  let mk_arith_binop op l r = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Rnd)) in
+  let mk_arith_binop op l r = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Zero)) in
   let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
   | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
@@ -184,7 +188,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       texpr_of_expr ~fallback itv e
       >>= fun e ->
       match op with
-      | Unop.Neg -> Some (Texpr1.Unop (Texpr1.Neg, e, Texpr1.Double, Texpr0.Rnd))
+      | Unop.Neg -> Some (Texpr1.Unop (Texpr1.Neg, e, Texpr1.Double, Texpr0.Zero))
       | Unop.Not -> mk_bool_binop itv Tcons0.EQ e (Texpr1.Cst (Coeff.s_of_float 0.))
       | Unop.Plus -> Some e
       | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
@@ -257,7 +261,7 @@ let interpret stmt itv =
       let lhs = Var.of_string lhs in
       let env = Abstract1.env itv in
       let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [| lhs |] [||]
+        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
       in
       let itv_new_env = Abstract1.change_environment man itv new_env true in
       match texpr_of_expr itv rhs with

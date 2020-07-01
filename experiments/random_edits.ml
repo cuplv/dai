@@ -182,35 +182,19 @@ module Make (Dom : Abstract.Dom) = struct
     | 2 -> Expr.Unop { op = Unop.Not; e = gen_bool_expr () }
     | _ -> Expr.Var ("b" ^ Int.to_string @@ Random.int !bool_vars)
 
-  (** Generate a random array [Ast.Expr.t]; 20% chance of new array literal, 80% chance of existing array variable*)
-  let gen_array_expr () =
-    match Random.int 5 with
-    | 0 ->
-        (* no source location so just generate at random *)
-        let alloc_site = pair (Random.int 100) (Random.int 100) in
-        let elts = List.map [ (); (); (); (); () ] ~f:gen_arith_expr in
-        Expr.Array { elts; alloc_site }
-    | _ -> Expr.Var ("arr" ^ Int.to_string @@ Random.int !array_vars)
-
   (** Generate a single random [Ast.Stmt.t] with the following distribution:
-   * 40% [Assign] (x := e)
-     * 50% of assignments are to arithmetic variables, 25% each to bool/array variables
-   * 20% [Write] (x[i] := e)
-   * 10% [Skip] (skip)
-   * 10% [Throw] (throw e)
+   * 80% [Assign] (x := e)
+     * 75% of assignments are to arithmetic variables, 25% to bools
    * 10% [Assume] (assume e)
+   * 10% [Skip] (skip)
    *)
   let gen_stmt () =
     let open Ast.Stmt in
-    let i = Random.int 10 in
-    if i < 2 then Assign { lhs = gen_arith_ident (); rhs = gen_arith_expr () }
-    else if i < 3 then Assign { lhs = gen_bool_ident (); rhs = gen_bool_expr () }
-    else if i < 4 then Assign { lhs = gen_array_ident (); rhs = gen_array_expr () }
-    else if i < 6 then
-      Write { rcvr = gen_array_ident (); field = gen_arith_expr (); rhs = gen_arith_expr () }
-    else if i < 8 then Skip
-    else if i < 9 then Throw { exn = gen_arith_expr () }
-    else Assume (gen_bool_expr ())
+    match Random.int 10 with
+    | 0 -> Skip
+    | 1 -> Assume (gen_bool_expr ())
+    | 2 | 3 -> Assign { lhs = gen_bool_ident (); rhs = gen_bool_expr () }
+    | _ -> Assign { lhs = gen_arith_ident (); rhs = gen_arith_expr () }
 
   (** Edit [daig]'s underlying program at random, according to the following distribution:
       * 50% insert a statement 

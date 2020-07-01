@@ -168,7 +168,7 @@ let interpret stmt phi =
       let lhs = Var.of_string lhs in
       let env = Abstract1.env itv in
       let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [| lhs |] [||]
+        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
       in
       let itv_new_env = Abstract1.change_environment man itv new_env true in
       match texpr_of_expr rhs (am, itv) with
