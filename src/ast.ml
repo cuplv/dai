@@ -112,6 +112,15 @@ module Expr = struct
         (List.pp ", " ~pre:"[" ~suf:"]" pp) fs elts;
         Format.fprintf fs "%@(%i,%i)" line col
 
+  let rec var_uses = function
+    | Var v -> String.Set.singleton v
+    | Binop { l; op = _; r } -> Set.union (var_uses l) (var_uses r)
+    | Unop { op = _; e } -> var_uses e
+    | Deref { rcvr; field } -> Set.union (var_uses rcvr) (var_uses field)
+    | Array { elts; alloc_site = _ } ->
+        List.fold elts ~init:String.Set.empty ~f:(fun a c -> Set.union a (var_uses c))
+    | _ -> String.Set.empty
+
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
   let hash_fold_int acc curr =
     let open Ppx_hash_lib.Std in
@@ -136,6 +145,13 @@ module Stmt = struct
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
     | Skip -> Format.pp_print_string fs "skip"
+
+  let var_uses = function
+    | Assign { lhs = _; rhs } -> Expr.var_uses rhs
+    | Write { rcvr = _; field; rhs } -> Set.union (Expr.var_uses field) (Expr.var_uses rhs)
+    | Throw { exn } -> Expr.var_uses exn
+    | Expr e | Assume e -> Expr.var_uses e
+    | Skip -> String.Set.empty
 
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;

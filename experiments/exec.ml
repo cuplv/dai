@@ -41,32 +41,35 @@ let do_n_edits_and_queries =
         gc_settings.space_overhead <- 8000;
         Gc.set gc_settings;
 
-        Random.init seed;
         Cfg.Loc.reset ();
-        if dd && incr then
-          let module RE = Random_edits.Make (Incr.Make (Array_bounds)) in
+        if dd && incr then (
+          let module RE = Random_edits.Make (Incr.Make (Itv)) in
+          Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
           let f = RE.random_edit >> issue_queries in
-          ignore @@ apply_n_times ~n ~init ~f
-        else if dd then
-          let module RE = Random_edits.Make (Array_bounds) in
+          ignore @@ apply_n_times ~n ~init ~f )
+        else if dd then (
+          let module RE = Random_edits.Make (Itv) in
+          Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
             apply_n_times ~n:qpe ~init
               ~f:(RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
           let f = RE.random_edit >> issue_queries in
-          ignore @@ apply_n_times ~n ~init ~f
-        else if incr then
-          let module RE = Random_edits.Make (Incr.Make (Array_bounds)) in
+          ignore @@ apply_n_times ~n ~init ~f )
+        else if incr then (
+          let module RE = Random_edits.Make (Incr.Make (Itv)) in
+          Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let f = RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x in
-          ignore @@ apply_n_times ~n ~init ~f
+          ignore @@ apply_n_times ~n ~init ~f )
         else
-          let module RE = Random_edits.Make (Array_bounds) in
+          let module RE = Random_edits.Make (Itv) in
+          Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let f =
             RE.random_edit >> RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x

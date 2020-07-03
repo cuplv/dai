@@ -250,9 +250,19 @@ let eval_texpr itv =
   let env = Abstract1.env itv in
   Texpr1.of_expr env >> Abstract1.bound_texpr (get_man ()) itv
 
+let extend_env_by_uses stmt itv =
+  let env = Abstract1.env itv in
+  let man = get_man () in
+  Ast.Stmt.var_uses stmt
+  |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
+  |> Set.to_array |> Array.map ~f:Var.of_string
+  |> Environment.add env [||]
+  |> fun new_env -> Abstract1.change_environment man itv new_env false
+
 let interpret stmt itv =
   let open Ast.Stmt in
   let man = get_man () in
+  let itv = extend_env_by_uses stmt itv in
   match stmt with
   | Write _ | Skip | Expr _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
