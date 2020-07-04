@@ -7,7 +7,7 @@ module Make (Dom : Abstract.Dom) : Abstract.Dom = struct
   (* Lift a binary [op]eration of the abstract domain to an adapton-memoized equivalent *)
   let mk_memoized_binary_op op nm =
     let mfn = Art.mk_mfn nm (module Adapton.Types.Tuple2 (Dom) (Dom)) (fun _mfn (l, r) -> op l r) in
-    fun l r -> mfn.mfn_data (l, r)
+    fun l r -> mfn.mfn_art (l, r) |> Art.force
 
   let widen = mk_memoized_binary_op Dom.widen (Name.of_string "Dom#widen")
 
@@ -19,7 +19,7 @@ module Make (Dom : Abstract.Dom) : Abstract.Dom = struct
         (module Adapton.Types.Tuple2 (Ast.Stmt) (Dom))
         (fun _mfn (stmt, env) -> Dom.interpret stmt env)
     in
-    fun l r -> mfn.mfn_data (l, r)
+    fun l r -> mfn.mfn_art (l, r) |> Art.force
 end
 
 module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
@@ -80,7 +80,7 @@ module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
               | `F | `Neither -> None )
           | Expr _ | Skip | Write _ -> Some env)
     in
-    fun stmt -> flip ( >>= ) (fun env -> mfn.Art.mfn_data (stmt, env))
+    fun stmt -> flip ( >>= ) (fun env -> mfn.mfn_art (stmt, env) |> Art.force)
 
   let implies _x _y = failwith "todo"
 
@@ -99,7 +99,7 @@ module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
     in
     fun l r ->
       match (l, r) with
-      | Some l, Some r -> mfn.mfn_data (l, r)
+      | Some l, Some r -> mfn.mfn_art (l, r) |> Art.force
       | Some x, _ | _, Some x -> Some x
       | _ -> None
 
@@ -221,7 +221,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               | _ -> None )
           | Skip | Expr _ -> Some (env, heap))
     in
-    fun stmt -> flip ( >>= ) (fun state -> mfn.Art.mfn_data (stmt, state))
+    fun stmt -> flip ( >>= ) (fun state -> mfn.mfn_art (stmt, state) |> Art.force)
 
   let make_memoized_pointwise_binary_op nm op =
     let mfn =
@@ -240,7 +240,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     in
     fun l r ->
       match (l, r) with
-      | Some l, Some r -> mfn.mfn_data (l, r)
+      | Some l, Some r -> mfn.mfn_art (l, r) |> Art.force
       | Some x, _ | _, Some x -> Some x
       | _ -> None
 
