@@ -14,6 +14,12 @@ let ( $> ) x f =
   f x;
   x
 
+let fst3 (x, _, _) = x
+
+let snd3 (_, x, _) = x
+
+let trd3 (_, _, x) = x
+
 let uncurry f (x, y) = f x y
 
 let curry f x y = f (x, y)
@@ -24,7 +30,9 @@ let curry3 f x y z = f (x, y, z)
 
 let pair x y = (x, y)
 
-let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a@,%a)@]" a_pp a b_pp b
+let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a,%a)@]" a_pp a b_pp b
+
+let pp_triple a_pp b_pp c_pp fs (a, b, c) = Format.fprintf fs "@[(%a,%a,%a)@]" a_pp a b_pp b c_pp c
 
 let range i j =
   let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in

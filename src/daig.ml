@@ -20,9 +20,9 @@ module Name = struct
       | Loc of Cfg.Loc.t
       | Fn of Comp.t
       | Idx of int
-      | Prod of t * t
       (* todo: do something fancier (set of loop/iteration pairs?) for nested loops -- for now, assuming loop bodies are disjoint, so just one iteration count needed *)
       | Iterate of int * t
+      | Prod of t * t
     [@@deriving compare, equal, sexp_of]
 
     let rec hash : t -> int = function
@@ -190,7 +190,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Ref.Stmt _ -> [ `Color grey ])
 
   (** Directly implements the DAIG Encoding procedure; OCaml variables are labelled by LaTeX equivalents where applicable *)
-  let of_cfg (cfg : Cfg.t) : t =
+  let of_cfg ?(init_state : Dom.t = Dom.init ()) (cfg : Cfg.t) : t =
     let open List.Monad_infix in
     let name_of_edge e = Name.(Prod (Loc (Cfg.src e), Loc (Cfg.dst e))) in
     (* E_b *)
@@ -239,7 +239,7 @@ module Make (Dom : Abstract.Dom) = struct
         Seq.to_list (Cfg.G.nodes cfg) >>| fun l ->
         Ref.AState
           {
-            state = (if Cfg.Loc.(equal entry l) then Some (Dom.init ()) else None);
+            state = (if Cfg.Loc.(equal entry l) then Some init_state else None);
             name = name_of_loc l;
           }
       and pre_joins =
@@ -698,7 +698,7 @@ end
 
 module Daig = Make (Incr.Make (Itv))
 
-let%test "build dcg and dump dot: arith_syntax.js" =
+let%test "build daig and dump dot: arith_syntax.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
@@ -707,7 +707,7 @@ let%test "build dcg and dump dot: arith_syntax.js" =
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/arith_daig.dot";
   true
 
-let%test "build dcg and issue queries: while_syntax.js" =
+let%test "build daig and issue queries: while_syntax.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"

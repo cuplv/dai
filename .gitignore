@@ -1,6 +1,5 @@
 _build
-src/.merlin
-experiments/.merlin
+**/.merlin
 
 *.dot
 *.png

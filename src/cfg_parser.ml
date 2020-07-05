@@ -77,9 +77,13 @@ let assign_of_json json =
   | Some "Identifier" ->
       let lhs = ident_of_json lhs in
       Ast.Stmt.Assign { lhs; rhs }
-  | Some "Subscript" | Some "MemberAccess" ->
+  | Some "Subscript" ->
       let rcvr = member "lhs" lhs |> member "name" |> to_string in
       let field = member "rhs" lhs |> index 0 |> expr_of_json in
+      Ast.Stmt.Write { rcvr; field; rhs }
+  | Some "MemberAccess" ->
+      let rcvr = member "lhs" lhs |> member "name" |> to_string in
+      let field = member "rhs" lhs |> expr_of_json in
       Ast.Stmt.Write { rcvr; field; rhs }
   | _ -> failwith "malformed assignment JSON"
 
@@ -181,6 +185,13 @@ let%test "cfg_parse and dump dot: array_syntax.js" =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/array_syntax.js"
   in
   Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/array.dot";
+  true
+
+let%test "cfg_parse and dump dot: list_append.js" =
+  let cfg =
+    cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/list_append.js"
+  in
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/list.dot";
   true
 
 let%test "back edge classification: while_syntax.js" =

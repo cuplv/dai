@@ -1,8 +1,15 @@
 open Import
 
-module Make (Dom : Abstract.Dom) : Abstract.Dom = struct
+module Make (Dom : Abstract.Dom) : sig
+  include Abstract.Dom
+
+  val lift : Dom.t -> t
+end = struct
   module Art = Adapton.MakeArt.Of (Name) (Dom)
   include Dom
+
+  (* hack to silence typechecker and explicitly construct elements -- probably a nicer way to do this with module/type equalities, but this works.*)
+  let lift x = x
 
   (* Lift a binary [op]eration of the abstract domain to an adapton-memoized equivalent *)
   let mk_memoized_binary_op op nm =

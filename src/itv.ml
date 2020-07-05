@@ -286,7 +286,7 @@ let interpret stmt itv =
 let sanitize itv = itv
 
 let show itv =
-  pp Format.std_formatter itv;
+  pp Format.str_formatter itv;
   Format.flush_str_formatter ()
 
 let hash seed itv = seeded_hash seed @@ Abstract1.hash (get_man ()) itv
