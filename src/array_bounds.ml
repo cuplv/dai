@@ -128,8 +128,8 @@ let interpret stmt phi =
       let itv = Abstract1.change_environment man itv env false in
       Abstract1.meet man itv array_length_binding |> pair am |> Option.some
       (* the below snippet tracks actual array contents; just tracking lengths for now though
-     If tracking of contents is enabled, should also write a case for Ast.Stmt.Write, currently treated as skip.
-   *)
+         If tracking of contents is enabled, should also write a case for Ast.Stmt.Write, currently treated as skip.
+      *)
       (*
       Some
         ( am,

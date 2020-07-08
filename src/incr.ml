@@ -184,7 +184,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         | _ -> None )
     | Expr.Array _ ->
         (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
-          eval_expr so we can store elements there and then return the addr
+           eval_expr so we can store elements there and then return the addr
         *)
         failwith "array literals not supported when nested within compound expression"
 

@@ -203,7 +203,7 @@ module Make (Dom : Abstract.Dom) = struct
     (* Optional argument is used at loop heads, where there's a separate location for the 0th iterate and the fixpoint.
        When [dst] flag is set, yields the 0th iterate name, otherwise yield the fixpoint name.  This is such that flow
        into the loop head goes to the 0th iterate and flow out is from the fixpoint.
-     *)
+    *)
     let name_of_loc ?(dst = false) l =
       ( match Map.find loop_head_map l with
       | None -> Name.Loc l

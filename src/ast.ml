@@ -103,8 +103,8 @@ module Expr = struct
     match e with
     | Var v -> Format.pp_print_string fs v
     | Lit l -> Lit.pp fs l
-    (*    | Call { fn; actuals } ->
-        Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
+    (* | Call { fn; actuals } ->
+       Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
     | Deref { rcvr; field } -> Format.fprintf fs "%a[%a]" pp rcvr pp field

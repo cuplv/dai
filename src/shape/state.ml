@@ -15,12 +15,12 @@ module Pure = struct
 
   type t = pure_constraint list [@@deriving equal, compare]
 
-  (*  let pp =
-    let pp_constraint fs = function
-      | Eq (x, y) -> Format.fprintf fs "%a=%a" Memloc.pp x Memloc.pp y
-      | Neq (x, y) -> Format.fprintf fs "%a≠%a" Memloc.pp x Memloc.pp y
-    in
-    List.pp ~pre:"{" ~suf:"}" " ∧ " pp_constraint*)
+  (* let pp =
+     let pp_constraint fs = function
+       | Eq (x, y) -> Format.fprintf fs "%a=%a" Memloc.pp x Memloc.pp y
+       | Neq (x, y) -> Format.fprintf fs "%a≠%a" Memloc.pp x Memloc.pp y
+     in
+     List.pp ~pre:"{" ~suf:"}" " ∧ " pp_constraint*)
 
   (* todo: be smarter, build equivalence classes *)
   let is_bot = List.exists ~f:(function Neq (a, b) when Memloc.equal a b -> true | _ -> false)
@@ -84,7 +84,7 @@ module G = struct
       - fst: those nodes and edges of [g] UNreachable from the memloc
       - snd: those nodes and edges of [g] reachable from the memloc
       corresponds to M * M'(a ~~>) judgment of XISA paper; given a graph and an a, return (M,M')
-   *)
+  *)
   let _slice g start =
     Graph.fold_reachable
       (module G)
@@ -101,7 +101,7 @@ module G = struct
        - fst: those nodes and edges of [g] unreachable from [start] without passing through [stop]
        - snd: complement thereof
        corresponds to M * M'(a ~~> a') judgment of XISA paper; given a graph, a, and a', return (M,M')
-     *)
+  *)
   let _slice_region g start stop =
     let rec find_region frontier nodes edges =
       if Node.Set.is_empty frontier then (nodes, edges)
@@ -164,7 +164,7 @@ module GP = struct
         Format.fprintf fs "lseg(%a,%a)" Memloc.Labelled_pair.pp (Edge.src e) Memloc.Labelled_pair.pp
           (Edge.dst e)
 
-  let pp fs g = (List.pp " * " pp_edge) fs (Seq.to_list (edges g))
+  let _pp fs g = (List.pp " * " pp_edge) fs (Seq.to_list (edges g))
 
   (* assign a new address to each pair, rename nodes according to environment of widen *)
   let to_non_pair_graph_and_env (g : t) =
@@ -186,11 +186,11 @@ module GP = struct
     in
     let g = Graph.create (module G) ~nodes ~edges () in
 
-    (*    let e_alist = Env.to_alist e2 in
-    let get_var_by_addr a =
-      if Memloc.(equal null a) then "null" else
-      List.find_exn e_alist ~f:(snd >> Memloc.equal a) |> fst
-    in *)
+    (* let e_alist = Env.to_alist e2 in
+       let get_var_by_addr a =
+         if Memloc.(equal null a) then "null" else
+         List.find_exn e_alist ~f:(snd >> Memloc.equal a) |> fst
+       in *)
     let e =
       List.map nodes_with_indices ~f:(fun (i, (_, a, v)) ->
           if Memloc.(equal null a) then ("null", Memloc.null) else (v, Memloc.of_int i))
@@ -415,21 +415,21 @@ module T = struct
         match G.edge rcvr_addr g with
         | None ->
             (* pre-state has no edge from rcvr_addr;
-             - materialize a new address
-             - bind lhs variable to it
-             - draw a next-ptr edge from rcvr_addr to it
-          *)
+               - materialize a new address
+               - bind lhs variable to it
+               - draw a next-ptr edge from rcvr_addr to it
+            *)
             let next_addr = Memloc.fresh () in
             let next_edge = G.Edge.create rcvr_addr next_addr `Next_ptr in
             let env = Env.update e lhs ~f:(fun _ -> next_addr) in
             (G.Edge.insert next_edge g, p, env)
         | Some smry when Edge_type.equal `List_seg (G.Edge.label smry) ->
             (* pre-state has a summary edge from rcvr_addr;
-            - materialize a new address
-            - bind lhs variable to it
-            - draw a next-ptr edge from rcvr_addr to it
-            - draw a summary edge from it to target of original summary edge
-          *)
+               - materialize a new address
+               - bind lhs variable to it
+               - draw a next-ptr edge from rcvr_addr to it
+               - draw a summary edge from it to target of original summary edge
+            *)
             let next_addr = Memloc.fresh () in
             let next_edge = G.Edge.create rcvr_addr next_addr `Next_ptr in
             let new_smry = G.Edge.create next_addr (G.Edge.dst smry) `List_seg in
@@ -438,8 +438,8 @@ module T = struct
             (g, p, env)
         | Some next ->
             (* pre-state has a next ptr edge from rcvr addr;
-            - bind lhs variable to its destination
-          *)
+               - bind lhs variable to its destination
+            *)
             (g, p, Env.update e lhs ~f:(fun _ -> G.Edge.dst next)) )
     | Stmt.Write { rcvr; field = Expr.Var "next"; rhs } -> (
         let g, e, rcvr_addr =
