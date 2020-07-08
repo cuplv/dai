@@ -164,4 +164,6 @@ module Stmt = struct
     Format.flush_str_formatter ()
 
   let hash = seeded_hash
+
+  let skip = Skip
 end

@@ -22,6 +22,8 @@ end
 (* Keep a map of variable names to array abstract addresses, along with an APRON interval. None indicates bottom. *)
 type t = (Addr_map.t * Itv.t) option [@@deriving compare]
 
+module Stmt = Ast.Stmt
+
 let is_bot = Option.fold ~init:true ~f:(fun _ (_, itv) -> Itv.is_bot itv)
 
 let init () = pair (Map.empty (module String)) (Itv.init ()) |> Option.some
@@ -202,6 +204,24 @@ let hash_fold_t seed = function
       let i_hash = Itv.hash_fold_t seed i in
       Ppx_hash_lib.Std.Hash.fold_int i_hash (Addr.Abstract.hash 13 a)
   | None -> seed
+
+open Ast
+
+let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
+  let rec expr_derefs = function
+    | Expr.Deref { rcvr = _; field = Expr.Var "length" } -> []
+    | Expr.Deref { rcvr; field } -> [ (rcvr, field) ]
+    | Expr.Lit _ | Expr.Var _ -> []
+    | Expr.Binop { l; op = _; r } -> List.append (expr_derefs l) (expr_derefs r)
+    | Expr.Unop { op = _; e } -> expr_derefs e
+    | Expr.Array { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
+  in
+  function
+  | Assign { lhs = _; rhs } -> expr_derefs rhs
+  | Write { rcvr; field; rhs } -> (Expr.Var rcvr, field) :: expr_derefs rhs
+  | Throw { exn } -> expr_derefs exn
+  | Expr e | Assume e -> expr_derefs e
+  | Skip -> []
 
 (** Some(true/false) indicates [idx] is definitely in/out-side of [addr]'s bounds;
     None indicates it could be either

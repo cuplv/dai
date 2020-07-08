@@ -43,6 +43,8 @@ module Name = struct
     let to_string n =
       pp Format.str_formatter n;
       Format.flush_str_formatter ()
+
+    let is_iterate = function Iterate _ -> true | _ -> false
   end
 
   include T
@@ -81,7 +83,7 @@ module Make (Dom : Abstract.Dom) = struct
   module Ref = struct
     module T = struct
       type t =
-        | Stmt of { mutable stmt : Ast.Stmt.t; name : Name.t }
+        | Stmt of { mutable stmt : Dom.Stmt.t; name : Name.t }
         | AState of { mutable state : Dom.t option; name : Name.t }
       [@@deriving sexp_of]
 
@@ -98,7 +100,7 @@ module Make (Dom : Abstract.Dom) = struct
         | _ -> Name.compare (name r1) (name r2)
 
       let pp fs = function
-        | Stmt { stmt; name } -> Format.fprintf fs "%a[%a]" Name.pp name Ast.Stmt.pp stmt
+        | Stmt { stmt; name } -> Format.fprintf fs "%a[%a]" Name.pp name Dom.Stmt.pp stmt
         | AState { state = Some s; name } -> Format.fprintf fs "%a[%a]" Name.pp name Dom.pp s
         | AState { state = None; name } -> Format.fprintf fs "%a[???]" Name.pp name
 
@@ -155,6 +157,7 @@ module Make (Dom : Abstract.Dom) = struct
   end
 
   module G = Graph.Make (Opaque_ref) (Comp)
+  module Cfg = Cfg.Make (Dom.Stmt)
 
   type t = G.t
 
@@ -190,7 +193,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Ref.Stmt _ -> [ `Color grey ])
 
   (** Directly implements the DAIG Encoding procedure; OCaml variables are labelled by LaTeX equivalents where applicable *)
-  let of_cfg ?(init_state : Dom.t = Dom.init ()) (cfg : Cfg.t) : t =
+  let of_cfg ?(init_state : Dom.t = Dom.init ()) (cfg : Cfg.G.t) : t =
     let open List.Monad_infix in
     let name_of_edge e = Name.(Prod (Loc (Cfg.src e), Loc (Cfg.dst e))) in
     (* E_b *)
@@ -347,6 +350,10 @@ module Make (Dom : Abstract.Dom) = struct
       ~nodes:all_refs
       ~edges:List.(append transfer_comps (append join_comps loop_comps))
       ()
+
+  let of_js_cfg_unsafe ?(init_state : Dom.t = Dom.init ()) (cfg : Cfg_parser.JsCfg.G.t) : t =
+    let cast_cfg : Cfg.G.t = Obj.magic cfg in
+    of_cfg ~init_state cast_cfg
 
   (* TODO: handle nested loops, increasing a given loop head's iteration count and holding others constant *)
   let increment_iteration _loop_head = function
@@ -558,6 +565,7 @@ module Make (Dom : Abstract.Dom) = struct
         let loop_head_fp, daig = get (loop_head_fp astate_ref) daig in
         let final_iterate =
           G.Node.preds loop_head_fp daig
+          |> Seq.filter ~f:(Ref.name >> Name.is_iterate)
           |> Seq.max_elt ~compare:(fun x y -> Name.compare (Ref.name x) (Ref.name y))
         in
         match Option.map ~f:Ref.name final_iterate with
@@ -582,7 +590,7 @@ module Make (Dom : Abstract.Dom) = struct
         )
 
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
-  let edit_stmt (r : Ref.t) (stmt : Ast.Stmt.t) (g : t) =
+  let edit_stmt (r : Ref.t) (stmt : Dom.Stmt.t) (g : t) =
     match r with
     | Ref.Stmt cell ->
         cell.stmt <- stmt;
@@ -593,7 +601,7 @@ module Make (Dom : Abstract.Dom) = struct
   (** IMPURE -- see [edit_stmt] *)
   let delete_stmt (nm : Name.t) (g : t) =
     match ref_by_name nm g with
-    | Some r -> edit_stmt r Ast.Stmt.Skip g
+    | Some r -> edit_stmt r Dom.Stmt.skip g
     | None -> failwith "can't delete non-existent reference"
 
   (** add a statement*)
@@ -660,7 +668,7 @@ module Make (Dom : Abstract.Dom) = struct
     dirty_from dst_ref new_daig
 
   (*insert a new [stmt] at a control [loc] *)
-  let add_stmt_at (loc : Cfg.Loc.t) (stmt : Ast.Stmt.t) (daig : t) =
+  let add_stmt_at (loc : Cfg.Loc.t) (stmt : Dom.Stmt.t) (daig : t) =
     (* loc is either (case 1) not in any loop, (case 2) in the body of a loop, or (case 3) a loop head *)
     let new_loc, new_loc_ref, old_loc_ref, add_stmt_before =
       match (ref_by_name Name.(Iterate (0, Loc loc)) daig, ref_by_name (Name.Loc loc) daig) with
@@ -696,14 +704,15 @@ module Make (Dom : Abstract.Dom) = struct
     | None -> failwith "no reference found for entry location"
 end
 
-module Daig = Make (Incr.Make (Itv))
+module Dom = Incr.Make (Itv)
+module Daig = Make (Dom)
 
 let%test "build daig and dump dot: arith_syntax.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
       "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  let daig = Daig.of_cfg cfg in
+  let daig = Daig.of_js_cfg_unsafe cfg in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/arith_daig.dot";
   true
 
@@ -713,13 +722,13 @@ let%test "build daig and issue queries: while_syntax.js" =
       "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
   let l1 = Name.Loc (Cfg.Loc.of_int_unsafe 1) in
-  let daig = Daig.of_cfg cfg in
+  let daig = Daig.of_js_cfg_unsafe cfg in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig.dot";
   let _, daig = Daig.get_by_name Name.(Prod (Iterate (0, l1), Iterate (1, l1))) daig in
   Daig.dump_dot daig
     ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig_straightline_demand.dot";
   let _, daig = Daig.get_by_name (Name.Loc Cfg.Loc.exit) daig in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig_loop_demand.dot";
-  let daig = Daig.add_stmt_at (Cfg.Loc.of_int_unsafe 2) Ast.Stmt.Skip daig in
+  let daig = Daig.add_stmt_at (Cfg.Loc.of_int_unsafe 2) Dom.Stmt.skip daig in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/w_e1.dot";
   true

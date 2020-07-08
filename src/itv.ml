@@ -31,6 +31,8 @@ open Option.Monad_infix
 
 type t = Box.t Abstract1.t
 
+module Stmt = Ast.Stmt
+
 let man = lazy (Box.manager_alloc ())
 
 let get_man () = Lazy.force man

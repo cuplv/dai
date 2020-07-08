@@ -202,6 +202,8 @@ end
 module T = struct
   type t = G.t * Pure.t * Env.t [@@deriving equal, compare]
 
+  module Stmt = D1a.Ast.Stmt
+
   let init =
     Graph.create (module G) ~nodes:[ Memloc.null ] ~edges:[] >> fun g ->
     (g, [], Env.empty |> Env.add_exn ~key:"null" ~data:Memloc.null)
@@ -565,7 +567,7 @@ let%test "build daig and dump dot: list_append.js" =
       ()
   in
   let init_state = IncrT.lift (mem, [], env) in
-  let daig = Daig.of_cfg ~init_state cfg in
+  let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
   Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/list_daig.dot";
   let query_loc = D1a.Daig.Name.(Iterate (1, Loc (D1a.Cfg.Loc.of_int_unsafe 2))) in
   let _, daig = Daig.get_by_name query_loc daig in

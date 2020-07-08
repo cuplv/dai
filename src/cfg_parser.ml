@@ -89,7 +89,9 @@ let assign_of_json json =
 
 type edge_list = (Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t) list
 
-let cfg_of_json json : Cfg.t =
+module JsCfg = Cfg.Make (Ast.Stmt)
+
+let cfg_of_json json =
   let rec edge_list_of_json entry exit ret json : edge_list =
     match member "term" json |> to_string_option with
     | Some "Statements" ->
@@ -162,7 +164,7 @@ let cfg_of_json json : Cfg.t =
   in
   Cfg.Loc.reset ();
   Graph.create
-    (module Cfg.G)
+    (module JsCfg.G)
     ~edges:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit Cfg.Loc.exit json)
     ()
 
@@ -170,28 +172,28 @@ let%test "cfg_parse and dump dot: arith_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith.dot";
+  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith.dot";
   true
 
 let%test "cfg_parse and dump dot: while_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot";
+  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot";
   true
 
 let%test "cfg_parse and dump dot: array_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/array_syntax.js"
   in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/array.dot";
+  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/array.dot";
   true
 
 let%test "cfg_parse and dump dot: list_append.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/list_append.js"
   in
-  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/list.dot";
+  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/list.dot";
   true
 
 let%test "back edge classification: while_syntax.js" =
@@ -200,27 +202,7 @@ let%test "back edge classification: while_syntax.js" =
   in
   Int.equal 1
   @@ Graph.depth_first_search
-       (module Cfg.G)
+       (module JsCfg.G)
        ~start:Cfg.Loc.entry
        ~leave_edge:(function `Back -> fun _e acc -> acc + 1 | _ -> fun _e acc -> acc)
        ~init:0 cfg
-
-module Soc_interpreter = Cfg.Interpreter (Set_of_concrete.Env)
-
-let%test "collecting semantics: arith_syntax.js" =
-  let cfg =
-    cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
-  in
-  let collection = Soc_interpreter.collect cfg in
-  match Set.find collection ~f:(fst >> Cfg.Loc.equal Cfg.Loc.exit) with
-  | Some (_, state) ->
-      let expected =
-        Sexp.(
-          List
-            [
-              List [ Atom "b"; List [ List [ Atom "Bool"; Atom "true" ] ] ];
-              List [ Atom "x"; List [ List [ Atom "Float"; Atom "1" ] ] ];
-            ])
-      in
-      Sexp.equal expected (Set_of_concrete.Env.sexp_of_t state)
-  | None -> false

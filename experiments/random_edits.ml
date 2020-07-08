@@ -2,7 +2,7 @@ open D1a
 open Import
 open Ast
 
-module Make (Dom : Abstract.Dom) = struct
+module Make (Dom : D1a.Abstract.Dom with type Stmt.t = Ast.Stmt.t) = struct
   module D = Daig.Make (Dom)
   module E = D.G.Edge
   module N = D.G.Node
@@ -225,7 +225,7 @@ module Make (Dom : Abstract.Dom) = struct
   let issue_exit_query = D.get_by_loc Cfg.Loc.exit >> snd
 end
 
-module AB = Make (Array_bounds)
+(*module AB = Make (Array_bounds)
 
 let cond = Expr.Var "cond"
 
@@ -299,3 +299,4 @@ let%test "fuzz 100 edits/queries" =
   let init = AB.D.of_cfg @@ Cfg.empty () in
   ignore @@ apply_n_times ~n:100 ~f:(AB.random_edit >> AB.issue_random_query) ~init;
   true
+ *)

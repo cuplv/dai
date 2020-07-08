@@ -29,12 +29,23 @@ module type Dom = sig
 
   include Adapton.Data.S with type t := t
 
+  module Stmt : sig
+    type t [@@deriving compare, equal, sexp_of]
+
+    (*    val pp : t pp*)
+    val to_string : t -> string
+
+    val skip : t
+
+    include Adapton.Data.S with type t := t
+  end
+
   val pp : t pp
 
   (* [unit -> t] type allows for lazy apron manager allocation, unlike [t] *)
   val init : unit -> t
 
-  val interpret : Ast.Stmt.t -> t -> t
+  val interpret : Stmt.t -> t -> t
 
   val implies : t -> t -> bool
 

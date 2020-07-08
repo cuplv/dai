@@ -6,27 +6,13 @@ open Ast
 module Arr_bounds_check = struct
   include Daig.Make (Array_bounds)
 
-  let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
-    let rec expr_derefs = function
-      | Expr.Deref { rcvr = _; field = Expr.Var "length" } -> []
-      | Expr.Deref { rcvr; field } -> [ (rcvr, field) ]
-      | Expr.Lit _ | Expr.Var _ -> []
-      | Expr.Binop { l; op = _; r } -> List.append (expr_derefs l) (expr_derefs r)
-      | Expr.Unop { op = _; e } -> expr_derefs e
-      | Expr.Array { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
-    in
-    function
-    | Assign { lhs = _; rhs } -> expr_derefs rhs
-    | Write { rcvr; field; rhs } -> (Expr.Var rcvr, field) :: expr_derefs rhs
-    | Throw { exn } -> expr_derefs exn
-    | Expr e | Assume e -> expr_derefs e
-    | Skip -> []
-
   let check_all_accesses daig fs =
     let candidates : ((Expr.t * Expr.t) list * Ref.t) Seq.t =
       Seq.filter_map (G.nodes daig) ~f:(function
         | Ref.Stmt { stmt; name = _ } as refcell -> (
-            match array_accesses stmt with [] -> None | accesses -> Some (accesses, refcell) )
+            match Array_bounds.array_accesses stmt with
+            | [] -> None
+            | accesses -> Some (accesses, refcell) )
         | _ -> None)
     in
     Seq.fold candidates ~init:daig ~f:(fun daig (accesses, stmt_ref) ->
@@ -62,8 +48,7 @@ end
 
 let test_array_accesses id =
   let cfg = (Util.test_case >> json_of_file >> cfg_of_json) id in
-  Cfg.dump_dot cfg ~filename:(Util.cfg_output id);
-  let daig = Arr_bounds_check.of_cfg cfg in
+  let daig = Arr_bounds_check.of_js_cfg_unsafe cfg in
   Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output id);
   let fs =
     Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.log_output id)

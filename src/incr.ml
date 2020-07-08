@@ -1,7 +1,9 @@
 open Import
 
-module Make (Dom : Abstract.Dom) : sig
+module Make (Dom : sig
   include Abstract.Dom
+end) : sig
+  include Abstract.Dom with type Stmt.t = Dom.Stmt.t
 
   val lift : Dom.t -> t
 end = struct
@@ -23,16 +25,19 @@ end = struct
   let interpret =
     let mfn =
       Art.mk_mfn (Name.of_string "Dom#interpret")
-        (module Adapton.Types.Tuple2 (Ast.Stmt) (Dom))
+        (module Adapton.Types.Tuple2 (Dom.Stmt) (Dom))
         (fun _mfn (stmt, env) -> Dom.interpret stmt env)
     in
     fun l r -> mfn.mfn_art (l, r) |> Art.force
 end
 
-module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
+module Make_env (Val : Abstract.Val) : sig
+  include Abstract.Dom
+end = struct
   module Env = Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (Val)
   include Adapton.Types.Option (Env)
   module Art = Adapton.MakeArt.Of (Name) (Adapton.Types.Option (Env))
+  module Stmt = Ast.Stmt
 
   let sexp_of_t =
     let open Sexp in
@@ -73,7 +78,7 @@ module Make_env (Val : Abstract.Val) : Abstract.Dom = struct
   let interpret =
     let mfn =
       Art.mk_mfn (Name.of_string "Dom#interpret")
-        (module Adapton.Types.Tuple2 (Ast.Stmt) (Env))
+        (module Adapton.Types.Tuple2 (Stmt) (Env))
         (fun _mfn (stmt, env) ->
           let open Ast.Stmt in
           match stmt with
@@ -146,6 +151,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
   module AState = Adapton.Types.Tuple2 (Env) (Heap)
   include Adapton.Types.Option (AState)
   module Art = Adapton.MakeArt.Of (Name) (Adapton.Types.Option (AState))
+  module Stmt = Ast.Stmt
 
   let hash_fold_t seed = hash 0 >> Ppx_hash_lib.Std.Hash.fold_int seed
 
