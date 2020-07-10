@@ -27,18 +27,16 @@ module Arr_bounds_check = struct
                 function
                 | Stmt _ -> failwith "unreachable by preceding filter on Ref.is_astate"
                 | AState _ as astate_ref ->
-                    time fs "computing abstract state and checking safety" ~x:astate_ref
-                      ~f:(fun astate_ref ->
-                        let astate_ref, daig = fixpoint_of astate_ref daig in
-                        let _ = Ref.astate_exn astate_ref in
-                        Format.fprintf fs
-                          ( match Array_bounds.is_safe rcvr field (Ref.astate_exn astate_ref) with
-                          | Some true -> "SAFE\t (Array access %s[%a] of statement at %a)\n"
-                          | Some false -> "UNSAFE\t (Array access %s[%a] of statement at %a)\n"
-                          | None -> "UNKNOWN\t (Array access %s[%a] of statement at %a)\n" )
-                          rcvr Expr.pp field Daig.Name.pp (Ref.name stmt_ref);
+                    let astate_ref, daig = fixpoint_of astate_ref daig in
+                    let _ = Ref.astate_exn astate_ref in
+                    Format.fprintf fs
+                      ( match Array_bounds.is_safe rcvr field (Ref.astate_exn astate_ref) with
+                      | Some true -> "SAFE\t (Array  access %s[%a] of statement at %a)\n"
+                      | Some false -> "UNSAFE\t (Array access %s[%a] of statement at %a)\n"
+                      | None -> "UNKNOWN\t (Array access %s[%a] of statement at %a)\n" )
+                      rcvr Expr.pp field Daig.Name.pp (Ref.name stmt_ref);
 
-                        daig))
+                    daig)
           | rcvr, field ->
               Format.fprintf fs
                 "UNKNOWN\t(Array access %a[%a] of statement at %a has too complex of a receiver)\n"

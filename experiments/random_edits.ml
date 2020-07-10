@@ -167,7 +167,7 @@ module Make (Dom : D1a.Abstract.Dom with type Stmt.t = Ast.Stmt.t) = struct
   let rec gen_bool_expr () =
     let open Ast in
     match Random.int 4 with
-    | 0 -> Expr.Lit (Lit.Bool (Random.bool ()))
+    (*    | 0 -> Expr.Lit (Lit.Bool (Random.bool ()))*)
     | 1 ->
         let op =
           match Random.int 6 with
@@ -204,16 +204,16 @@ module Make (Dom : D1a.Abstract.Dom with type Stmt.t = Ast.Stmt.t) = struct
    *)
   let random_edit daig =
     match Random.int 10 with
-    | 0 ->
-        (* no nested loops, so keep sampling locations until finding one not in any loop *)
-        let l = ref (Cfg.Loc.sample ()) in
-        while
-          Cfg.Loc.equal !l Cfg.Loc.entry
-          || Option.is_some (D.ref_by_name Nm.(Iterate (0, Loc !l)) daig)
-        do
-          l := Cfg.Loc.sample ()
-        done;
-        add_loop_at !l ~cond:(gen_bool_expr ()) ~body:(gen_stmt ()) daig
+    (* | 0 ->
+       (* no nested loops, so keep sampling locations until finding one not in any loop *)
+       let l = ref (Cfg.Loc.sample ()) in
+       while
+         Cfg.Loc.equal !l Cfg.Loc.entry
+         || Option.is_some (D.ref_by_name Nm.(Iterate (0, Loc !l)) daig)
+       do
+         l := Cfg.Loc.sample ()
+       done;
+       add_loop_at !l ~cond:(gen_bool_expr ()) ~body:(gen_stmt ()) daig*)
     | 1 | 2 ->
         add_ite_at (Cfg.Loc.sample ()) ~cond:(gen_bool_expr ()) ~if_stmt:(gen_stmt ())
           ~else_stmt:(gen_stmt ()) daig

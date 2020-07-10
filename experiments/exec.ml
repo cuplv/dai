@@ -21,13 +21,13 @@ let do_n_edits_and_queries =
       in
       fun () ->
         (* unique output stream for this run, named by parameters*)
+        let filename =
+          (if dd then "dd_" ^ Int.to_string qpe ^ "qpe_" else "")
+          ^ (if incr then "incr_" else "")
+          ^ ("n" ^ Int.to_string n ^ "_")
+          ^ "seed" ^ Int.to_string seed
+        in
         let fs_out =
-          let filename =
-            (if dd then "dd_" ^ Int.to_string qpe ^ "qpe_" else "")
-            ^ (if incr then "incr_" else "")
-            ^ ("n" ^ Int.to_string n ^ "_")
-            ^ "seed" ^ Int.to_string seed
-          in
           Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
@@ -50,7 +50,8 @@ let do_n_edits_and_queries =
             apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
           let f = RE.random_edit >> issue_queries in
-          ignore @@ apply_n_times ~n ~init ~f )
+          let daig = apply_n_times ~n ~init ~f in
+          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if dd then (
           let module RE = Random_edits.Make (Itv) in
           Random.init seed;
@@ -60,13 +61,15 @@ let do_n_edits_and_queries =
               ~f:(RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
           let f = RE.random_edit >> issue_queries in
-          ignore @@ apply_n_times ~n ~init ~f )
+          let daig = apply_n_times ~n ~init ~f in
+          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if incr then (
           let module RE = Random_edits.Make (Incr.Make (Itv)) in
           Random.init seed;
           let init = RE.D.of_cfg @@ RE.D.Cfg.empty () in
           let f = RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x in
-          ignore @@ apply_n_times ~n ~init ~f )
+          let daig = apply_n_times ~n ~init ~f in
+          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else
           let module RE = Random_edits.Make (Itv) in
           Random.init seed;
@@ -74,6 +77,7 @@ let do_n_edits_and_queries =
           let f =
             RE.random_edit >> RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x
           in
-          ignore @@ apply_n_times ~n ~init ~f]
+          let daig = apply_n_times ~n ~init ~f in
+          RE.D.dump_dot ~filename:(Util.daig_output filename) daig]
 
 let () = Command.run ~version:"0.1" do_n_edits_and_queries
