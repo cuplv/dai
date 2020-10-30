@@ -1,6 +1,6 @@
 open Apron
 
-include Abstract.Dom with type t = Box.t Abstract1.t and type Stmt.t = Ast.Stmt.t
+include Abstract.DomNoCtx with type t = Box.t Abstract1.t
 
 val get_man : unit -> Box.t Manager.t
 

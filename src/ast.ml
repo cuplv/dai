@@ -103,8 +103,6 @@ module Expr = struct
     match e with
     | Var v -> Format.pp_print_string fs v
     | Lit l -> Lit.pp fs l
-    (* | Call { fn; actuals } ->
-       Format.fprintf fs "%a(%a)" pp fn (List.pp ",@ " pp) actuals*)
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
     | Deref { rcvr; field } -> Format.fprintf fs "%a[%a]" pp rcvr pp field
@@ -112,13 +110,16 @@ module Expr = struct
         (List.pp ", " ~pre:"[" ~suf:"]" pp) fs elts;
         Format.fprintf fs "%@(%i,%i)" line col
 
-  let rec var_uses = function
+  let rec uses =
+    let uses_in_list exprs =
+      List.fold exprs ~init:String.Set.empty ~f:(fun a c -> Set.union a (uses c))
+    in
+    function
     | Var v -> String.Set.singleton v
-    | Binop { l; op = _; r } -> Set.union (var_uses l) (var_uses r)
-    | Unop { op = _; e } -> var_uses e
-    | Deref { rcvr; field } -> Set.union (var_uses rcvr) (var_uses field)
-    | Array { elts; alloc_site = _ } ->
-        List.fold elts ~init:String.Set.empty ~f:(fun a c -> Set.union a (var_uses c))
+    | Binop { l; op = _; r } -> Set.union (uses l) (uses r)
+    | Unop { op = _; e } -> uses e
+    | Deref { rcvr; field } -> Set.union (uses rcvr) (uses field)
+    | Array { elts; alloc_site = _ } -> uses_in_list elts
     | _ -> String.Set.empty
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
@@ -131,27 +132,34 @@ module Stmt = struct
   type t =
     | Assign of { lhs : string; rhs : Expr.t }
     | Write of { rcvr : string; field : Expr.t; rhs : Expr.t }
+    | Call of { lhs : string; fn : string; actuals : Expr.t list }
     | Throw of { exn : Expr.t }
     | Expr of Expr.t
     | Assume of Expr.t
     | Skip
-  [@@deriving compare, equal, sexp_of]
+  [@@deriving compare, equal, hash, sexp_of]
 
   let pp fs stmt =
     match stmt with
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
     | Write { rcvr; field; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp field Expr.pp rhs
+    | Call { lhs; fn; actuals } ->
+        Format.fprintf fs "%s := %s(%a)" lhs fn (List.pp ",@ " Expr.pp) actuals
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
     | Skip -> Format.pp_print_string fs "skip"
 
-  let var_uses = function
-    | Assign { lhs = _; rhs } -> Expr.var_uses rhs
-    | Write { rcvr = _; field; rhs } -> Set.union (Expr.var_uses field) (Expr.var_uses rhs)
-    | Throw { exn } -> Expr.var_uses exn
-    | Expr e | Assume e -> Expr.var_uses e
+  let uses = function
+    | Assign { lhs = _; rhs } -> Expr.uses rhs
+    | Write { rcvr = _; field; rhs } -> Set.union (Expr.uses field) (Expr.uses rhs)
+    | Call { lhs = _; fn = _; actuals } ->
+        List.fold actuals ~init:String.Set.empty ~f:(fun a c -> Set.union a (Expr.uses c))
+    | Throw { exn } -> Expr.uses exn
+    | Expr e | Assume e -> Expr.uses e
     | Skip -> String.Set.empty
+
+  let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None
 
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;

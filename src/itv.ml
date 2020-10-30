@@ -255,7 +255,7 @@ let eval_texpr itv =
 let extend_env_by_uses stmt itv =
   let env = Abstract1.env itv in
   let man = get_man () in
-  Ast.Stmt.var_uses stmt
+  Ast.Stmt.uses stmt
   |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   |> Set.to_array |> Array.map ~f:Var.of_string
   |> Environment.add env [||]
@@ -266,7 +266,7 @@ let interpret stmt itv =
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
-  | Write _ | Skip | Expr _ -> itv
+  | Write _ | Skip | Expr _ | Call _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
   | Assume e -> meet_with_constraint itv e
   | Assign { lhs; rhs } -> (
@@ -296,3 +296,23 @@ let hash seed itv = seeded_hash seed @@ Abstract1.hash (get_man ()) itv
 let compare _l _r = failwith "todo"
 
 let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
+
+let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
+  match callsite with
+  | Ast.Stmt.Call { lhs; _ } ->
+      let man = get_man () in
+      let lhs = Var.of_string lhs in
+      let env = Abstract1.env caller_state in
+      let new_env =
+        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
+      in
+      let caller_state = Abstract1.change_environment man caller_state new_env false in
+      let return_val = Abstract1.bound_variable man return_state (Var.of_string "RETVAL") in
+      Abstract1.assign_texpr man caller_state lhs
+        Texpr1.(of_expr new_env (Cst (Coeff.Interval return_val)))
+        None
+  | _ -> failwith "malformed callsite"
+
+(*let project ~vars itv =
+  let env = Environment.make [||] (List.map ~f:Var.of_string vars |> Array.of_list) in
+  Abstract1.change_environment (get_man ()) itv env false*)

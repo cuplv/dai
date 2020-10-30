@@ -22,8 +22,6 @@ end
 (* Keep a map of variable names to array abstract addresses, along with an APRON interval. None indicates bottom. *)
 type t = (Addr_map.t * Itv.t) option [@@deriving compare]
 
-module Stmt = Ast.Stmt
-
 let is_bot = Option.fold ~init:true ~f:(fun _ (_, itv) -> Itv.is_bot itv)
 
 let init () = pair (Map.empty (module String)) (Itv.init ()) |> Option.some
@@ -101,7 +99,7 @@ let texpr_of_expr expr (am, itv) =
 let extend_env_with_uses stmt (am, itv) =
   let env = Abstract1.env itv in
   let man = Itv.get_man () in
-  Ast.Stmt.var_uses stmt
+  Ast.Stmt.uses stmt
   |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   |> Set.to_array |> Array.map ~f:Var.of_string
   |> Environment.add env [||]
@@ -172,7 +170,7 @@ let interpret stmt phi =
       match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
       | itv when Abstract1.is_bottom man itv -> None
       | itv -> Some (am, itv) )
-  | Expr _ | Write _ | Skip -> Some (am, itv)
+  | Expr _ | Write _ | Skip | Call _ -> Some (am, itv)
 
 let pp = Option.pp (pp_pair Addr_map.pp Itv.pp) "bottom"
 
@@ -221,6 +219,7 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   | Write { rcvr; field; rhs } -> (Expr.Var rcvr, field) :: expr_derefs rhs
   | Throw { exn } -> expr_derefs exn
   | Expr e | Assume e -> expr_derefs e
+  | Call { actuals; _ } -> List.bind actuals ~f:expr_derefs
   | Skip -> []
 
 (** Some(true/false) indicates [idx] is definitely in/out-side of [addr]'s bounds;
@@ -254,3 +253,5 @@ let is_safe var idx state =
         |> List.map ~f:(fun a -> is_in_bounds a idx itv)
         |> List.reduce_exn ~f:(fun x y ->
                match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
+
+let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ = failwith "todo"

@@ -24,28 +24,17 @@ module type Val = sig
   val models : t -> Ast.Lit.t -> bool
 end
 
-module type Dom = sig
+module type DomNoCtx = sig
   type t [@@deriving compare, equal, hash, sexp]
 
   include Adapton.Data.S with type t := t
-
-  module Stmt : sig
-    type t [@@deriving compare, equal, sexp_of]
-
-    (*    val pp : t pp*)
-    val to_string : t -> string
-
-    val skip : t
-
-    include Adapton.Data.S with type t := t
-  end
 
   val pp : t pp
 
   (* [unit -> t] type allows for lazy apron manager allocation, unlike [t] *)
   val init : unit -> t
 
-  val interpret : Stmt.t -> t -> t
+  val interpret : Ast.Stmt.t -> t -> t
 
   val implies : t -> t -> bool
 
@@ -54,4 +43,28 @@ module type Dom = sig
   val widen : t -> t -> t
 
   val is_bot : t -> bool
+
+  (*  val forget : var:string -> t -> t*)
+  (* TODO: rename [project] to [project_locals]? For handling heap side effects in interprocedural shape analysis, might be an important distinction.*)
+  (* val project : vars:string list -> t -> t *)
+  val handle_return :
+    caller_state:t -> return_state:t -> callsite:Ast.Stmt.t -> callee_defs:string list -> t
+end
+
+module type Dom = sig
+  include DomNoCtx
+
+  module Ctx : sig
+    type dom = t
+
+    type t [@@deriving compare, equal, hash, sexp_of]
+
+    include Adapton.Data.S with type t := t
+
+    val pp : t pp
+
+    val init : t
+
+    val callee_ctx : caller_state:dom -> callsite:Ast.Stmt.t -> ctx:t -> t
+  end
 end

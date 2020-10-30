@@ -1,9 +1,9 @@
 open Import
 
 module Make (Dom : sig
-  include Abstract.Dom
+  include Abstract.DomNoCtx
 end) : sig
-  include Abstract.Dom with type Stmt.t = Dom.Stmt.t
+  include Abstract.DomNoCtx
 
   val lift : Dom.t -> t
 end = struct
@@ -25,19 +25,18 @@ end = struct
   let interpret =
     let mfn =
       Art.mk_mfn (Name.of_string "Dom#interpret")
-        (module Adapton.Types.Tuple2 (Dom.Stmt) (Dom))
+        (module Adapton.Types.Tuple2 (Ast.Stmt) (Dom))
         (fun _mfn (stmt, env) -> Dom.interpret stmt env)
     in
     fun l r -> mfn.mfn_art (l, r) |> Art.force
 end
 
 module Make_env (Val : Abstract.Val) : sig
-  include Abstract.Dom
+  include Abstract.DomNoCtx
 end = struct
   module Env = Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (Val)
   include Adapton.Types.Option (Env)
   module Art = Adapton.MakeArt.Of (Name) (Adapton.Types.Option (Env))
-  module Stmt = Ast.Stmt
 
   let sexp_of_t =
     let open Sexp in
@@ -78,7 +77,7 @@ end = struct
   let interpret =
     let mfn =
       Art.mk_mfn (Name.of_string "Dom#interpret")
-        (module Adapton.Types.Tuple2 (Stmt) (Env))
+        (module Adapton.Types.Tuple2 (Ast.Stmt) (Env))
         (fun _mfn (stmt, env) ->
           let open Ast.Stmt in
           match stmt with
@@ -90,11 +89,39 @@ end = struct
               match Val.truthiness (eval_expr env e) with
               | `T | `Either -> Some env
               | `F | `Neither -> None )
-          | Expr _ | Skip | Write _ -> Some env)
+          | Expr _ | Skip | Write _ | Call _ -> Some env)
     in
     fun stmt -> flip ( >>= ) (fun env -> mfn.mfn_art (stmt, env) |> Art.force)
 
   let implies _x _y = failwith "todo"
+
+  (* let rename =
+       let mfn =
+         Art.mk_mfn (Name.of_string "Dom#rename")
+           (module Adapton.Types.Tuple3 (Adapton.Types.String) (Adapton.Types.String) (Env))
+           (fun _mfn (old_var, new_var, env) ->
+             if not @@ Env.mem env old_var then Some env
+             else
+               let add_with_renaming env k v =
+                 if String.equal k old_var then Env.add env new_var v else Env.add env k v
+               in
+               Some (Env.fold add_with_renaming (Env.of_list []) env))
+       in
+       fun ~old_var ~new_var ->
+       flip ( >>= ) (fun env -> mfn.mfn_art (old_var, new_var, env) |> Art.force)
+
+     let project =
+       let mfn =
+         Art.mk_mfn (Name.of_string "Dom#project")
+           (module Adapton.Types.Tuple2 (Adapton.Types.List (Adapton.Types.String)) (Env))
+           (fun _mfn (vars, env) ->
+             let vars = String.Set.of_list vars in
+             let add_if_in_projection env k v = if Set.mem vars k then Env.add env k v else env in
+             Some (Env.fold add_if_in_projection (Env.of_list []) env))
+       in
+       fun ~vars -> flip ( >>= ) (fun env -> mfn.mfn_art (vars, env) |> Art.force) *)
+
+  let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
 
   let make_memoized_pointwise_binary_op op nm =
     let mfn =
@@ -127,7 +154,7 @@ end = struct
     | None -> Format.print_string "bottom"
 end
 
-module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
+module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
   module AAddr_or_val = struct
     include Adapton.Types.Sum2 (Addr.Abstract) (Val)
 
@@ -151,7 +178,6 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
   module AState = Adapton.Types.Tuple2 (Env) (Heap)
   include Adapton.Types.Option (AState)
   module Art = Adapton.MakeArt.Of (Name) (Adapton.Types.Option (AState))
-  module Stmt = Ast.Stmt
 
   let hash_fold_t seed = hash 0 >> Ppx_hash_lib.Std.Hash.fold_int seed
 
@@ -232,7 +258,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function
               | `T | `Either -> Some (env, heap)
               | _ -> None )
-          | Skip | Expr _ -> Some (env, heap))
+          | Skip | Expr _ | Call _ -> Some (env, heap))
     in
     fun stmt -> flip ( >>= ) (fun state -> mfn.mfn_art (stmt, state) |> Art.force)
 
@@ -271,7 +297,9 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         | AAddr_or_val.InR v1, AAddr_or_val.InR v2 -> AAddr_or_val.InR (Val.join v1 v2)
         | _ -> failwith "This domain functor assumes static separation of arrays and scalars")
 
-  let implies = failwith "todo"
+  let implies _ _ = failwith "todo"
+
+  let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
 
   let sexp_of_t =
     let open Sexp in

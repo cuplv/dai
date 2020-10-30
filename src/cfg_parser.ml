@@ -71,30 +71,39 @@ and unop op json =
   Ast.Expr.Unop { op; e }
 
 let assign_of_json json =
-  let rhs = member "assignmentValue" json |> expr_of_json in
-  let lhs = member "assignmentTarget" json in
-  match member "term" lhs |> to_string_option with
-  | Some "Identifier" ->
-      let lhs = ident_of_json lhs in
-      Ast.Stmt.Assign { lhs; rhs }
-  | Some "Subscript" ->
-      let rcvr = member "lhs" lhs |> member "name" |> to_string in
-      let field = member "rhs" lhs |> index 0 |> expr_of_json in
-      Ast.Stmt.Write { rcvr; field; rhs }
-  | Some "MemberAccess" ->
-      let rcvr = member "lhs" lhs |> member "name" |> to_string in
-      let field = member "rhs" lhs |> expr_of_json in
-      Ast.Stmt.Write { rcvr; field; rhs }
-  | _ -> failwith "malformed assignment JSON"
+  let lhs_json = member "assignmentTarget" json in
+  let rhs_json = member "assignmentValue" json in
+  match member "term" rhs_json |> to_string_option with
+  | Some "Call" ->
+      let lhs = ident_of_json lhs_json in
+      let fn = member "callFunction" rhs_json |> member "name" |> to_string in
+      let actuals = member "callParams" rhs_json |> convert_each expr_of_json in
+      Ast.Stmt.Call { lhs; fn; actuals }
+  | _ -> (
+      let rhs = expr_of_json rhs_json in
+      match member "term" lhs_json |> to_string_option with
+      | Some "Identifier" ->
+          let lhs = ident_of_json lhs_json in
+          Ast.Stmt.Assign { lhs; rhs }
+      | Some "Subscript" ->
+          let rcvr = member "lhs" lhs_json |> member "name" |> to_string in
+          let field = member "rhs" lhs_json |> index 0 |> expr_of_json in
+          Ast.Stmt.Write { rcvr; field; rhs }
+      | Some "MemberAccess" ->
+          let rcvr = member "lhs" lhs_json |> member "name" |> to_string in
+          let field = member "rhs" lhs_json |> expr_of_json in
+          Ast.Stmt.Write { rcvr; field; rhs }
+      | _ -> failwith "malformed assignment JSON" )
 
-type edge_list = (Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t) list
+type edge = Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t
 
-module JsCfg = Cfg.Make (Ast.Stmt)
-
-let cfg_of_json json =
-  let rec edge_list_of_json entry exit ret json : edge_list =
+let cfg_of_json json : Cfg.t =
+  let is_fn_decl stmt_json =
+    match member "term" stmt_json |> to_string with "Function" -> true | _ -> false
+  in
+  let rec edge_list_of_json entry exit ret json : edge list =
     match member "term" json |> to_string_option with
-    | Some "Statements" ->
+    | Some "Statements" | Some "StatementBlock" ->
         let rec of_json_list l curr_loc =
           match l with
           | [ last ] -> edge_list_of_json curr_loc exit ret last
@@ -106,7 +115,7 @@ let cfg_of_json json =
           | [] -> [ (curr_loc, exit, Ast.Stmt.Skip) ]
           (* this case only reachable if initial list empty *)
         in
-        of_json_list (member "statements" json |> to_list) entry
+        of_json_list (member "statements" json |> to_list |> List.drop_while ~f:is_fn_decl) entry
     | Some "Assignment" -> [ (entry, exit, assign_of_json json) ]
     | Some "VariableDeclaration" ->
         let rec of_assign_list l curr_loc =
@@ -158,51 +167,82 @@ let cfg_of_json json =
     | Some "Empty" ->
         (* "Empty" statements are else-branches of else-branch-less conditionals *)
         [ (entry, exit, Ast.Stmt.Skip) ]
+    | Some "Function" -> []
     | Some t ->
         failwith @@ "Unrecognized statement with term : \"" ^ t ^ "\" and content: " ^ show json
     | None -> failwith @@ "Malformed statement JSON: no \"term\" element; content: " ^ show json
   in
   Cfg.Loc.reset ();
-  Graph.create
-    (module JsCfg.G)
-    ~edges:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit Cfg.Loc.exit json)
-    ()
+  (* We assume all function definitions are top level declarations preceding any other statements *)
+  let fn_decls_of_json json : (Cfg.Fn.t * edge list) list =
+    match member "term" json |> to_string_option with
+    | Some "Statements" ->
+        let stmts = member "statements" json |> to_list in
+        let fn_decls = List.take_while stmts ~f:is_fn_decl in
+        List.map fn_decls ~f:(fun json ->
+            let entry = Cfg.Loc.fresh () in
+            let exit = Cfg.Loc.fresh () in
+            let name : string = member "functionName" json |> member "name" |> to_string in
+            let formals : string list =
+              member "functionParameters" json
+              |> convert_each (member "requiredParameterSubject" >> member "name" >> to_string)
+            in
+            let body : edge list =
+              member "functionBody" json |> edge_list_of_json entry exit exit
+            in
+            (Cfg.Fn.make ~name ~formals ~entry ~exit ~body, body))
+    | _ -> failwith "Malformed JSON parse tree"
+  in
+  let fns = fn_decls_of_json json in
+  let edges =
+    List.fold fns ~init:(edge_list_of_json Cfg.Loc.entry Cfg.Loc.exit Cfg.Loc.exit json)
+      ~f:(fun es (_, fn_body) -> List.append fn_body es)
+  in
+  let cfg = Graph.create (module Cfg.G) ~edges () in
+  (cfg, List.map ~f:fst fns |> Cfg.Fn.Set.of_list)
 
 let%test "cfg_parse and dump dot: arith_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
   in
-  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith.dot";
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/arith.dot";
   true
 
 let%test "cfg_parse and dump dot: while_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
-  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot";
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/while.dot";
   true
 
 let%test "cfg_parse and dump dot: array_syntax.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/array_syntax.js"
   in
-  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/array.dot";
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/array.dot";
   true
 
 let%test "cfg_parse and dump dot: list_append.js" =
   let cfg =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/list_append.js"
   in
-  JsCfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/list.dot";
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/list.dot";
+  true
+
+let%test "cfg_parse and dump dot: functions.js" =
+  let cfg =
+    cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/functions.js"
+  in
+  Cfg.dump_dot cfg ~filename:"/Users/benno/Documents/CU/code/d1a/functions.dot";
   true
 
 let%test "back edge classification: while_syntax.js" =
-  let cfg =
+  let cfg, _ =
     cfg_of_json @@ json_of_file "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
   in
   Int.equal 1
   @@ Graph.depth_first_search
-       (module JsCfg.G)
+       (module Cfg.G)
        ~start:Cfg.Loc.entry
        ~leave_edge:(function `Back -> fun _e acc -> acc + 1 | _ -> fun _e acc -> acc)
        ~init:0 cfg
