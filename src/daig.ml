@@ -590,7 +590,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Stmt _ -> daig
     | AState { state = Some _; _ } -> daig
     | AState { state = None; _ } when Seq.is_empty (G.Node.inputs r (fst daig)) ->
-        failwith "todo, analyze possible callers"
+        analyze_to_fn_entry r daig
     | AState phi ->
         (* recursively [get] all predecessors *)
         let preds, daig =
@@ -687,6 +687,7 @@ module Make (Dom : Abstract.Dom) = struct
     let loc, ctx =
       match Ref.name r with
       | Name.Loc (l, c) -> (l, c)
+      | Name.(Iterate (0, Loc (l, c))) -> (l, c)
       | _ -> failwith "malformed name; not a function entry"
     in
     (* Given a location/context pair at a function entry and a daig, analyze all data flow into that function entry. *)
