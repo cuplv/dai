@@ -163,6 +163,9 @@ let src : G.Edge.t -> Loc.t = G.Edge.src
 
 let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
+let containing_fn loc (cfg, fns) =
+  Fn.Set.find fns ~f:(fun fn -> Graph.is_reachable (module G) cfg (Fn.entry fn) loc)
+
 let empty () =
   Loc.reset ();
   Graph.create
@@ -241,23 +244,6 @@ let reachable_subgraph (cfg : G.t) ~(from : G.node) : G.t =
   in
   Graph.create (module G) ~edges ()
 
-(** Add a [stmt]-labelled edge from [loc] in [cfg], preserving other structure.
-    Returns: (G.t * Loc.t) pair of resulting CFG and newly-added location
-*)
-let add_stmt_at (loc : Loc.t) (stmt : Ast.Stmt.t) (cfg : G.t) =
-  let new_loc = Loc.fresh () in
-  flip pair new_loc
-  @@
-  (* if [loc] is a loop head or [Cfg.Loc.exit], add the statement _before_ [loc]; otherwise, add it after  *)
-  if List.mem (loop_heads cfg) loc ~equal:G.Node.equal || Loc.(equal loc exit) then
-    Seq.fold (G.Node.inputs loc cfg) ~init:cfg ~f:(fun cfg edge ->
-        G.Edge.remove edge cfg |> G.Edge.(insert (create (src edge) new_loc (label edge))))
-    |> G.Edge.(insert (create new_loc loc stmt))
-  else
-    Seq.fold (G.Node.outputs loc cfg) ~init:cfg ~f:(fun cfg edge ->
-        G.Edge.remove edge cfg |> G.Edge.(insert (create new_loc (dst edge) (label edge))))
-    |> G.Edge.(insert (create loc new_loc stmt))
-
 let dump_dot ?print ~filename (cfg, fns) =
   let output_fd =
     if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
@@ -278,6 +264,22 @@ let dump_dot ?print ~filename (cfg, fns) =
           [ `Label label ]
       | None -> []);
   if Option.is_none print then Unix.close output_fd
+
+(** Given a program [cfg] and a location [loc] therein, return those sequences of callsites such that [loc] is reachable from the program entry with that sequence on the stack *)
+let rec call_chains_to ~loc ~cfg : G.edge list list =
+  match containing_fn loc cfg with
+  | None -> [ [] ] (* in main function, reachable with empty stack *)
+  | Some fn ->
+      (* in other function; recursively get chains to each of its callers, appending that caller to each chain*)
+      Seq.filter
+        (G.edges (fst cfg))
+        ~f:(fun e ->
+          match Ast.Stmt.callee (G.Edge.label e) with
+          | Some edge_callee -> String.equal (Fn.name fn) edge_callee
+          | None -> false)
+      |> Seq.to_list
+      |> List.bind ~f:(fun caller ->
+             call_chains_to ~loc:(G.Edge.src caller) ~cfg |> List.(map ~f:(cons caller)))
 
 (* module Interpreter (Dom : sig
      include Abstract.Dom

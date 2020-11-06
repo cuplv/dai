@@ -161,6 +161,8 @@ module Stmt = struct
 
   let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None
 
+  let callee = function Call { fn; _ } -> Some fn | _ -> None
+
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;
     Format.flush_str_formatter ()

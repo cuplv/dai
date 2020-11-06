@@ -29,6 +29,8 @@ end = struct
     let init = ()
 
     let callee_ctx ~caller_state:_ ~callsite:_ ~ctx:() = ()
+
+    let is_feasible_callchain _ _ = true
   end
 end
 
@@ -38,11 +40,10 @@ module Make1CFA (Dom : Abstract.DomNoCtx) : Abstract.Dom = struct
   module Ctx = struct
     type dom = t
 
-    type t = { curr : string; caller : string option } [@@deriving compare, equal, hash, sexp_of]
+    type t = Ast.Stmt.t option [@@deriving compare, equal, hash, sexp_of]
 
-    let pp fs { curr = _; caller } =
-      match caller with
-      | Some caller -> Format.fprintf fs "[%s]" caller
+    let pp fs = function
+      | Some caller -> Format.fprintf fs "[%a]" Ast.Stmt.pp caller
       | None -> Format.fprintf fs "[]"
 
     let sanitize x = x
@@ -53,11 +54,14 @@ module Make1CFA (Dom : Abstract.DomNoCtx) : Abstract.Dom = struct
 
     let hash = seeded_hash
 
-    let init = { curr = "__main"; caller = None }
+    let init = None
 
-    let callee_ctx ~caller_state:_ ~callsite ~ctx:{ curr; caller = _ } =
-      match callsite with
-      | Ast.Stmt.Call { fn; _ } -> { curr = fn; caller = Some curr }
-      | _ -> failwith "malformed callsite"
+    let callee_ctx ~caller_state:_ ~callsite ~ctx:_ = Some callsite
+
+    let is_feasible_callchain ctx chain =
+      match (ctx, chain) with
+      | None, [] -> true
+      | Some ctx_caller, chain_caller :: _ -> Ast.Stmt.equal ctx_caller chain_caller
+      | _ -> false
   end
 end

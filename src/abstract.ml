@@ -66,5 +66,9 @@ module type Dom = sig
     val init : t
 
     val callee_ctx : caller_state:dom -> callsite:Ast.Stmt.t -> ctx:t -> t
+
+    (* Given a context and a callchain, returns true if the context MAY be reached via the callchain.  This signature allows syntactic context sensitivity policies (e.g. kCFA) to filter out infeasible chains. (e.g. in 1CFA with context f, those not ending in f)
+     *)
+    val is_feasible_callchain : t -> Ast.Stmt.t list -> bool
   end
 end
