@@ -4,21 +4,25 @@ open Cfg_parser
 open Ast
 
 module Arr_bounds_check = struct
-  include Daig.Make (Array_bounds)
+  include Daig.Make (Context.MakeInsensitive (Array_bounds))
 
-  let check_all_accesses daig fs =
+  let check_all_accesses (daig : t) fs =
     let candidates : ((Expr.t * Expr.t) list * Ref.t) Seq.t =
-      Seq.filter_map (G.nodes daig) ~f:(function
-        | Ref.Stmt { stmt; name = _ } as refcell -> (
-            match Array_bounds.array_accesses stmt with
-            | [] -> None
-            | accesses -> Some (accesses, refcell) )
-        | _ -> None)
+      Seq.filter_map
+        (G.nodes (fst daig))
+        ~f:(function
+          | Ref.Stmt { stmt; name = _ } as refcell -> (
+              match Array_bounds.array_accesses stmt with
+              | [] -> None
+              | accesses -> Some (accesses, refcell) )
+          | _ -> None)
     in
     Seq.fold candidates ~init:daig ~f:(fun daig (accesses, stmt_ref) ->
         let astates_at_stmt_entry =
-          Seq.bind (G.Node.succs stmt_ref daig) ~f:(fun poststate_ref ->
-              Seq.filter ~f:Ref.is_astate (G.Node.preds poststate_ref daig))
+          Seq.bind
+            (G.Node.succs stmt_ref (fst daig))
+            ~f:(fun poststate_ref ->
+              Seq.filter ~f:Ref.is_astate (G.Node.preds poststate_ref (fst daig)))
         in
         List.fold accesses ~init:daig ~f:(fun daig ->
           function
@@ -34,19 +38,18 @@ module Arr_bounds_check = struct
                       | Some true -> "SAFE\t (Array  access %s[%a] of statement at %a)\n"
                       | Some false -> "UNSAFE\t (Array access %s[%a] of statement at %a)\n"
                       | None -> "UNKNOWN\t (Array access %s[%a] of statement at %a)\n" )
-                      rcvr Expr.pp field Daig.Name.pp (Ref.name stmt_ref);
-
+                      rcvr Expr.pp field Name.pp (Ref.name stmt_ref);
                     daig)
           | rcvr, field ->
               Format.fprintf fs
                 "UNKNOWN\t(Array access %a[%a] of statement at %a has too complex of a receiver)\n"
-                Expr.pp rcvr Expr.pp field Daig.Name.pp (Ref.name stmt_ref);
+                Expr.pp rcvr Expr.pp field Name.pp (Ref.name stmt_ref);
               daig))
 end
 
 let test_array_accesses id =
   let cfg = (Util.test_case >> json_of_file >> cfg_of_json) id in
-  let daig = Arr_bounds_check.of_js_cfg_unsafe cfg in
+  let daig = Arr_bounds_check.of_cfg cfg in
   Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output id);
   let fs =
     Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.log_output id)
@@ -55,7 +58,11 @@ let test_array_accesses id =
   let daig = Arr_bounds_check.check_all_accesses daig fs in
   Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output (id ^ "_post"))
 
-let%test "buckets tests" =
+let%test "interproc buckets tests" =
+  test_array_accesses "buckets_contains";
+  true
+
+(*let%test "intraproc buckets tests" =
   test_array_accesses "buckets_swap1";
   test_array_accesses "buckets_swap2";
   test_array_accesses "buckets_swap3";
@@ -80,3 +87,4 @@ let%test "buckets tests" =
   test_array_accesses "buckets_indexof7";
   test_array_accesses "buckets_indexof8";
   true
+ *)

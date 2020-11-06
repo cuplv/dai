@@ -45,7 +45,7 @@ let do_n_edits_and_queries =
         if dd && incr then (
           let module RE = Random_edits.Make (Incr.Make (Itv)) in
           Random.init seed;
-          let init = RE.D.of_cfg @@ RE.D.Cfg.empty () in
+          let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
@@ -55,7 +55,7 @@ let do_n_edits_and_queries =
         else if dd then (
           let module RE = Random_edits.Make (Itv) in
           Random.init seed;
-          let init = RE.D.of_cfg @@ RE.D.Cfg.empty () in
+          let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
             apply_n_times ~n:qpe ~init
               ~f:(RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
@@ -66,14 +66,14 @@ let do_n_edits_and_queries =
         else if incr then (
           let module RE = Random_edits.Make (Incr.Make (Itv)) in
           Random.init seed;
-          let init = RE.D.of_cfg @@ RE.D.Cfg.empty () in
+          let init = RE.D.of_cfg @@ Cfg.empty () in
           let f = RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else
           let module RE = Random_edits.Make (Itv) in
           Random.init seed;
-          let init = RE.D.of_cfg @@ RE.D.Cfg.empty () in
+          let init = RE.D.of_cfg @@ Cfg.empty () in
           let f =
             RE.random_edit >> RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x
           in
