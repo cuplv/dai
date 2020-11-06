@@ -141,6 +141,10 @@ module Make (Dom : Abstract.Dom) = struct
       let is_stmt = is_astate >> not
 
       let is_empty = function AState { state = None; name = _ } -> true | _ -> false
+
+      let dirty = function
+        | AState a -> a.state <- None
+        | Stmt _ -> failwith "dirty should only be called on AStates in a well-formed DAIG"
     end
 
     include T
@@ -215,6 +219,7 @@ module Make (Dom : Abstract.Dom) = struct
    fun (daig, (cfg, fns)) ->
     let open List.Monad_infix in
     let region_cfg = Cfg.reachable_subgraph cfg ~from:from_loc in
+
     let name_of_edge e = Name.Edge (Cfg.src e, Cfg.dst e) in
     (* E_b *)
     let back_edges = Cfg.back_edges region_cfg in
@@ -473,19 +478,18 @@ module Make (Dom : Abstract.Dom) = struct
 
   let dirty_from r daig =
     let g, cfg = daig in
-    let dirty = function
-      | Ref.AState a -> a.state <- None
-      | Ref.Stmt _ -> failwith "dirty should only be called on AStates in a well-formed DAIG"
-    in
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n g in
       if Seq.is_empty outgoing_edges then (
         let loc, ctx =
           match Ref.name n with
           | Name.Loc (l, c) -> (l, c)
-          | _ ->
+          | x ->
               failwith
-                "outdegree-0 refs must be abstract state for a function or program exit location"
+                (Format.asprintf
+                   "outdegree-0 refs must be abstract state for a function or program exit \
+                    location; [%a] is neither"
+                   Name.pp x)
         in
         (* If None, this is the program exit and we're done.  if Some, this is a function exit, so we:
             * find [possible_callers]: those daig refs for locations to which control may return from this function (taking contexts into account)
@@ -515,7 +519,7 @@ module Make (Dom : Abstract.Dom) = struct
                        |> Seq.fold ~init:acc ~f:(flip List.cons)
                    | _ -> acc)
             in
-            List.iter possible_callers ~f:dirty;
+            List.iter possible_callers ~f:Ref.dirty;
             let frontier, loophead_fixpoints = acc in
             (List.append possible_callers frontier, loophead_fixpoints) )
       else
@@ -529,16 +533,17 @@ module Make (Dom : Abstract.Dom) = struct
               | Name.Loc _ as l -> (
                   match ref_by_name_exn Name.(Iterate (0, l)) daig with
                   | Ref.AState { state = Some _; name = _ } as lh ->
-                      dirty succ;
+                      Ref.dirty succ;
+
                       (lh :: succ :: frontier, succ :: lh_fps)
                   | _ ->
-                      dirty succ;
+                      Ref.dirty succ;
                       (succ :: frontier, succ :: lh_fps) )
               | _ ->
                   failwith
                     "malformed DAIG -- the destination of a `Fix edge is always the loop fixpoint"
             else (
-              dirty succ;
+              Ref.dirty succ;
               (succ :: frontier, lh_fps) ))
     in
     let rec change_prop frontier loop_head_fixpoints =
@@ -580,10 +585,12 @@ module Make (Dom : Abstract.Dom) = struct
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a pair ([Ref.t] guaranteed to be non-empty, [t] reflecting possible changes to the DAIG structure
    *)
-  let rec get (r : Ref.t) (daig : t) =
+  let rec get (r : Ref.t) (daig : t) : Ref.t * t =
     ( match r with
-    | Stmt { stmt = _; name = _ } -> daig
-    | AState { state = Some _; name = _ } -> daig
+    | Stmt _ -> daig
+    | AState { state = Some _; _ } -> daig
+    | AState { state = None; _ } when Seq.is_empty (G.Node.inputs r (fst daig)) ->
+        failwith "todo, analyze possible callers"
     | AState phi ->
         (* recursively [get] all predecessors *)
         let preds, daig =
@@ -595,7 +602,6 @@ module Make (Dom : Abstract.Dom) = struct
               (p :: acc, g))
         in
         let preds = List.sort preds ~compare:Ref.compare in
-        (* [hd_exn] call is safe because empty ref cells always have parents by DCG well-formedness *)
         let result, new_daig =
           match G.Edge.label (Seq.hd_exn (G.Node.inputs r (fst daig))) with
           | `Transfer -> (
@@ -624,38 +630,49 @@ module Make (Dom : Abstract.Dom) = struct
         new_daig )
     |> pair r
 
+  and bind_formals caller_state callsite callee =
+    match callsite with
+    | Ast.Stmt.Call { actuals; _ } ->
+        List.fold
+          (List.zip_exn (Cfg.Fn.formals callee) actuals)
+          ~init:caller_state
+          ~f:(fun astate (formal, actual) ->
+            (* for each formal/actual pair, [[formal := actual ]](astate) *)
+            let binding = Ast.Stmt.Assign { lhs = formal; rhs = actual } in
+            Dom.interpret binding astate)
+    | _ -> failwith "malformed callsite"
+
   and interpret_call callsite daig phi ctx =
     match (phi, callsite) with
-    | AState { state = Some caller_state; name = _ }, Ast.Stmt.Call { lhs = _; fn; actuals } ->
+    | AState { state = Some caller_state; _ }, Ast.Stmt.Call { fn; _ } ->
         let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal fn) in
         let callee_ctx = Dom.Ctx.callee_ctx ~caller_state ~callsite ~ctx in
         let callee_entry_state =
-          List.fold
-            (List.zip_exn (Cfg.Fn.formals callee) actuals)
-            ~init:caller_state
-            ~f:(fun astate (formal, actual) ->
-              (* for each formal/actual pair, [[formal := actual ]](astate) *)
-              let binding = Ast.Stmt.Assign { lhs = formal; rhs = actual } in
-              Dom.interpret binding astate)
+          bind_formals caller_state callsite callee
           (* TODO: decide: project down to minimal environment for summarization? *)
           (*|> Dom.project ~vars:(Cfg.Fn.formals callee)*)
         in
         (* find or create DAIG for callee, join [callee_entry_state] into callee entry *)
+        let callee_entry_ref =
+          let loc_name = Name.(Loc (Cfg.Fn.entry callee, callee_ctx)) in
+          match ref_by_name (Name.Iterate (0, loc_name)) daig with
+          | Some r -> Some r
+          | None -> ref_by_name loc_name daig
+        in
         let daig =
-          match ref_by_name Name.(Loc (Cfg.Fn.entry callee, callee_ctx)) daig with
-          | Some (AState phi as entry) when Option.is_some phi.state ->
+          match callee_entry_ref with
+          | Some (AState phi) when Option.is_some phi.state ->
               if Dom.implies callee_entry_state (Option.value_exn phi.state) then daig
               else
                 let entry_state = Option.fold phi.state ~init:callee_entry_state ~f:Dom.join in
-                let daig = dirty_from entry daig in
                 phi.state <- Some entry_state;
                 daig
           | Some (AState phi) ->
               phi.state <- Some callee_entry_state;
               daig
           | _ ->
-              add_region_to_daig ~init_state:callee_entry_state ~from_loc:(Cfg.Fn.entry callee) ~ctx
-                daig
+              add_region_to_daig ~init_state:callee_entry_state ~from_loc:(Cfg.Fn.entry callee)
+                ~ctx:callee_ctx daig
         in
         (* [get] callee exit *)
         let callee_exit, daig =
@@ -666,8 +683,51 @@ module Make (Dom : Abstract.Dom) = struct
         (Dom.handle_return ~caller_state ~return_state ~callsite ~callee_defs, daig)
     | _ -> failwith "Malformed callsite"
 
+  and analyze_to_fn_entry r daig =
+    let loc, ctx =
+      match Ref.name r with
+      | Name.Loc (l, c) -> (l, c)
+      | _ -> failwith "malformed name; not a function entry"
+    in
+    (* Given a location/context pair at a function entry and a daig, analyze all data flow into that function entry. *)
+    Cfg.call_chains_to ~loc ~cfg:(snd daig)
+    |> List.filter ~f:(List.map ~f:Cfg.G.Edge.label >> Dom.Ctx.is_feasible_callchain ctx)
+    |> List.fold ~init:daig ~f:(fun daig ->
+         function
+         | [] -> failwith "invalid empty call chain"
+         | immediate_caller :: chain -> (
+             List.rev chain
+             |> List.fold ~init:(daig, Dom.Ctx.init) ~f:(fun (daig, curr_ctx) callsite ->
+                    let precall_loc, callsite, postcall_loc =
+                      Cfg.G.Edge.(src callsite, label callsite, dst callsite)
+                    in
+                    let _, daig = get_by_loc postcall_loc curr_ctx daig in
+                    let prestate, _ = get_by_loc precall_loc curr_ctx daig in
+                    ( daig,
+                      Dom.Ctx.callee_ctx ~caller_state:(Ref.astate_exn prestate) ~callsite
+                        ~ctx:curr_ctx ))
+             |> fun (daig, immediate_caller_ctx) ->
+             match Cfg.G.Edge.label immediate_caller with
+             | Ast.Stmt.Call { fn; _ } as callsite ->
+                 let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal fn) in
+                 let caller_state, daig =
+                   get_by_loc (Cfg.G.Edge.src immediate_caller) immediate_caller_ctx daig
+                 in
+                 let caller_state = Ref.astate_exn caller_state in
+                 ( if
+                   Dom.Ctx.(
+                     equal (callee_ctx ~caller_state ~callsite ~ctx:immediate_caller_ctx) ctx)
+                 then
+                   match r with
+                   | AState phi ->
+                       let new_flow_to_entry = Some (bind_formals caller_state callsite callee) in
+                       phi.state <- Option.merge phi.state new_flow_to_entry Dom.join
+                   | _ -> failwith "malformed DAIG" );
+                 daig
+             | _ -> failwith "malformed callsite" ))
+
   (** IMPURE -- see [get] *)
-  let get_by_name (nm : Name.t) g =
+  and get_by_name (nm : Name.t) g =
     match ref_by_name nm g with
     | Some r -> get r g
     | None ->
@@ -675,11 +735,22 @@ module Make (Dom : Abstract.Dom) = struct
           ( Format.fprintf Format.str_formatter "No reference cell found with name %a" Name.pp nm;
             Format.flush_str_formatter () )
 
-  (* traverse control-flow-reachable ref cells, clearing their values and accumulating
-     all encountered loop fixpoints for the next step. NB: DAIG-reachability alone is
-     unsound due to cyclic control flow, so also jump back to loop heads as needed *)
+  and get_by_loc l ctx daig =
+    match ref_by_name (Name.Loc (l, ctx)) daig with
+    | Some r -> get r daig
+    | None -> (
+        match ref_by_name (Name.Iterate (0, Name.Loc (l, ctx))) daig with
+        | Some r -> fixpoint_of r daig
+        | None -> (
+            match Cfg.containing_fn l (snd daig) with
+            | Some fn -> get_by_loc l ctx (add_region_to_daig ~from_loc:(Cfg.Fn.entry fn) ~ctx daig)
+            | None ->
+                dump_dot ~filename:"/Users/benno/Documents/CU/code/d1a/error_dump.dot" daig;
+                failwith
+                  (Format.asprintf "location %a not found; daig dumped at error_dump.dot" Cfg.Loc.pp
+                     l) ) )
 
-  let fixpoint_of astate_ref daig =
+  and fixpoint_of astate_ref daig =
     match Ref.name astate_ref with
     | Name.Iterate (_, l) -> (
         (* loop head fixpoint postdominates all refcells in the loop, so just follow any path to find it *)
@@ -712,46 +783,55 @@ module Make (Dom : Abstract.Dom) = struct
     >> Seq.to_list
 
   let contexts_at_loc ~loc daig =
-    refs_at_loc ~loc daig |> List.filter_map ~f:(fun r -> Name.ctx (Ref.name r))
-
-  let get_by_loc l ctx daig =
-    match ref_by_name (Name.Loc (l, ctx)) daig with
-    | Some r -> get r daig
-    | None -> (
-        match ref_by_name (Name.Iterate (0, Name.Loc (l, ctx))) daig with
-        | Some r -> fixpoint_of r daig
-        | None ->
-            dump_dot ~filename:"/Users/benno/Documents/CU/code/d1a/error_dump.dot" daig;
-            failwith
-              (Format.asprintf "location %a not found; daig dumped at error_dump.dot" Cfg.Loc.pp l)
-        )
+    refs_at_loc ~loc daig
+    |> List.filter_map ~f:(fun r -> Name.ctx (Ref.name r))
+    |> List.dedup_and_sort ~compare:Dom.Ctx.compare
 
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
-  let edit_stmt (r : Ref.t) (stmt : Ast.Stmt.t) (g : t) =
+  let edit_stmt (r : Ref.t) (stmt : Ast.Stmt.t) (daig : t) =
     match r with
     | Ref.Stmt cell ->
         cell.stmt <- stmt;
-        dirty_from r g
+        dirty_from r daig
     | Ref.AState _ ->
         failwith "Ill-typed edit -- can't store a statement in an abstract state reference"
 
   (** IMPURE -- see [edit_stmt] *)
-  let delete_stmt (nm : Name.t) (g : t) =
-    match ref_by_name nm g with
-    | Some r -> edit_stmt r Ast.Stmt.skip g
+  let delete_stmt (nm : Name.t) (daig : t) =
+    match ref_by_name nm daig with
+    | Some r -> edit_stmt r Ast.Stmt.skip daig
     | None -> failwith "can't delete non-existent reference"
 
   (** add a statement*)
   let add_stmt src dst stmt daig =
     assert (not @@ Cfg.Loc.equal src dst);
-    let cfg =
-      snd daig |> fun (graph, fns) ->
+    let g, (cfg, fns) = daig in
+    let new_cfg =
       let new_cfg_edge = Cfg.G.Edge.create src dst stmt in
-      (Cfg.G.Edge.insert new_cfg_edge graph, fns)
+      Cfg.G.Edge.insert new_cfg_edge cfg
     in
-    refs_at_loc ~loc:dst daig
-    |> List.fold ~init:daig ~f:(fun daig dst_ref ->
+    let new_fns =
+      match Cfg.containing_fn src (cfg, fns) with
+      | Some ({ name; formals; locals; entry; exit } as fn) ->
+          let new_fn : Cfg.Fn.t =
+            { name; formals; locals = Option.cons (Ast.Stmt.def stmt) locals; entry; exit }
+          in
+          Set.remove fns fn |> flip Set.add new_fn
+      | None -> fns
+    in
+    let daig = (g, (new_cfg, new_fns)) in
+    contexts_at_loc ~loc:dst daig
+    |> List.fold ~init:daig ~f:(fun daig ctx ->
            let g, _ = daig in
+           let dst_ref =
+             ( match ref_by_name (Name.Iterate (0, Name.Loc (dst, ctx))) daig with
+             | Some r -> r
+             | None -> ref_by_name_exn (Name.Loc (dst, ctx)) daig )
+             |> fun r ->
+             Ref.dirty r;
+             r
+           in
+
            let src_ref =
              match Ref.name dst_ref with
              | Name.Loc (_, c) -> ref_by_name_exn Name.(Loc (src, c)) daig
@@ -806,45 +886,71 @@ module Make (Dom : Abstract.Dom) = struct
                  |> G.Edge.insert (G.Edge.create src_ref new_transfer_dst `Transfer)
                  |> G.Edge.insert (G.Edge.create old_transfer_dst dst_ref `Join)
                  |> G.Edge.insert (G.Edge.create new_transfer_dst dst_ref `Join)
-             | _ -> failwith "malformed daig"
+             | e :: _ ->
+                 failwith
+                   (Format.asprintf "malformed daig; input edge to %a; label: %a; stmt : %a "
+                      Cfg.Loc.pp dst Comp.pp (G.Edge.label e) Ast.Stmt.pp stmt)
            in
-           dirty_from dst_ref (new_g, cfg))
+           dirty_from dst_ref (new_g, (new_cfg, new_fns)))
 
   (*insert a new [stmt] at a control [loc] *)
   let add_stmt_at (loc : Cfg.Loc.t) (stmt : Ast.Stmt.t) (daig : t) =
+    let new_loc = Cfg.Loc.fresh () in
     let g, (cfg, fns) = daig in
-    let new_cfg, new_loc = Cfg.add_stmt_at loc stmt cfg in
-    let daig = (g, (new_cfg, fns)) in
-    List.fold (contexts_at_loc ~loc daig) ~init:daig ~f:(fun daig ctx ->
+    let add_before_loc =
+      Cfg.Loc.(equal exit loc)
+      || Cfg.Fn.Set.exists fns ~f:(Cfg.Fn.exit >> Cfg.Loc.equal loc)
+      || List.mem (Cfg.loop_heads cfg) loc ~equal:Cfg.Loc.equal
+    in
+    let cfg =
+      if add_before_loc then
+        Seq.fold (Cfg.G.Node.inputs loc cfg) ~init:cfg ~f:(fun cfg edge ->
+            if List.mem (Cfg.back_edges cfg) edge ~equal:Cfg.G.Edge.equal then cfg
+            else
+              Cfg.G.Edge.remove edge cfg
+              |> Cfg.G.Edge.(insert (create (src edge) new_loc (label edge))))
+      else
+        Seq.fold (Cfg.G.Node.outputs loc cfg) ~init:cfg ~f:(fun cfg edge ->
+            Cfg.G.Edge.remove edge cfg
+            |> Cfg.G.Edge.(insert (create new_loc (dst edge) (label edge))))
+    in
+    List.fold (contexts_at_loc ~loc daig)
+      ~init:(g, (cfg, fns))
+      ~f:(fun daig ctx ->
         (* loc is either (case 1) not in any loop, (case 2) in the body of a loop, or (case 3) a loop head *)
-        let new_loc_ref, old_loc_ref, add_stmt_before =
+        let new_loc_ref, old_loc_ref =
           match
             ( ref_by_name (Name.Iterate (0, Name.Loc (loc, ctx))) daig,
               ref_by_name (Name.Loc (loc, ctx)) daig )
           with
           | None, Some r ->
               let new_loc_ref = Ref.AState { state = None; name = Name.Loc (new_loc, ctx) } in
-              (new_loc_ref, r, Cfg.Loc.(equal exit loc))
+              (new_loc_ref, r)
           | Some r, None ->
               let new_loc_ref =
                 Ref.AState { state = None; name = Name.Iterate (0, Name.Loc (new_loc, ctx)) }
               in
-              (new_loc_ref, r, false)
+              (new_loc_ref, r)
           | Some r, Some _ ->
               let new_loc_ref = Ref.AState { state = None; name = Name.Loc (new_loc, ctx) } in
-              (new_loc_ref, r, true)
+              (new_loc_ref, r)
           | None, None -> failwith "can't add statement at non-existent location"
         in
-        let g, fns = daig in
+        let g, (cfg, fns) = daig in
         let g = G.Node.insert new_loc_ref g in
-        if add_stmt_before then
-          Seq.fold (G.Node.inputs old_loc_ref g) ~init:g ~f:(fun g edge ->
-              G.Edge.remove edge g |> G.Edge.(insert (create (src edge) new_loc_ref (label edge))))
-          |> flip pair fns |> add_stmt new_loc loc stmt
+        if add_before_loc then
+          let g =
+            Seq.fold (G.Node.inputs old_loc_ref g) ~init:g ~f:(fun g edge ->
+                G.Edge.remove edge g |> G.Edge.(insert (create (src edge) new_loc_ref (label edge))))
+          in
+          (g, (cfg, fns))
         else
-          Seq.fold (G.Node.outputs old_loc_ref g) ~init:g ~f:(fun g edge ->
-              G.Edge.remove edge g |> G.Edge.(insert (create new_loc_ref (dst edge) (label edge))))
-          |> flip pair fns |> add_stmt loc new_loc stmt)
+          let g =
+            Seq.fold (G.Node.outputs old_loc_ref g) ~init:g ~f:(fun g edge ->
+                G.Edge.remove edge g |> G.Edge.(insert (create new_loc_ref (dst edge) (label edge))))
+          in
+          (g, (cfg, fns)))
+    |> if add_before_loc then add_stmt new_loc loc stmt else add_stmt loc new_loc stmt
 
   let drop_cache d =
     match ref_by_name (Name.Loc (Cfg.Loc.entry, Dom.Ctx.init)) d with
