@@ -28,7 +28,8 @@ let do_n_edits_and_queries =
           ^ "seed" ^ Int.to_string seed
         in
         let fs_out =
-          Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.exp_output filename)
+          Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ]
+            (Unix.getcwd () ^ Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
 
