@@ -205,17 +205,11 @@ let back_edges =
 let loop_heads = back_edges >> List.map ~f:dst
 
 (** Map from locations to set of loop heads of containing loops.  Locations not in any loop are not in the domain, so [find_exn] is unsafe! *)
-let containing_loop_heads cfg : Loc.Set.t Loc.Map.t =
+let containing_loop_heads cfg : Loc.t Loc.Map.t =
   let back_edges = back_edges cfg in
   List.fold back_edges ~init:Loc.Map.empty ~f:(fun map backedge ->
       let head = dst backedge in
-      Set.fold (natural_loop backedge cfg) ~init:map ~f:(fun map l ->
-          let heads =
-            match Map.find map l with
-            | None -> Loc.Set.singleton head
-            | Some heads -> Set.add heads head
-          in
-          Map.set map ~key:l ~data:heads))
+      Set.fold (natural_loop backedge cfg) ~init:map ~f:(fun map l -> Map.set map ~key:l ~data:head))
 
 (** Returns a partition of [cfg]'s nodes into non-join and join locations;
       the [fst] list returned contains all nodes with at most 1 incoming forward edge,

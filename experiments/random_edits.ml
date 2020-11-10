@@ -308,29 +308,29 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
       *)
 
   let random_edit daig =
-    let fn_exits = (snd >> snd) daig |> Set.to_list |> List.map ~f:Cfg.Fn.exit in
-    let _sample_loc_ensuring predicate () =
-      let l = ref (Cfg.Loc.sample ()) in
-      while not (predicate l) do
-        l := Cfg.Loc.sample ()
-      done;
-      !l
-    in
     let sample_loc_no_fn_exits () =
+      let fn_exits = (snd >> snd) daig |> Set.to_list |> List.map ~f:Cfg.Fn.exit in
       let l = ref (Cfg.Loc.sample ()) in
       while List.exists fn_exits ~f:(Cfg.Loc.equal !l) do
         l := Cfg.Loc.sample ()
       done;
       !l
     in
+
     match Random.int 10 with
     | 0 ->
         (* no nested loops, so keep sampling locations until finding one not in any loop *)
         let l = ref (Cfg.Loc.sample ()) in
+        let _, (cfg, fns) = daig in
+        let fn_entries = Set.to_list fns |> List.map ~f:Cfg.Fn.entry in
+        let locs_in_loops =
+          List.append (Cfg.loop_heads cfg) (Map.keys @@ Cfg.containing_loop_heads cfg)
+        in
+        let equals_l x = Cfg.Loc.equal !l x in
         while
-          Cfg.Loc.equal !l Cfg.Loc.entry
-          || List.exists (D.refs_at_loc ~loc:!l daig)
-               ~f:(D.Ref.name >> function Nm.Iterate (0, _) -> true | _ -> false)
+          equals_l Cfg.Loc.entry
+          || List.exists fn_entries ~f:equals_l
+          || List.exists locs_in_loops ~f:equals_l
         do
           l := Cfg.Loc.sample ()
         done;

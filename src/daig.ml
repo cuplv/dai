@@ -235,9 +235,7 @@ module Make (Dom : Abstract.Dom) = struct
     let name_of_loc ?(dst = false) l =
       ( match Map.find loop_head_map l with
       | None -> Name.Loc (l, ctx)
-      | Some heads ->
-          if Int.equal (Set.length heads) 1 then Name.Iterate (0, Name.Loc (l, ctx))
-          else failwith "Nested loops not yet supported." )
+      | Some _ -> Name.Iterate (0, Name.Loc (l, ctx)) )
       |> fun n ->
       if dst && List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.Iterate (0, n) else n
     in
@@ -296,9 +294,11 @@ module Make (Dom : Abstract.Dom) = struct
           match Map.add m ~key:(Ref.name r) ~data:r with
           | `Ok m -> m
           | `Duplicate ->
-              let nm = Name.to_string (Ref.name r) in
-              failwith
-                (Format.sprintf "Non-uniquely-named reference %s violates well-formedness" nm))
+              if Ref.equal r @@ Map.find_exn m (Ref.name r) then m
+              else
+                failwith
+                  (Format.asprintf "Non-uniquely-named references %a violates well-formedness"
+                     Ref.pp r))
     in
     let lookup_name nm =
       match Name.Map.find ref_map nm with
@@ -318,7 +318,7 @@ module Make (Dom : Abstract.Dom) = struct
             let is_into_loop_body =
               match Map.find loop_head_map (Cfg.dst cfg_edge) with
               | None -> false
-              | Some heads -> Set.mem heads (Cfg.src cfg_edge)
+              | Some head -> Cfg.(Loc.equal head (src cfg_edge))
             in
             let src_astate =
               lookup_name
@@ -512,10 +512,10 @@ module Make (Dom : Abstract.Dom) = struct
                              |> Seq.filter ~f:(Ref.equal callsite >> not)
                              |> Seq.hd_exn
                            in
-                           Dom.Ctx.equal ctx
-                             (Dom.Ctx.callee_ctx ~caller_state:(Ref.astate_exn prestate_ref)
-                                ~callsite:(Ref.stmt_exn callsite)
-                                ~ctx:(Name.ctx_exn @@ Ref.name prestate_ref)))
+                           Option.exists (Ref.astate prestate_ref) ~f:(fun caller_state ->
+                               Dom.Ctx.equal ctx
+                                 (Dom.Ctx.callee_ctx ~caller_state ~callsite:(Ref.stmt_exn callsite)
+                                    ~ctx:(Name.ctx_exn @@ Ref.name prestate_ref))))
                        |> Seq.fold ~init:acc ~f:(flip List.cons)
                    | _ -> acc)
             in
@@ -719,7 +719,7 @@ module Make (Dom : Abstract.Dom) = struct
                    Dom.Ctx.(
                      equal (callee_ctx ~caller_state ~callsite ~ctx:immediate_caller_ctx) ctx)
                  then
-                   match r with
+                   match ref_by_name_exn (Ref.name r) daig with
                    | AState phi ->
                        let new_flow_to_entry = Some (bind_formals caller_state callsite callee) in
                        phi.state <- Option.merge phi.state new_flow_to_entry Dom.join
