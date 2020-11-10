@@ -43,7 +43,7 @@ let do_n_edits_and_queries =
 
         Cfg.Loc.reset ();
         if dd && incr then (
-          let module RE = Random_edits.Make (Incr.Make (Itv)) in
+          let module RE = Random_edits.Make (Incr.Make (Octagon)) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
@@ -53,7 +53,7 @@ let do_n_edits_and_queries =
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if dd then (
-          let module RE = Random_edits.Make (Itv) in
+          let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
@@ -64,14 +64,14 @@ let do_n_edits_and_queries =
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if incr then (
-          let module RE = Random_edits.Make (Incr.Make (Itv)) in
+          let module RE = Random_edits.Make (Incr.Make (Octagon)) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let f = RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else
-          let module RE = Random_edits.Make (Itv) in
+          let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let f =
