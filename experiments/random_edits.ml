@@ -362,60 +362,59 @@ let%test "add an ite before a while loop" =
   Random.init 12345;
 
   let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
+    Cfg_parser.(json_of_file >> cfg_of_json) (Util.test_case "while_syntax")
   in
   let daig = AB.D.of_cfg cfg in
   let edited_daig = AB.add_ite_at Cfg.Loc.entry ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig in
-  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test1.dot";
+  AB.D.dump_dot edited_daig ~filename:"edit_test1.dot";
   true
 
 let%test "add an ite inside of a while loop" =
   Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
+      (Util.test_case "while_syntax")
   in
   let daig = AB.D.of_cfg cfg in
   let edited_daig =
     AB.add_ite_at Cfg.Loc.(of_int_unsafe 2) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
   in
-  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test2.dot";
+  AB.D.dump_dot edited_daig ~filename:"edit_test2.dot";
   true
 
 let%test "add an ite inside of an ite" =
   Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
+      (Util.test_case "arith_syntax")
   in
   let daig = AB.D.of_cfg cfg in
   let edited_daig =
     AB.add_ite_at Cfg.Loc.(of_int_unsafe 3) ~cond ~if_stmt:stmt1 ~else_stmt:stmt2 daig
   in
-  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test3.dot";
+  AB.D.dump_dot edited_daig ~filename:"edit_test3.dot";
   true
 
 let%test "add a while inside of an ite" =
   Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
+      (Util.test_case "arith_syntax")
   in
   let daig = AB.D.of_cfg cfg in
   let edited_daig = AB.add_loop_at Cfg.Loc.(of_int_unsafe 3) ~cond ~body:stmt1 daig in
-  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test4.dot";
+  AB.D.dump_dot edited_daig ~filename:"edit_test4.dot";
   true
 
 let%test "add a while in straightline code" =
   Random.init 12345;
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
+      (Util.test_case "arith_syntax")
   in
   let daig = AB.D.of_cfg cfg in
   let edited_daig = AB.add_loop_at Cfg.Loc.(of_int_unsafe 1) ~cond ~body:stmt1 daig in
-  AB.D.dump_dot edited_daig ~filename:"/Users/benno/Documents/CU/code/d1a/edit_test5.dot";
+  AB.D.dump_dot edited_daig ~filename:"edit_test5.dot";
   true
 
 let%test "fuzz 100 edits/queries" =

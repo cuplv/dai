@@ -202,8 +202,6 @@ end
 module T = struct
   type t = G.t * Pure.t * Env.t [@@deriving equal, compare]
 
-  module Stmt = D1a.Ast.Stmt
-
   let init =
     Graph.create (module G) ~nodes:[ Memloc.null ] ~edges:[] >> fun g ->
     (g, [], Env.empty |> Env.add_exn ~key:"null" ~data:Memloc.null)
@@ -388,6 +386,16 @@ module T = struct
 
   let is_bot (_, p, _) = Pure.is_bot p
 
+  let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
+    let _return_graph, _return_pures, return_env = return_state in
+    let _caller_graph, _caller_pures, _caller_env = caller_state in
+    match Env.find return_env "RETVAL" with
+    | None -> return_state
+    | Some _retval_memloc ->
+        (* bind lhs of callsite to retval_memloc *)
+        (* handle shadowing: keep caller_env bindings that were shadowed?  need that list of defs for the callee for that though*)
+        failwith "todo"
+
   (*let process_pures (g,p,e) = build equivalence classes, collapse addresses known to be equal, go to bottom if contradiction; apply after each [interpret]?*)
 
   let interpret stmt (g, p, e) =
@@ -509,53 +517,51 @@ module T = struct
 end
 
 include T
-
-let a0, a1, a2, a3 = (Memloc.of_int 0, Memloc.of_int 1, Memloc.of_int 2, Memloc.of_int 3)
-
-let x0_y1 = Env.of_alist_exn [ ("x", a0); ("y", a1) ]
-
-let x_lseg_y = Graph.create (module G) ~nodes:[ a0; a1 ] ~edges:[ (a0, a1, `List_seg) ] ()
-
-let x2_y3 = Env.of_alist_exn [ ("x", Memloc.of_int 2); ("y", Memloc.of_int 3) ]
-
-let x_pt_something_lseg_y =
-  Graph.create
-    (module G)
-    ~nodes:[ a2; a0; a3 ]
-    ~edges:[ (a2, a0, `Next_ptr); (a0, a3, `List_seg) ]
-    ()
-
-let%test "widen example from Evan" =
-  let res = widen (x_lseg_y, [], x0_y1) (x_pt_something_lseg_y, [], x2_y3) in
-  Format.fprintf Format.std_formatter "WIDEN RESULT 1:\n%a\n" pp res;
-  true
-
-let l1_curr1 = Env.of_alist_exn [ ("l", a1); ("curr", a1) ]
-
-let l1_curr2 = Env.of_alist_exn [ ("l", a1); ("curr", a2) ]
-
-let l_curr_alias_list =
-  Graph.create (module G) ~nodes:[ a1; Memloc.null ] ~edges:[ (a1, Memloc.null, `List_seg) ] ()
-
-let l_next_curr_list =
-  Graph.create
-    (module G)
-    ~nodes:[ a1; a2; Memloc.null ]
-    ~edges:[ (a1, a2, `Next_ptr); (a2, Memloc.null, `List_seg) ]
-    ()
-
-let%test "second widen example from Evan" =
-  let res = widen (l_curr_alias_list, [], l1_curr1) (l_next_curr_list, [], l1_curr2) in
-  Format.fprintf Format.std_formatter "\nWIDEN RESULT 2:\n%a\n" pp res;
-  true
-
-module IncrT = D1a.Incr.Make (T)
+module IncrT = D1a.Context.MakeInsensitive (D1a.Incr.Make (T))
 module Daig = D1a.Daig.Make (IncrT)
 
-let%test "build daig and dump dot: list_append.js" =
+(*let%test "build daig, analye, dump dot: buckets_list_reverse.js" =
   let cfg =
     D1a.Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/list_append.js"
+      ((Unix.getcwd ()) ^ "/test_cases/buckets_list_reverse.js")
+  in
+  let a0 = Memloc.of_int 0 in
+  let env = Env.of_alist_exn [ ("firstNode", a0) ] in
+  let mem =
+    Graph.create (module G) ~nodes:[ a0; Memloc.null ] ~edges:[ (a0, Memloc.null, `List_seg) ] ()
+  in
+  let init_state = IncrT.lift (mem, [], env) in
+  let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
+  let exit_loc = D1a.Daig.Name.Loc D1a.Cfg.Loc.exit in
+  let _, daig = Daig.get_by_name exit_loc daig in
+  Daig.dump_dot daig
+    ~filename:"buckets_list_reverse_daig_full.dot";
+  true
+ *)
+(*
+
+let%test "build daig, analye, dump dot: buckets_list_indexof.js" =
+  let cfg =
+    D1a.Cfg_parser.(json_of_file >> cfg_of_json)
+      ((Unix.getcwd ()) ^ "/test_cases/buckets_list_indexof.js")
+  in
+  let a0 = Memloc.of_int 0 in
+  let env = Env.of_alist_exn [ ("firstNode", a0) ] in
+  let mem =
+    Graph.create (module G) ~nodes:[ a0; Memloc.null ] ~edges:[ (a0, Memloc.null, `List_seg) ] ()
+  in
+  let init_state = IncrT.lift (mem, [], env) in
+  let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
+  let exit_loc = D1a.Daig.Name.Loc D1a.Cfg.Loc.exit in
+  let _, daig = Daig.get_by_name exit_loc daig in
+  Daig.dump_dot daig
+    ~filename:"buckets_list_indexof_daig_full.dot";
+  true
+
+let%test "build daig, analye, dump dot: list_append.js" =
+  let cfg =
+    D1a.Cfg_parser.(json_of_file >> cfg_of_json)
+      ((Unix.getcwd ()) ^ "/test_cases/list_append.js")
   in
   let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
   let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in
@@ -568,11 +574,61 @@ let%test "build daig and dump dot: list_append.js" =
   in
   let init_state = IncrT.lift (mem, [], env) in
   let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/list_daig.dot";
-  let query_loc = D1a.Daig.Name.(Iterate (1, Loc (D1a.Cfg.Loc.of_int_unsafe 2))) in
-  let _, daig = Daig.get_by_name query_loc daig in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/list_daig_partial.dot";
   let exit_loc = D1a.Daig.Name.Loc D1a.Cfg.Loc.exit in
   let _, daig = Daig.get_by_name exit_loc daig in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/list_daig_full.dot";
+  Daig.dump_dot daig ~filename:"list_daig_full.dot";
   true
+
+let%test "build daig, analye, dump dot: buckets_list_remove.js" =
+  let cfg =
+    D1a.Cfg_parser.(json_of_file >> cfg_of_json)
+      ((Unix.getcwd ()) ^ "/test_cases/buckets_list_remove.js")
+  in
+  let a0 = Memloc.of_int 0 in
+  let env = Env.of_alist_exn [ ("firstNode", a0) ] in
+  let mem =
+    Graph.create (module G) ~nodes:[ a0; Memloc.null ] ~edges:[ (a0, Memloc.null, `List_seg) ] ()
+  in
+  let init_state = IncrT.lift (mem, [], env) in
+  let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
+  let exit_loc = D1a.Daig.Name.Loc D1a.Cfg.Loc.exit in
+  let _, daig = Daig.get_by_name exit_loc daig in
+  Daig.dump_dot daig
+    ~filename:"buckets_list_remove_daig_full.dot";
+  true
+
+
+
+let%test "build daig, analye, dump dot: buckets_list_foreach.js" =
+  let cfg =
+    D1a.Cfg_parser.(json_of_file >> cfg_of_json)
+      ((Unix.getcwd ()) ^ "/test_cases/buckets_list_foreach.js")
+  in
+  let a0 = Memloc.of_int 0 in
+  let env = Env.of_alist_exn [ ("firstNode", a0) ] in
+  let mem =
+    Graph.create (module G) ~nodes:[ a0; Memloc.null ] ~edges:[ (a0, Memloc.null, `List_seg) ] ()
+  in
+  let init_state = IncrT.lift (mem, [], env) in
+  let daig = Daig.of_js_cfg_unsafe ~init_state cfg in
+  let exit_loc = D1a.Daig.Name.Loc D1a.Cfg.Loc.exit in
+  let _, daig = Daig.get_by_name exit_loc daig in
+  Daig.dump_dot daig
+    ~filename:"buckets_list_foreach_daig_full.dot";
+  true
+
+let%test "equivalence classes from pures" =
+  let a0, a1, a2, a3, a4, a5 =
+    ( Memloc.of_int 0,
+      Memloc.of_int 1,
+      Memloc.of_int 2,
+      Memloc.of_int 3,
+      Memloc.of_int 4,
+      Memloc.of_int 5 )
+  in
+  let ps = [ Pure.eq a1 a2; Pure.eq a2 a3; Pure.eq a0 a4; Pure.eq a5 a0 ] in
+  let eqs_as_lists = Pure.equiv_classes ps |> Set.to_list |> List.map ~f:Set.to_list in
+  let pp = List.pp "////" (List.pp "," Memloc.pp) in
+  Format.fprintf Format.std_formatter "%a" pp eqs_as_lists;
+  true
+ *)

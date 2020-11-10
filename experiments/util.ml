@@ -1,6 +1,6 @@
-let test_case f = "/Users/benno/Documents/CU/code/d1a/test_cases/" ^ f ^ ".js"
+let test_case f = Unix.getcwd () ^ "/test_cases/" ^ f ^ ".js"
 
-let output = ( ^ ) "/Users/benno/Documents/CU/code/d1a/out/"
+let output = ( ^ ) (Unix.getcwd () ^ "/out/")
 
 let daig_output f = output ("daig/" ^ f ^ ".dot")
 

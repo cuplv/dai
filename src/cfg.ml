@@ -239,6 +239,7 @@ let reachable_subgraph (cfg : G.t) ~(from : G.node) : G.t =
   Graph.create (module G) ~edges ()
 
 let dump_dot ?print ~filename (cfg, fns) =
+  let filename = Unix.getcwd () ^ "/" ^ filename in
   let output_fd =
     if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
   in

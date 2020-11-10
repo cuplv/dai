@@ -191,6 +191,7 @@ module Make (Dom : Abstract.Dom) = struct
     | None -> failwith (Format.asprintf "No reference exists with name: %s" (Name.to_string nm))
 
   let dump_dot ?print ~filename daig =
+    let filename = Unix.getcwd () ^ "/" ^ filename in
     let g, _fns = daig in
     let output_fd =
       if Option.is_some print then Unix.stdout
@@ -746,7 +747,7 @@ module Make (Dom : Abstract.Dom) = struct
             match Cfg.containing_fn l (snd daig) with
             | Some fn -> get_by_loc l ctx (add_region_to_daig ~from_loc:(Cfg.Fn.entry fn) ~ctx daig)
             | None ->
-                dump_dot ~filename:"/Users/benno/Documents/CU/code/d1a/error_dump.dot" daig;
+                dump_dot ~filename:"error_dump.dot" daig;
                 failwith
                   (Format.asprintf "location %a not found; daig dumped at error_dump.dot" Cfg.Loc.pp
                      l) ) )
@@ -962,40 +963,32 @@ end
 module Dom = Context.MakeInsensitive (Incr.Make (Itv))
 module Daig = Make (Dom)
 
+let file = ( ^ ) (Unix.getcwd () ^ "/")
+
 let%test "build daig and dump dot: arith_syntax.js" =
-  let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/arith_syntax.js"
-  in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/arith_syntax.js") in
   let daig = Daig.of_cfg cfg in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/arith_daig.dot";
+  Daig.dump_dot daig ~filename:"arith_daig.dot";
   true
 
 let%test "build daig and issue queries: while_syntax.js" =
-  let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/while_syntax.js"
-  in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/while_syntax.js") in
   let l1 = Daig.Name.Loc (Cfg.Loc.of_int_unsafe 1, Dom.Ctx.init) in
   let daig = Daig.of_cfg cfg in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig.dot";
+  Daig.dump_dot daig ~filename:"while_daig.dot";
   let _, daig = Daig.get_by_name Daig.Name.(Prod (Iterate (0, l1), Iterate (1, l1))) daig in
-  Daig.dump_dot daig
-    ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig_straightline_demand.dot";
+  Daig.dump_dot daig ~filename:"while_daig_straightline_demand.dot";
   let _, daig = Daig.get_by_name (Daig.Name.Loc (Cfg.Loc.exit, Dom.Ctx.init)) daig in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/while_daig_loop_demand.dot";
+  Daig.dump_dot daig ~filename:"while_daig_loop_demand.dot";
   let daig = Daig.add_stmt_at (Cfg.Loc.of_int_unsafe 2) Ast.Stmt.skip daig in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/w_e1.dot";
+  Daig.dump_dot daig ~filename:"w_e1.dot";
   true
 
 let%test "build daig and issue query at exit: functions.js" =
-  let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/functions.js"
-  in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/functions.js") in
   let daig = Daig.of_cfg cfg in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/functions_initial_daig.dot";
+  Daig.dump_dot daig ~filename:"functions_initial_daig.dot";
   let exit_name = Daig.Name.(Loc (Cfg.Loc.exit, Dom.Ctx.init)) in
   let _, daig = Daig.get_by_name exit_name daig in
-  Daig.dump_dot daig ~filename:"/Users/benno/Documents/CU/code/d1a/functions_evaluated_daig.dot";
+  Daig.dump_dot daig ~filename:"functions_evaluated_daig.dot";
   true
