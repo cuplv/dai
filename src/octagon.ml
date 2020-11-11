@@ -254,7 +254,7 @@ let show oct =
   pp Format.str_formatter oct;
   Format.flush_str_formatter ()
 
-let hash seed oct = seeded_hash seed @@ Abstract1.hash (get_man ()) oct
+let hash seed oct = try seeded_hash seed @@ Abstract1.hash (get_man ()) oct with Apron.Manager.Error _ -> seed
 
 let compare _l _r = failwith "todo"
 
