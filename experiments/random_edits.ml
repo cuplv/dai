@@ -127,9 +127,9 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
         Set.find fns ~f:(fun fn -> Graph.is_reachable (module Cfg.G) cfg (Cfg.Fn.entry fn) l)
       with
       | Some ({ name; formals; locals; entry; exit } as fn) ->
-          let new_fn : Cfg.Fn.t =
-            { name; formals; locals = Option.cons (Stmt.def body) locals; entry; exit }
-          in
+          let locals = Option.cons (Stmt.def body) locals in
+          let exit = if Cfg.Loc.equal l exit then exit_loc else exit in
+          let new_fn : Cfg.Fn.t = { name; formals; locals; entry; exit } in
           Set.remove fns fn |> flip Set.add new_fn
       | None -> fns
     in
@@ -148,8 +148,6 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
           | Some (AState { state; name = _ } as r), None -> (r, state)
           | _ -> failwith "Can only insert loops in straightline code"
         in
-        let daig = D.dirty_from l_ref daig in
-        D.Ref.dirty l_ref;
         let body_ref =
           D.Ref.AState { state = None; name = Nm.Iterate (0, Nm.Loc (body_loc, ctx)) }
         in
@@ -188,7 +186,8 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
         |> N.insert assume_neg_stmt_ref
         |> E.insert (E.create l_ref exit_ref `Transfer)
         |> E.insert (E.create assume_neg_stmt_ref exit_ref `Transfer)
-        |> flip pair cfg)
+        |> flip pair cfg |> D.dirty_from exit_ref
+        $> fun _ -> D.Ref.dirty l_ref)
 
   let functions = ref (-1)
 
