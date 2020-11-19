@@ -48,9 +48,13 @@ let do_n_edits_and_queries =
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
-            apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
+            apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f = RE.random_edit >> issue_queries in
+          let f x n =
+            let x = RE.random_edit x in
+            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
+            issue_queries x
+          in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if dd then (
@@ -58,24 +62,34 @@ let do_n_edits_and_queries =
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
-            apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
+            apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f = RE.D.drop_cache >> RE.random_edit >> issue_queries in
+          let f x n =
+            let x = RE.(D.drop_cache >> random_edit) x in
+            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
+            issue_queries x
+          in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if incr then (
           let module RE = Random_edits.Make (Incr.Make (Octagon)) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
-          let f = RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x in
+          let f x n =
+            let x = RE.random_edit x in
+            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
+            time fs_out "" ~f:RE.issue_exit_query ~x
+          in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else
           let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
-          let f =
-            RE.D.drop_cache >> RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x
+          let f x n =
+            let x = RE.(D.drop_cache >> random_edit) x in
+            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
+            time fs_out "" ~f:RE.issue_exit_query ~x
           in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig]

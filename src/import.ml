@@ -39,13 +39,11 @@ let range i j =
   aux j []
 
 let rec apply_n_times ~n ~init ~f =
-  if n <= 0 then init else apply_n_times ~n:(pred n) ~init:(f init) ~f
+  if n <= 0 then init else apply_n_times ~n:(pred n) ~init:(f init n) ~f
 
 let time ~f ~x fs descr =
   let st = systime () in
-  f x $> fun _ ->
-  Format.fprintf fs "%s%.3f\n" descr (1000. *. (systime () -. st));
-  Format.pp_print_flush fs ()
+  f x $> fun _ -> Format.fprintf fs "%s%.3f\n" descr (1000. *. (systime () -. st))
 
 module Option = struct
   include Base.Option
