@@ -218,11 +218,16 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
 let extend_env_by_uses stmt oct =
   let env = Abstract1.env oct in
   let man = get_man () in
-  Ast.Stmt.uses stmt
-  |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
-  |> Set.to_array |> Array.map ~f:Var.of_string
-  |> Environment.add env [||]
-  |> fun new_env -> Abstract1.change_environment man oct new_env true
+  (* adding RETVAL here is a hack -- not sure why, but apron complains down the line if RETVAL
+     is not in the env, including throwing an error if you try to add it explicitly. *)
+  let new_uses =
+    Ast.Stmt.uses stmt |> flip Set.add "RETVAL"
+    |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
+  in
+  if Set.is_empty new_uses then oct
+  else
+    new_uses |> Set.to_array |> Array.map ~f:Var.of_string |> Environment.add env [||]
+    |> fun new_env -> Abstract1.change_environment man oct new_env true
 
 let interpret stmt oct =
   let open Ast.Stmt in
@@ -238,7 +243,8 @@ let interpret stmt oct =
       let new_env =
         if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
       in
-      let oct_new_env = Abstract1.change_environment man oct new_env true in
+      let oct_new_env = Abstract1.change_environment man oct new_env false in
+
       match texpr_of_expr oct rhs with
       | Some rhs_texpr ->
           Abstract1.assign_texpr man oct_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None
@@ -254,7 +260,7 @@ let show oct =
   pp Format.str_formatter oct;
   Format.flush_str_formatter ()
 
-let hash seed oct = try seeded_hash seed @@ Abstract1.hash (get_man ()) oct with Apron.Manager.Error _ -> seed
+let hash seed oct = seeded_hash seed @@ Abstract1.hash (get_man ()) oct
 
 let compare _l _r = failwith "todo"
 
