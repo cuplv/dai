@@ -415,7 +415,7 @@ module Make (Dom : Abstract.Dom) = struct
 
   (* Transform the DAIG [g] by unrolling one step further the loop whose current abstract iterate is at [curr_iter] *)
   let unroll_loop (daig : t) (curr_iter : Ref.t) =
-    let g, fns = daig in
+    let g, cfg = daig in
     (* First, find the entire previous unrolling [loop_edges]: all DAIG edges backwards-reachable from [curr_iter] without going through the previous iteration *)
     let curr_idx, loop_head =
       match Ref.name curr_iter with
@@ -488,54 +488,60 @@ module Make (Dom : Abstract.Dom) = struct
     in
     (* Finally, remove the old "fix" edges and add the newly constructed edges. Incident nodes are added automatically.*)
     let g_without_fix_edges = Seq.fold (G.Node.inputs fixpoint g) ~init:g ~f:(flip G.Edge.remove) in
-    List.fold all_new_edges ~init:g_without_fix_edges ~f:(flip G.Edge.insert) |> flip pair fns
+    List.fold all_new_edges ~init:g_without_fix_edges ~f:(flip G.Edge.insert) |> flip pair cfg
 
   let dirty_from r daig =
     let g, cfg = daig in
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n g in
       if Seq.is_empty outgoing_edges then (
-        let loc, ctx =
-          match Ref.name n with
-          | Name.Loc (l, c) -> (l, c)
-          | x ->
-              failwith
-                (Format.asprintf
-                   "outdegree-0 refs must be abstract state for a function or program exit \
-                    location; [%a] is neither"
-                   Name.pp x)
-        in
-        (* If None, this is the program exit and we're done.  if Some, this is a function exit, so we:
-            * find [possible_callers]: those daig refs for locations to which control may return from this function (taking contexts into account)
-            * dirty each one and add to the frontier to continue change propagation.
-        *)
-        match Set.find (snd cfg) ~f:(Cfg.Fn.exit >> Cfg.Loc.equal loc) with
-        | None -> acc
-        | Some { name; _ } ->
-            let possible_callers =
-              G.nodes g
-              |> Seq.fold ~init:[] ~f:(fun acc ->
-                   function
-                   | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } as callsite
-                     when String.equal fn name ->
-                       Seq.filter (G.Node.succs callsite g) ~f:(fun poststate_ref ->
-                           Option.is_some (Ref.astate poststate_ref)
-                           &&
-                           let prestate_ref =
-                             G.Node.preds poststate_ref g
-                             |> Seq.filter ~f:(Ref.equal callsite >> not)
-                             |> Seq.hd_exn
-                           in
-                           Option.exists (Ref.astate prestate_ref) ~f:(fun caller_state ->
-                               Dom.Ctx.equal ctx
-                                 (Dom.Ctx.callee_ctx ~caller_state ~callsite:(Ref.stmt_exn callsite)
-                                    ~ctx:(Name.ctx_exn @@ Ref.name prestate_ref))))
-                       |> Seq.fold ~init:acc ~f:(flip List.cons)
-                   | _ -> acc)
-            in
-            List.iter possible_callers ~f:Ref.dirty;
-            let frontier, loophead_fixpoints = acc in
-            (List.append possible_callers frontier, loophead_fixpoints) )
+        match Ref.name n with
+        | Name.Loc (loc, ctx) -> (
+            (* If None, this is the program exit and we're done.  if Some, this is a function exit, so we:
+             * find [possible_callers]: those daig refs for locations to which control may return from this function (taking contexts into account)
+             * dirty each one and add to the frontier to continue change propagation.
+             *)
+            match Set.find (snd cfg) ~f:(Cfg.Fn.exit >> Cfg.Loc.equal loc) with
+            | None -> acc
+            | Some { name; _ } ->
+                let possible_callers =
+                  G.nodes g
+                  |> Seq.fold ~init:[] ~f:(fun acc ->
+                       function
+                       | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } as callsite
+                         when String.equal fn name ->
+                           Seq.filter (G.Node.succs callsite g) ~f:(fun poststate_ref ->
+                               Option.is_some (Ref.astate poststate_ref)
+                               &&
+                               let prestate_ref =
+                                 G.Node.preds poststate_ref g
+                                 |> Seq.filter ~f:(Ref.equal callsite >> not)
+                                 |> Seq.hd_exn
+                               in
+                               Option.exists (Ref.astate prestate_ref) ~f:(fun caller_state ->
+                                   Dom.Ctx.equal ctx
+                                     (Dom.Ctx.callee_ctx ~caller_state
+                                        ~callsite:(Ref.stmt_exn callsite)
+                                        ~ctx:(Name.ctx_exn @@ Ref.name prestate_ref))))
+                           |> Seq.fold ~init:acc ~f:(flip List.cons)
+                       | _ -> acc)
+                in
+                List.iter possible_callers ~f:Ref.dirty;
+                let frontier, loophead_fixpoints = acc in
+                (List.append possible_callers frontier, loophead_fixpoints) )
+        | Name.Iterate (_, l) ->
+           (* this is a hack -- graphlib doesn't seem to actually remove edges/nodes sometimes,
+              so just jump to the loop head if we somehow end up in a dangling unrolling *)
+            let lh_fp = ref_by_name_exn l daig in
+            let f, lh_fps = acc in
+            (lh_fp :: f, lh_fp :: lh_fps)
+        | x ->
+            dump_dot ~filename:"malformed.dot" daig;
+            failwith
+              (Format.asprintf
+                 "outdegree-0 refs must be abstract state for a function or program exit location; \
+                  [%a] is neither"
+                 Name.pp x) )
       else
         Seq.fold outgoing_edges ~init:acc ~f:(fun (frontier, lh_fps) e ->
             let succ = G.Edge.dst e in
@@ -601,8 +607,9 @@ module Make (Dom : Abstract.Dom) = struct
                   (module G)
                   daig root_of_dangling_unrollings ~init:daig
                   ~f:(fun daig n ->
-                    Seq.fold ~init:(G.Node.remove n daig) ~f:(flip G.Edge.remove)
-                      (G.Node.inputs n daig))
+                    Ref.dirty n;
+                    Seq.fold ~init:daig ~f:(flip G.Edge.remove) (G.Node.inputs n daig)
+                    |> G.Node.remove n)
             | _ -> daig )
         | _ ->
             failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
