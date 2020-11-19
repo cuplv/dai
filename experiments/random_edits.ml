@@ -203,6 +203,7 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
       Cfg.Fn.make ~name ~formals:[ formal ] ~entry ~exit ~body:[ (entry, exit, body_stmt) ]
     in
     (g, (Cfg.G.Edge.(insert (create entry exit body_stmt) cfg), Cfg.Fn.Set.add fns new_fn))
+    |> pair name
 
   (** Generate a random arithmetic [Ast.Expr.t], uniformly drawn from:
    * number literal
@@ -267,17 +268,18 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
       Cfg.containing_fn loc (snd daig)
       >>| (Cfg.Fn.name >> flip String.drop_prefix 1 >> Int.of_string)
     in
-    let daig =
+    let callee, daig =
       if
         !functions < 0
         || Option.exists caller ~f:(Int.equal !functions)
-        || Int.equal 0 (Random.int 5)
+        || Int.equal 0 (Random.int 2)
       then add_fresh_fn daig
-      else daig
-    in
-    let callee =
-      Option.(map caller ~f:Int.succ |> value ~default:0)
-      |> flip Random.int_incl !functions |> Int.to_string |> ( ^ ) "f"
+      else
+        let callee =
+          Option.(map caller ~f:Int.succ |> value ~default:0)
+          |> flip Random.int_incl !functions |> Int.to_string |> ( ^ ) "f"
+        in
+        callee,daig
     in
     let call =
       Ast.Stmt.Call { lhs = gen_arith_ident (); fn = callee; actuals = [ gen_arith_expr () ] }
@@ -305,7 +307,6 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
       * 20% insert a conditional
       * 10% insert a while loop
       *)
-
   let random_edit daig =
     let sample_loc_no_fn_exits () =
       let fn_exits = (snd >> snd) daig |> Set.to_list |> List.map ~f:Cfg.Fn.exit in
@@ -315,8 +316,7 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
       done;
       !l
     in
-
-    match Random.int 10 with
+    match Random.int 20 with
     | 0 ->
         (* no nested loops, so keep sampling locations until finding one not in any loop *)
         let l = ref (Cfg.Loc.sample ()) in
