@@ -390,6 +390,19 @@ module Make (Dom : Abstract.Dom) = struct
     let daig = Graph.create (module G) ~nodes:[] ~edges:[] () in
     add_region_to_daig ~init_state ~from_loc:Cfg.Loc.entry ~ctx:Dom.Ctx.init (daig, cfg)
 
+  let refs_at_loc ~loc =
+    fst >> G.nodes
+    >> Seq.filter ~f:(function
+         | Ref.AState { state = _; name = Name.Loc (l, _) } -> Cfg.Loc.equal l loc
+         | Ref.AState { state = _; name = Name.(Iterate (0, Loc (l, _))) } -> Cfg.Loc.equal l loc
+         | _ -> false)
+    >> Seq.to_list
+
+  let contexts_at_loc ~loc daig =
+    refs_at_loc ~loc daig
+    |> List.filter_map ~f:(fun r -> Name.ctx (Ref.name r))
+    |> List.dedup_and_sort ~compare:Dom.Ctx.compare
+
   (* TODO: handle nested loops, increasing a given loop head's iteration count and holding others constant *)
   let increment_iteration _loop_head = function
     | Name.Iterate (i, n) -> Name.Iterate (i + 1, n)
@@ -526,6 +539,18 @@ module Make (Dom : Abstract.Dom) = struct
       else
         Seq.fold outgoing_edges ~init:acc ~f:(fun (frontier, lh_fps) e ->
             let succ = G.Edge.dst e in
+            let callees =
+              Seq.find_map (G.Node.preds succ g) ~f:(function
+                | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } -> Some fn
+                | _ -> None)
+              |> function
+              | Some fn ->
+                  Set.find_exn (snd cfg) ~f:(Cfg.Fn.name >> String.equal fn) |> Cfg.Fn.entry
+                  |> fun loc -> refs_at_loc ~loc daig
+              | None -> []
+            in
+            List.iter callees ~f:Ref.dirty;
+            let frontier = List.append callees frontier in
             if Ref.is_empty succ then (frontier, lh_fps)
             else if
               Comp.equal `Fix (G.Edge.label e) && (not @@ List.mem lh_fps succ ~equal:Ref.equal)
@@ -776,19 +801,6 @@ module Make (Dom : Abstract.Dom) = struct
               "error, malformed DAIG -- predecessors of the fixpoint are named in the above form" )
     | _ -> get astate_ref daig
 
-  let refs_at_loc ~loc =
-    fst >> G.nodes
-    >> Seq.filter ~f:(function
-         | Ref.AState { state = _; name = Name.Loc (l, _) } -> Cfg.Loc.equal l loc
-         | Ref.AState { state = _; name = Name.(Iterate (0, Loc (l, _))) } -> Cfg.Loc.equal l loc
-         | _ -> false)
-    >> Seq.to_list
-
-  let contexts_at_loc ~loc daig =
-    refs_at_loc ~loc daig
-    |> List.filter_map ~f:(fun r -> Name.ctx (Ref.name r))
-    |> List.dedup_and_sort ~compare:Dom.Ctx.compare
-
   (** IMPURE -- modifies the specified cell and clears the value of forwards-reachable cells*)
   let edit_stmt (r : Ref.t) (stmt : Ast.Stmt.t) (daig : t) =
     match r with
@@ -985,10 +997,16 @@ let%test "build daig and issue queries: while_syntax.js" =
   true
 
 let%test "build daig and issue query at exit: functions.js" =
-  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/functions.js") in
+  let cfg =
+    Cfg_parser.(json_of_file >> cfg_of_json)
+      "/Users/benno/Documents/CU/code/d1a/test_cases/functions.js"
+  in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"functions_initial_daig.dot";
   let exit_name = Daig.Name.(Loc (Cfg.Loc.exit, Dom.Ctx.init)) in
   let _, daig = Daig.get_by_name exit_name daig in
   Daig.dump_dot daig ~filename:"functions_evaluated_daig.dot";
+  let entry_ref, daig = Daig.get_by_name Daig.Name.(Loc (Cfg.Loc.entry, Dom.Ctx.init)) daig in
+  let daig = Daig.dirty_from entry_ref daig in
+  Daig.dump_dot daig ~filename:"functions_dirtied_daig.dot";
   true
