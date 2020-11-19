@@ -58,10 +58,9 @@ let do_n_edits_and_queries =
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let issue_queries init =
-            apply_n_times ~n:qpe ~init
-              ~f:(RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
+            apply_n_times ~n:qpe ~init ~f:(fun x -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f = RE.random_edit >> issue_queries in
+          let f = RE.D.drop_cache >> RE.random_edit >> issue_queries in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
         else if incr then (
@@ -76,7 +75,7 @@ let do_n_edits_and_queries =
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
           let f =
-            RE.random_edit >> RE.D.drop_cache >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x
+            RE.D.drop_cache >> RE.random_edit >> fun x -> time fs_out "" ~f:RE.issue_exit_query ~x
           in
           let daig = apply_n_times ~n ~init ~f in
           RE.D.dump_dot ~filename:(Util.daig_output filename) daig]
