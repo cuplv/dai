@@ -138,3 +138,10 @@ end
 
 module Graph = Graphlib.Std.Graphlib
 module Seq = Regular.Std.Seq
+
+
+let (=) = Stdlib.(=)
+let (<) = Stdlib.(<)
+let (>) = Stdlib.(>)
+let (<=) = Stdlib.(<=)
+let (>=) = Stdlib.(>=)
