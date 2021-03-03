@@ -3,7 +3,6 @@ default: build
 
 .PHONY: build
 build:
-	cp `find ../adapton.ocaml/ -name bits.cmx` $(OPAM_SWITCH_PREFIX)/lib/adapton
 	dune build
 	cp ./_build/default/experiments/exec.exe ./run_d1a_experiment
 
