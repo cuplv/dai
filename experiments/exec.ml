@@ -55,8 +55,8 @@ let do_n_edits_and_queries =
             if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             issue_queries x
           in
-          let daig = apply_n_times ~n ~init ~f in
-          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
+          let _daig = apply_n_times ~n ~init ~f in
+          () )
         else if dd then (
           let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
@@ -69,8 +69,8 @@ let do_n_edits_and_queries =
             if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             issue_queries x
           in
-          let daig = apply_n_times ~n ~init ~f in
-          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
+          let _daig = apply_n_times ~n ~init ~f in
+          () )
         else if incr then (
           let module RE = Random_edits.Make (Incr.Make (Octagon)) in
           Random.init seed;
@@ -80,8 +80,8 @@ let do_n_edits_and_queries =
             if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             time fs_out "" ~f:RE.issue_exit_query ~x
           in
-          let daig = apply_n_times ~n ~init ~f in
-          RE.D.dump_dot ~filename:(Util.daig_output filename) daig )
+          let _daig = apply_n_times ~n ~init ~f in
+          () )
         else
           let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
@@ -91,7 +91,8 @@ let do_n_edits_and_queries =
             if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             time fs_out "" ~f:RE.issue_exit_query ~x
           in
-          let daig = apply_n_times ~n ~init ~f in
-          RE.D.dump_dot ~filename:(Util.daig_output filename) daig]
+          let _daig = apply_n_times ~n ~init ~f in
+          ()
+    ]
 
 let () = Command.run ~version:"0.1" do_n_edits_and_queries
