@@ -1,12 +1,9 @@
 This README accompanies the artifact submission for PLDI paper #111 "Demanded Abstract Interpretation".
 
 The artifact is provided as an Ubuntu-based Docker image that includes the dependencies to build the tool and reproduce the experiments reported in the paper.
-
-The Dockerfile used to produce the image is provided at the end of this file, in case there are questions about the configuration or a need to rebuild the image locally (e.g. if there are issues with getting-started steps 1 and 2)
+The Dockerfile used to produce the image can be found at `~/d1a_impl/Dockerfile` or in the `artifact` branch of github.com/cuplv/d1a_impl, in case you need to rebuild the image locally or have questions about its configuration.
 
 These instructions describe how to get the image running on your local machine and replicate the papers' experiments.
-
-NB: Many utilities (notably the build system `dune`) are installed through OPAM, the OCaml package manager.  If you ever see a "command not found" error, it is likely that you need to run `eval $(opam env)` to put any OPAM-managed binaries on your $PATH.  Unfortunately, this is per-bash-session and cannot be preconfigured in the Docker image.
 
 =====================
 Getting Started Guide
@@ -31,7 +28,7 @@ Getting Started Guide
       * a prebuilt binary of the experimental driver (`./run_d1a_experiment`)
           - `./run_d1a_experiment -help` for usage information; this driver will generate random edits and queries according to the flags provided.
       * this file (`./README.txt`).
-    You can rebuild the binary with `make` if you wish, after running `eval $(opam env)` to add the necessary binaries to your $PATH.
+    You can rebuild the binary with `make` if you wish.  This will produce an executable binary at `./_build/default/experiments/exec.exe` and copy/rename it to `./run_d1a_experiment`.
 
 5.) Run small versions of the experiments with `./kick_the_tires.sh`, to verify that everything runs smoothly.  This will generate and analyze random sequences of edits and queries as described in Section 7.3, but with 100 edits instead of the full 3000 as shown there.
     This will produce log files in `./out/experiments`, each named according to the analysis configuration, random seed, and number of edits used.  Each log file records the analysis cost (in milliseconds) after each edit.  It will also generate some miniature versions of the figure 10 plots, in `./out/plots`.
@@ -45,12 +42,13 @@ Getting Started Guide
 Step-by-Step Instructions
 =========================
 
-0.) First, follow the getting-started guide through step 3 if you have not already done so, and run the docker image.
+0.) First, follow the getting-started guide through step 3 if you have not already done so, and run the docker image.  Then, `cd` into `~/d1a_impl` for the rest of these instructions.
 
 # Expressivity Experiments
 
-1.) To analyze the Buckets.JS programs as described lines 1069-1078, run `dune runtest experiments` from `~/d1a_impl`.
+1.) To analyze the Buckets.JS programs as described lines 1069-1078, run `dune runtest experiments`.  This will output logs to `./out/experiments` (TODO(benno): verify output directory) containing one line per array access, classifying each access as SAFE, UNSAFE, or UNKNOWN.
 
+2.) To analyze the list-append program shown in the overview and discussed in Section 7.2, run `dune runtest src/shape`.
 TODO(benno): Finish up here once `semantic` is working from within docker.
 
 # Scalability Experiments
@@ -64,16 +62,23 @@ Reviewers are invited to edit the script and adjust these numbers as needed to p
 
 2.) Using `docker cp` as described in step 7 of the getting started guide, view the generated plots.
 
+3.) If desired (after generating plots), the summary statistics reported in the table of Fig. 10 can be reproduced on this dataset:
+    3.a) `sudo apt-get install datamash`
+    3.b) `datamash mean 1 median 1 perc:90 1 perc:95 1 perc:99 1 < tmp/batch_all.log`
+    3.c) `datamash mean 1 median 1 perc:90 1 perc:95 1 perc:99 1 < tmp/incr_all.log`
+    3.d) `datamash mean 1 median 1 perc:90 1 perc:95 1 perc:99 1 < tmp/dd_all.log`
+    3.e) `datamash mean 1 median 1 perc:90 1 perc:95 1 perc:99 1 < tmp/dd_incr_all.log`
+    
 =================================
 Claims supported by this artifact
 =================================
+
 Our paper studies two research questions related to this artifact, referred to as "Expressivity" and "Scalability" and discussed/evaluated in Section 7.
 We reproduce those two RQs here and will discuss each in turn.
 
  * Expressivity: Does the DAIG framework allow for clean and straightforward implementations of rich analysis domains that cannot be handled by existing incremental and/or demand-driven frameworks?
 
  * Scalability: For these rich analysis domains, what degree of performance improvement can be obtained by performing incremental and/or demand-driven analysis, as compared to batch analysis?
-
 
 # Expressivity
 
@@ -104,11 +109,4 @@ Claims not supported by this artifact
 =====================================
  * The claim that these domains "cannot be handled by existing incremental and/or demand-driven frameworks" is not in scope here -- see related work for discussion about that, but such a statement is not suited to artifact evaluation.
 
- * The CDF and table of Figure 10 are likely not to be reproduced by artifact evaluators -- the compute resources necessary to reproduce experiments at that scale are well beyond what the artifact evaluation committe could reasonably be expected to use.
-
-
-==========
-Dockerfile
-==========
-
-TODO(benno) add final Dockerfile here before submitting
+ * The CDF and table of Figure 10 are likely not to be reproduced by artifact evaluators -- the compute resources necessary to reproduce experiments at that scale are well beyond what the artifact evaluation committee could reasonably be expected to use.
