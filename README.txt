@@ -16,21 +16,23 @@ Getting Started Guide
 2.) Load it into Docker.
     `docker load < pldi21_paper111.tar`
 
-3.) Run the image. This should open a bash shell, at the home directory of user `pldi`.
+3.) Run the image. This should open a bash shell, at the home directory of user `pldi`.  This user has sudo privileges and password `pldi`.
     `docker run -it pldi21_paper111 bash`
 
 4.) In `~/d1a_impl` you will find:
       * the source code for our analysis framework (`./src`)
       * the source code of the experimental driver (`./experiments`)
-      * a prebuilt binary of the experimental driver (`./experiments`).
-    You can rebuild the binary with `make` if you wish.  There should be no errors/warnings.
+      * a prebuilt binary of the experimental driver (`./experiments`)
+      * this file (`./README.txt`).
+    You can rebuild the binary with `make` if you wish, after running `eval $(opam env)` to add the necessary binaries to your $PATH.
 
 5.) Run small versions of the experiments with `./kick_the_tires.sh`, to verify that everything runs smoothly.  This will generate and analyze random sequences of edits and queries as described in Section 7.3, but with 100 edits instead of the full 3000 as shown there.
-    This will produce log files in `./out/experiments`, each named according to the analysis configuration, random seed, and number of edits used.  Each log file records the analysis cost (in milliseconds) after each edit.  It will also generate some plots, in `./out/plots`.
+    This will produce log files in `./out/experiments`, each named according to the analysis configuration, random seed, and number of edits used.  Each log file records the analysis cost (in milliseconds) after each edit.  It will also generate some miniature versions of the figure 10 plots, in `./out/plots`.
 
 6.) From outside of the docker container, run `docker container ls` for a list of docker containers on your machine.  Note the "CONTAINER ID" of the container running this artifact.
 
-7.) From outside of the docker container, run `docker cp <CONTAINER-ID>:/home/pldi/d1a_impl/out/plots/cdf.png cdf.png` to pull the plot out of the container and onto your local machine.  Confirm that you can open and view it.  (The actual data are not important on this tiny sample size -- this step is just to make sure that you can generate and view plots for the artifact evaluation.)
+7.) From outside of the docker container, run `docker cp <CONTAINER-ID>:/home/pldi/d1a_impl/out/plots/cdf.png cdf.png` to pull the plot out of the container and onto your local machine.  Confirm that you can open and view it.
+    (The actual data will _not_ resemble the plots in the paper due to the tiny size of these kick-the-tires experiments -- this step is just to make sure that you can generate and view plots for the artifact evaluation.)
 
 =========================
 Step-by-Step Instructions
