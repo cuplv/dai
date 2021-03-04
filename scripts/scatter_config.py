@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Expects to run as ./scatter_config_ktt.py <output-file> <config> <columns>
+# Expects to run as ./scatter_config.py <output-file> <config> <columns>
 # where:
 #   - output-file is a .png to output the scatter plot to
 #   - config is in {batch, dd, incr, dd_incr} and controls the color/label of the plot
@@ -59,13 +59,13 @@ plt.rc('ytick',labelsize='large')
 
 #linear axes
 #plt.axis([0,3000,0,30000])
-plt.axis([0,100,0,1000])
+plt.axis([0,1000,0,30000])
 
 plt.ylabel(r"Analysis Time (sec)")
 plt.xlabel(r"Cumulative Program Edits")
 
-plt.xticks([0,50,100],labels=['0','','100'])
-plt.yticks(ticks=[0,500,1000],labels=['0','','1'])
+plt.xticks([0,250,500,750,100],labels=['0','','','','1000'])
+plt.yticks(ticks=[0,5000,10000,15000,20000,25000,30000],labels=['0','','','','','','30'])
 
 for i in range(runs):
     plt.scatter(x_coords, raw[i], s=0.08, alpha=0.3, color=color,marker=",")

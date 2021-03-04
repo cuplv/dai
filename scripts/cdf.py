@@ -35,11 +35,11 @@ plt.rc('ytick.major',width=1.5)
 plt.rc('xtick',labelsize='large')
 plt.rc('ytick',labelsize='large')
 
-plt.axis([0,1,0.5,1])
+plt.axis([0,5,0.5,1])
 
 plt.xlabel(r"Analysis Latency (sec)")
 
-plt.xticks([0,0.25,0.5,0.75,1,],labels=['0','','','','1'])
+plt.xticks([0,1,2,3,4,5],labels=['0','','','','','5'])
 plt.yticks([0.5,0.6,0.7,0.8,0.9,1.0])
 
 plt.plot(batch,ys,color=blue)
