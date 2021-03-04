@@ -16,7 +16,7 @@ Getting Started Guide
 2.) Load it into Docker.
     `docker load < pldi21_paper111.tar`
 
-3.) Run the image. This should open a bash shell, at the home directory of user `pldi`.  This user has sudo privileges and password `pldi`.
+3.) Run the image. This should open a bash shell, at the home directory of user `pldi` (with sudo privileges).
     `docker run -it pldi21_paper111 bash`
 
 4.) In `~/d1a_impl` you will find:
