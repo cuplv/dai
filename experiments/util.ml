@@ -1,4 +1,4 @@
-let test_case f = Unix.getcwd () ^ "/test_cases/" ^ f ^ ".js"
+let test_case f = "/home/pldi/d1a_impl/test_cases/" ^ f ^ ".js"
 
 let output = ( ^ ) "/out/"
 
