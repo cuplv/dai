@@ -22,6 +22,7 @@ done
 ####################
 echo "\nGenerating miniature versions of Fig. 10 plots..."
 mkdir -p tmp
+rm tmp/*
 for seed in 0 1 2 3; do
     # normalize to same numbers of rows per config
     scripts/to_moving_average_per_edit.py 5 < out/experiments/dd_5qpe_incr_n100_seed$seed.log > tmp/dd_5qpe_incr_n100_seed$seed.log.avgs
@@ -52,4 +53,3 @@ scripts/scatter_config_ktt.py out/plots/batch_scatter.png batch 4 < tmp/batch_pa
 # generate CDF at out/plots/cdf.png
 echo " ... generating CDF"
 scripts/cdf_ktt.py out/plots/cdf.png 400 tmp/batch_all.log tmp/incr_all.log tmp/dd_all.log tmp/dd_incr_all.log
-rm -r tmp
