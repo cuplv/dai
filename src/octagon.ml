@@ -218,10 +218,10 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
 let extend_env_by_uses stmt oct =
   let env = Abstract1.env oct in
   let man = get_man () in
-  (* adding RETVAL here is a hack -- not sure why, but apron complains down the line if RETVAL
+  (* adding RETVAR here is a hack -- not sure why, but apron complains down the line if RETVAR
      is not in the env, including throwing an error if you try to add it explicitly. *)
   let new_uses =
-    Ast.Stmt.uses stmt |> flip Set.add "RETVAL"
+    Ast.Stmt.uses stmt |> flip Set.add Cfg.retvar
     |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   in
   if Set.is_empty new_uses then oct

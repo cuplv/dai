@@ -389,7 +389,7 @@ module T = struct
   let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
     let _return_graph, _return_pures, return_env = return_state in
     let _caller_graph, _caller_pures, _caller_env = caller_state in
-    match Env.find return_env "RETVAL" with
+    match Env.find return_env D1a.Cfg.retvar with
     | None -> return_state
     | Some _retval_memloc ->
         (* bind lhs of callsite to retval_memloc *)
