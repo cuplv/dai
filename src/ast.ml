@@ -144,7 +144,7 @@ module Stmt = struct
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
     | Write { rcvr; field; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp field Expr.pp rhs
     | Call { lhs; fn; actuals } ->
-        Format.fprintf fs "%s := %s(%a)" lhs fn (List.pp ",@ " Expr.pp) actuals
+        Format.fprintf fs "%s := %s(%a)" lhs fn (List.pp ", " Expr.pp) actuals
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
