@@ -4,9 +4,11 @@ open Cfg_parser
 open Ast
 
 module Arr_bounds_check = struct
-  include Daig.Make (Context.MakeInsensitive (Array_bounds))
+  module Dom = Context.Make2CFA (Array_bounds)
+  include Daig.Make (Dom)
 
   let check_all_accesses (daig : t) fs =
+    let _, daig = get_by_name (Name.Loc (Cfg.Loc.exit, Dom.Ctx.init)) daig in
     let candidates : ((Expr.t * Expr.t) list * Ref.t) Seq.t =
       Seq.filter_map
         (G.nodes (fst daig))
@@ -35,10 +37,15 @@ module Arr_bounds_check = struct
                     let _ = Ref.astate_exn astate_ref in
                     Format.fprintf fs
                       ( match Array_bounds.is_safe rcvr field (Ref.astate_exn astate_ref) with
-                      | Some true -> "SAFE\t (Array  access %s[%a] of statement at %a)\n"
-                      | Some false -> "UNSAFE\t (Array access %s[%a] of statement at %a)\n"
-                      | None -> "UNKNOWN\t (Array access %s[%a] of statement at %a)\n" )
-                      rcvr Expr.pp field Name.pp (Ref.name stmt_ref);
+                      | Some true ->
+                          "SAFE\t (Array access %s[%a] of statement %a at %a, context %a)\n"
+                      | Some false ->
+                          "UNSAFE\t (Array access %s[%a] of statement %a at %a, context %a)\n"
+                      | None ->
+                          "UNKNOWN\t (Array access %s[%a] of statement %a at %a, context %a)\n" )
+                      rcvr Expr.pp field Stmt.pp (Ref.stmt_exn stmt_ref) Name.pp (Ref.name stmt_ref)
+                      Dom.Ctx.pp
+                      ((fun x -> Option.value_exn x) @@ Name.ctx (Ref.name astate_ref));
                     daig)
           | rcvr, field ->
               Format.fprintf fs
