@@ -23,6 +23,8 @@ let mem = String.Map.mem
 
 let of_alist_exn = String.Map.of_alist_exn
 
+let remove = String.Map.remove
+
 let to_alist = String.Map.to_alist
 
 let update = String.Map.update
