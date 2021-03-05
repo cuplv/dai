@@ -28,8 +28,7 @@ let do_n_edits_and_queries =
           ^ "seed" ^ Int.to_string seed
         in
         let fs_out =
-          Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ]
-            (Util.exp_output filename)
+          Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
 
@@ -50,9 +49,7 @@ let do_n_edits_and_queries =
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f x _ =
-            issue_queries @@ RE.random_edit x
-          in
+          let f x _ = issue_queries @@ RE.random_edit x in
           let _daig = apply_n_times ~n ~init ~f in
           () )
         else if dd then (
@@ -62,9 +59,7 @@ let do_n_edits_and_queries =
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f x _ =
-            issue_queries @@ RE.(D.drop_cache >> random_edit) x
-          in
+          let f x _ = issue_queries @@ RE.(D.drop_cache >> random_edit) x in
           let _daig = apply_n_times ~n ~init ~f in
           () )
         else if incr then (
@@ -86,7 +81,6 @@ let do_n_edits_and_queries =
             time fs_out "" ~f:RE.issue_exit_query ~x
           in
           let _daig = apply_n_times ~n ~init ~f in
-          ()
-    ]
+          ()]
 
 let () = Command.run ~version:"0.1" do_n_edits_and_queries

@@ -3,8 +3,8 @@ open Import
 open Cfg_parser
 open Ast
 
-module Arr_bounds_check = struct
-  module Dom = Context.Make2CFA (Array_bounds)
+module Arr_bounds_check (CF : Context.CtxFunctor) = struct
+  module Dom = CF (Array_bounds)
   include Daig.Make (Dom)
 
   let check_all_accesses (daig : t) fs =
@@ -54,16 +54,43 @@ module Arr_bounds_check = struct
               daig))
 end
 
+module Checker_0CFA = Arr_bounds_check (Context.MakeInsensitive)
+module Checker_1CFA = Arr_bounds_check (Context.Make1CFA)
+module Checker_2CFA = Arr_bounds_check (Context.Make2CFA)
+
 let test_array_accesses id =
   let cfg = (Util.test_case >> Util.abs_path >> json_of_file >> cfg_of_json) id in
-  let daig = Arr_bounds_check.of_cfg cfg in
-  Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output id);
+  Cfg.dump_dot cfg ~filename:(Util.cfg_output id);
+  let open Checker_0CFA in
+  (let id = id ^ "_0cfa" in
+   let daig = of_cfg cfg in
+   dump_dot daig ~filename:(Util.daig_output id);
+   let fs =
+     Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.log_output id)
+     |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
+   in
+   let daig = check_all_accesses daig fs in
+   dump_dot daig ~filename:(Util.daig_output (id ^ "_post")));
+  let open Checker_1CFA in
+  (let id = id ^ "_1cfa" in
+   let daig = of_cfg cfg in
+   dump_dot daig ~filename:(Util.daig_output id);
+   let fs =
+     Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.log_output id)
+     |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
+   in
+   let daig = check_all_accesses daig fs in
+   dump_dot daig ~filename:(Util.daig_output (id ^ "_post")));
+  let open Checker_2CFA in
+  let id = id ^ "_2cfa" in
+  let daig = of_cfg cfg in
+  dump_dot daig ~filename:(Util.daig_output id);
   let fs =
     Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ] (Util.log_output id)
     |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
   in
-  let daig = Arr_bounds_check.check_all_accesses daig fs in
-  Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output (id ^ "_post"))
+  let daig = check_all_accesses daig fs in
+  dump_dot daig ~filename:(Util.daig_output (id ^ "_post"))
 
 let%test "interproc buckets tests" =
   test_array_accesses "buckets_contains";
@@ -71,30 +98,3 @@ let%test "interproc buckets tests" =
   test_array_accesses "buckets_indexof";
   test_array_accesses "buckets_swap";
   true
-
-(*let%test "intraproc buckets tests" =
-  test_array_accesses "buckets_swap1";
-  test_array_accesses "buckets_swap2";
-  test_array_accesses "buckets_swap3";
-  test_array_accesses "buckets_swap4";
-  test_array_accesses "buckets_contains1";
-  test_array_accesses "buckets_contains2";
-  test_array_accesses "buckets_contains3";
-  test_array_accesses "buckets_contains4";
-  test_array_accesses "buckets_contains5";
-  test_array_accesses "buckets_equals1";
-  test_array_accesses "buckets_equals2";
-  test_array_accesses "buckets_equals3";
-  test_array_accesses "buckets_equals4";
-  test_array_accesses "buckets_equals5";
-  test_array_accesses "buckets_equals6";
-  test_array_accesses "buckets_indexof1";
-  test_array_accesses "buckets_indexof2";
-  test_array_accesses "buckets_indexof3";
-  test_array_accesses "buckets_indexof4";
-  test_array_accesses "buckets_indexof5";
-  test_array_accesses "buckets_indexof6";
-  test_array_accesses "buckets_indexof7";
-  test_array_accesses "buckets_indexof8";
-  true
- *)

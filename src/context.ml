@@ -6,6 +6,12 @@ let get_callee_unsafe stmt =
   | Ast.Stmt.Call { fn; _ } -> fn
   | _ -> failwith "can't get callee of non-call statement"
 
+module type CtxFunctor = functor (Dom : Abstract.DomNoCtx) -> sig
+  include Abstract.Dom with type t := Dom.t
+
+  type t = Dom.t
+end
+
 module MakeInsensitive (Dom : Abstract.DomNoCtx) : sig
   include Abstract.Dom with type t := Dom.t
 

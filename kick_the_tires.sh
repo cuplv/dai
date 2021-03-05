@@ -1,7 +1,7 @@
 ################################
 ## Run some small experiments ##
 ################################
-echo "Running some miniature experiments... this should just take 20 seconds or so."
+echo "Running some miniature experiments... this should just take 30 seconds or so."
 for seed in 0 1 2 3; do
     for n in 100; do
 	for qpe in 5; do
@@ -20,9 +20,12 @@ done
 ####################
 ## Generate plots ##
 ####################
-echo "\nGenerating miniature versions of Fig. 10 plots..."
+echo "Done with experiments"
+echo ""
+echo "Generating miniature versions of Fig. 10 plots..."
 mkdir -p tmp
-rm tmp/*
+touch tmp/tmp # silence "no files match tmp/*" warning in next line 
+rm tmp/* # clean up from previous runs
 for seed in 0 1 2 3; do
     # normalize to same numbers of rows per config
     scripts/to_moving_average_per_edit.py 5 < out/experiments/dd_5qpe_incr_n100_seed$seed.log > tmp/dd_5qpe_incr_n100_seed$seed.log.avgs

@@ -46,10 +46,20 @@ Step-by-Step Instructions
 
 # Expressivity Experiments
 
-1.) To analyze the Buckets.JS programs as described lines 1069-1078, run `dune runtest experiments`.  This will output logs to `./out/experiments` (TODO(benno): verify output directory) containing one line per array access, classifying each access as SAFE, UNSAFE, or UNKNOWN.
+1.) To analyze the Buckets.JS programs as described lines 1069-1078, run `dune runtest experiments`.  For each context-sensitivity policy {0,1,2}-CFA, this will output logs to `./out/log` containing one line per array access, classifying each access as SAFE (definitely in-bounds), UNSAFE (definitely out-of-bounds), or UNKNOWN (neither).
+    1.a) To check the top-line numbers reported lines 1073-1076, the following commands may be useful:
+         Safe 2-CFA accesses:   `grep "^SAFE" out/log/*2cfa.log | wc -l`
+         Total 2-CFA accesses:  `cat out/log/*2cfa.log | wc -l`
+         Safe 1-CFA accesses:   `grep "^SAFE" out/log/*1cfa.log | wc -l`
+         Total 1-CFA accesses:  `cat out/log/*1cfa.log | wc -l`
+         Safe 0-CFA accesses:   `grep "^SAFE" out/log/*0cfa.log | wc -l`
+         Total 0-CFA accesses:  `cat out/log/*0cfa.log | wc -l`
+    1.b) For a more detailed look at the analysis results or to better understand the contents of the the log files, you can also look at the CFG of each program or the DAIG before and after analysis of each program.  These are output in DOT/graphviz format in `out/cfg` and `out/daig` respectively; `_post` suffixes on the DAIG filenames denote the after-analysis versions.
+    These `.dot` files are human-readable(-ish) or can be rendered as PNG by: `dot -Tpng input.dot > output.png`.  To do so within the container, you wil first need to `sudo apt-get install graphviz` then copy out the result as described in steps 5-7 of Getting Started, or you can copy the `.dot` out and build the PNG on your host machine.
 
 2.) To analyze the list-append program shown in the overview and discussed in Section 7.2, run `dune runtest src/shape`.
 TODO(benno): Finish up here once `semantic` is working from within docker.
+
 
 # Scalability Experiments
 
@@ -57,6 +67,7 @@ TODO(benno): Finish up here once `semantic` is working from within docker.
 
 In our experiments for the paper, we ran each configuration for 3000 edits in each of 9 random seeds.  This took several processor-weeks of compute time, so it is quite infeasible for artifact evaluators to reproduce the full slate of experiments on laptops.
 As such, we have set up the `./scalability_experiments.sh` script to run each config for 1000 edits in each of 4 random seeds; this should take on the order of a few hours on a modern laptop.
+Each generated scatter plot thus corresponds to the leftmost third of the paper's scatter plots.
 
 Reviewers are invited to edit the script and adjust these numbers as needed to produce some results with the compute/memory resources available to them; the script is commented with some instructions on how to do so.
 

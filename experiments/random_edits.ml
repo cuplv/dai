@@ -279,7 +279,7 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
           Option.(map caller ~f:Int.succ |> value ~default:0)
           |> flip Random.int_incl !functions |> Int.to_string |> ( ^ ) "f"
         in
-        callee,daig
+        (callee, daig)
     in
     let call =
       Ast.Stmt.Call { lhs = gen_arith_ident (); fn = callee; actuals = [ gen_arith_expr () ] }

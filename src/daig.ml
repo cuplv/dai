@@ -489,19 +489,21 @@ module Make (Dom : Abstract.Dom) = struct
     let g_without_fix_edges = Seq.fold (G.Node.inputs fixpoint g) ~init:g ~f:(flip G.Edge.remove) in
     List.fold all_new_edges ~init:g_without_fix_edges ~f:(flip G.Edge.insert) |> flip pair cfg
 
-  let dirty_from r daig =
+  let dirty_from ?(interproc = true) r daig =
     let g, cfg = daig in
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n g in
       if Seq.is_empty outgoing_edges then (
         match Ref.name n with
         | Name.Loc (loc, ctx) -> (
-            (* If None, this is the program exit and we're done.  if Some, this is a function exit, so we:
-             * find [possible_callers]: those daig refs for locations to which control may return from this function (taking contexts into account)
-             * dirty each one and add to the frontier to continue change propagation.
+            (* If None this is the program exit and if !interproc then we're not dirtying interprocedurally; in either case, change propagation is done.
+             * if Some, this is a function exit, so we:
+             *  - find [possible_callers]: those daig refs for locations to which control may return from this function (taking contexts into account)
+             *  - dirty each one and add to the frontier to continue change propagation.
              *)
             match Set.find (snd cfg) ~f:(Cfg.Fn.exit >> Cfg.Loc.equal loc) with
             | None -> acc
+            | _ when not interproc -> acc
             | Some { name; _ } ->
                 let possible_callers =
                   G.nodes g
@@ -529,8 +531,8 @@ module Make (Dom : Abstract.Dom) = struct
                 let frontier, loophead_fixpoints = acc in
                 (List.append possible_callers frontier, loophead_fixpoints) )
         | Name.Iterate (_, l) ->
-           (* this is a hack -- graphlib doesn't seem to actually remove edges/nodes sometimes,
-              so just jump to the loop head if we somehow end up in a dangling unrolling *)
+            (* this is a hack -- graphlib doesn't seem to actually remove edges/nodes sometimes,
+               so just jump to the loop head if we somehow end up in a dangling unrolling *)
             let lh_fp = ref_by_name_exn l daig in
             let f, lh_fps = acc in
             (lh_fp :: f, lh_fp :: lh_fps)
@@ -693,12 +695,14 @@ module Make (Dom : Abstract.Dom) = struct
         in
         let daig =
           match callee_entry_ref with
-          | Some (AState phi) when Option.is_some phi.state ->
+          | Some (AState phi as callee_entry_ref) when Option.is_some phi.state ->
               if Dom.implies callee_entry_state (Option.value_exn phi.state) then daig
               else
                 let entry_state = Option.fold phi.state ~init:callee_entry_state ~f:Dom.join in
-                phi.state <- Some entry_state;
-                daig
+                if Option.exists ~f:(Dom.equal entry_state) phi.state then daig
+                else (
+                  phi.state <- Some entry_state;
+                  dirty_from ~interproc:false callee_entry_ref daig )
           | Some (AState phi) ->
               phi.state <- Some callee_entry_state;
               daig
