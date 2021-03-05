@@ -44,7 +44,8 @@ Step-by-Step Instructions
 
 0.) First, follow the getting-started guide through step 3 if you have not already done so, and run the docker image.  Then, `cd` into `~/d1a_impl` for the rest of these instructions.
 
-# Expressivity Experiments
+Expressivity Experiments
+========================
 
 1.) To analyze the Buckets.JS programs as described lines 1069-1078, run `dune runtest experiments`.  For each context-sensitivity policy {0,1,2}-CFA, this will output logs to `./out/log` containing one line per array access, classifying each access as SAFE (definitely in-bounds), UNSAFE (definitely out-of-bounds), or UNKNOWN (neither).
     1.a) To check the top-line numbers reported lines 1073-1076, the following commands may be useful:
@@ -65,15 +66,19 @@ At the exit, the MEM should read "lseg(a1,null)" (i.e. the heap contains a list 
 
 For a more detailed look, these `.dot` files can be rendered as PNG images as described in step 1.b above; this will confirm that analysis converges in one demanded unrolling as mentioned line 1134.
 
-# Scalability Experiments
+Scalability Experiments
+=======================
 
-1.)  Steps 5-7 of the Getting Started guide above detail the process to reproduce the scalability experiments described in Section 7.3; just replace `./kick_the_tires.sh` in step 5 by `./scalability_experiments.sh`.  This will generate and analyze random sequences of edits and queries as described in Section 7.3.
+1.)  Steps 5-7 of the Getting Started guide above detail the process to reproduce the scalability experiments described in Section 7.3; just replace `./kick_the_tires.sh` in step 5 by `./scalability_experiments_<size>.sh` for some choice of size, described below.  This will generate and analyze random sequences of edits and queries as described in Section 7.3.
 
-In our experiments for the paper, we ran each configuration for 3000 edits in each of 9 random seeds.  This took several processor-weeks of compute time, so it is quite infeasible for artifact evaluators to reproduce the full slate of experiments on laptops.
-As such, we have set up the `./scalability_experiments.sh` script to run each config for 1000 edits in each of 4 random seeds; this should take on the order of a few hours on a modern laptop.
-Each generated scatter plot thus corresponds to the leftmost third of the paper's scatter plots.
+In our experiments for the paper, we ran each configuration for 3000 edits in each of 9 random seeds.  This took several processor-weeks of compute time distributed across 4 separate cloud machines, so it is quite infeasible for artifact evaluators to reproduce the full slate of experiments on laptops.
 
-Reviewers are invited to edit the script and adjust these numbers as needed to produce some results with the compute/memory resources available to them; the script is commented with some instructions on how to do so.
+As such, we have provided three scripts to run scalability experiments:
+  - `./scalability experiments_large.sh`, which runs each configuration for 1000 edits in each of 4 random seeds  This will take quite some time, on the order of several hours to a day depending on your hardware.
+  - `./scalability_experiments_small.sh`, which runs each configuration for 500 edits in each of 4 random seeds. This should be very fast, on the order of minutes to a couple of hours.
+  - `./scalability_experiments_full.sh`, which _doesn't actually run any experiments_ but uses the data we gathered to reproduce the plots of figure 10.  This data is provided at `./data`.
+
+Reviewers are invited to edit the scripts and adjust these numbers as needed to produce some results with the compute/memory resources available to them; `./scalability_experiments_{small,large}.sh` are annotated with instructions on how to do so.
 
 2.) Using `docker cp` as described in step 7 of the getting started guide, view the generated plots.
 
@@ -108,12 +113,14 @@ Artifact evaluators can also confirm that our implementation uses the APRON libr
 
 # Scalability
 
-Because of the hardware and experiment-size differences, we expect that your results won't look precisely the same as Figure 10.
+Because of the hardware and experiment-size differences, we expect that your results won't look the same as Figure 10.
 
 Nonetheless, the same trends should be visible:
  - batch analysis will be the most costly
  - incremental-only and demand-only analysis will be significantly faster but still grow in cost with cumulative program edits
  - incremental+demand-driven analysis will be comparable in cost to the incremental-only/demand-only configurations at first, but should stay fast even as the program grows in size with edits.
+
+Note that these relative scaling differences are more pronounced the larger the experiment, as the cost of analysis grows super-linearly with program size and the overheads associated with incrementality and demand are relatively less important.  Reviewers should compare their results to the relevant segment of the scatter plots of figure 10; for example, if you run `./scalability_experiments_large.sh`, your results correspond to the leftmost third of each scatter plot, but if you run `./scalability_experiments_small.sh` then your results correspond only the leftmost sixth of each plot and it may be difficult to draw conclusions about scalability due to noise in the data and small sample sizes.
 
 As with the experimental results of the paper, these results should be seen more as proof-of-concept than conclusive measurements of absolute analysis costs.
 The relative scaling behaviors of each analysis configuration should support our claims (e.g. at lines 1219-1237) that the combination of incrementality and demand has potential to significantly outperform either technique on its own, with analysis costs consistently at ~1sec or less.
@@ -124,4 +131,4 @@ Claims not supported by this artifact
 =====================================
  * The claim that these domains "cannot be handled by existing incremental and/or demand-driven frameworks" is not in scope here -- see related work for discussion about that, but such a statement is not suited to artifact evaluation.
 
- * The CDF and table of Figure 10 are likely not to be reproduced by artifact evaluators -- the compute resources necessary to reproduce experiments at that scale are well beyond what the artifact evaluation committee could reasonably be expected to use.
+ * The scalability results shown in the CDF and table of Figure 10 are likely not to be reproduced by artifact evaluators -- the compute resources necessary to reproduce experiments at that scale are well beyond what the artifact evaluation committee could reasonably be expected to use.
