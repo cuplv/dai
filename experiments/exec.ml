@@ -29,7 +29,7 @@ let do_n_edits_and_queries =
         in
         let fs_out =
           Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ]
-            (Util.abs_path @@ Util.exp_output filename)
+            (Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
 

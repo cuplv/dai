@@ -55,7 +55,7 @@ module Arr_bounds_check = struct
 end
 
 let test_array_accesses id =
-  let cfg = (Util.test_case >> json_of_file >> cfg_of_json) id in
+  let cfg = (Util.test_case >> Util.abs_path >> json_of_file >> cfg_of_json) id in
   let daig = Arr_bounds_check.of_cfg cfg in
   Arr_bounds_check.dump_dot daig ~filename:(Util.daig_output id);
   let fs =

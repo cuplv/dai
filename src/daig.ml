@@ -191,7 +191,6 @@ module Make (Dom : Abstract.Dom) = struct
     | None -> failwith (Format.asprintf "No reference exists with name: %s" (Name.to_string nm))
 
   let dump_dot ?print ~filename daig =
-    let filename = Unix.getcwd () ^ "/" ^ filename in
     let g, _fns = daig in
     let output_fd =
       if Option.is_some print then Unix.stdout
