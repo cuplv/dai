@@ -47,7 +47,7 @@ with sys.stdin as csvfile:
         for i in range(runs):
             raw[i].append(float(row[i]))
 
-plt.rc('text', usetex=True)
+plt.rc('text')
 plt.rc('font', family='serif',size=16.0)
 plt.rc('legend', edgecolor='white',fontsize="x-large",handlelength=0,framealpha=0)
 
@@ -62,11 +62,11 @@ plt.rc('ytick',labelsize='large')
 #plt.axis([0,3000,0,30000])
 plt.axis([0,100,0,1000])
 
-plt.ylabel(r"Analysis Time (sec)")
+plt.ylabel(r"Analysis Time (ms)")
 plt.xlabel(r"Cumulative Program Edits")
 
-plt.xticks([0,50,100],labels=['0','','100'])
-plt.yticks(ticks=[0,500,1000],labels=['0','','1'])
+plt.xticks([0,50,100])
+plt.yticks([0,500,1000])
 
 for i in range(runs):
     plt.scatter(x_coords, raw[i], s=0.08, alpha=0.3, color=color,marker=",")

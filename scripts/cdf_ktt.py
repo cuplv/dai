@@ -25,7 +25,7 @@ incr = np.sort([float(line) for line in open(sys.argv[4])])/float(1000)
 dd = np.sort([float(line) for line in open(sys.argv[5])])/float(1000)
 dd_incr = np.sort([float(line) for line in open(sys.argv[6])])/float(1000)
 
-plt.rc('text', usetex=True)
+plt.rc('text')
 plt.rc('font', family='serif',size=16.0)
 plt.rc('legend', edgecolor='white',fontsize="x-large",handlelength=0,framealpha=0)
 
@@ -40,7 +40,7 @@ plt.axis([0,1,0.5,1])
 
 plt.xlabel(r"Analysis Latency (sec)")
 
-plt.xticks([0,0.25,0.5,0.75,1,],labels=['0','','','','1'])
+plt.xticks([0,0.5,1])
 plt.yticks([0.5,0.6,0.7,0.8,0.9,1.0])
 
 plt.plot(batch,ys,color=blue)

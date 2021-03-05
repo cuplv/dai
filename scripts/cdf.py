@@ -1,9 +1,10 @@
 #!/usr/bin/python3
 
 # expect arguments: <output-file> <observations> <batch> <incr> <dd> <dd+incr>
-# where each <config> is one analysis latency observation per row, <observations> rows
+# where each <config> is one analysis latency observation per line, <observations> line
 
 import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
@@ -24,7 +25,7 @@ incr = np.sort([float(line) for line in open(sys.argv[4])])/float(1000)
 dd = np.sort([float(line) for line in open(sys.argv[5])])/float(1000)
 dd_incr = np.sort([float(line) for line in open(sys.argv[6])])/float(1000)
 
-plt.rc('text', usetex=True)
+plt.rc('text')
 plt.rc('font', family='serif',size=16.0)
 plt.rc('legend', edgecolor='white',fontsize="x-large",handlelength=0,framealpha=0)
 
@@ -39,7 +40,7 @@ plt.axis([0,5,0.5,1])
 
 plt.xlabel(r"Analysis Latency (sec)")
 
-plt.xticks([0,1,2,3,4,5],labels=['0','','','','','5'])
+plt.xticks([0,1,2,3,4,5],label=True)
 plt.yticks([0.5,0.6,0.7,0.8,0.9,1.0])
 
 plt.plot(batch,ys,color=blue)

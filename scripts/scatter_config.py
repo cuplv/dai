@@ -8,6 +8,7 @@
 #   - input data (on stdin) is a csv where each column is the log output by one run of the experimental harness (../run_d1a_experiment)
 
 import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import csv
 import sys
@@ -46,7 +47,7 @@ with sys.stdin as csvfile:
         for i in range(runs):
             raw[i].append(float(row[i]))
 
-plt.rc('text', usetex=True)
+plt.rc('text')
 plt.rc('font', family='serif',size=16.0)
 plt.rc('legend', edgecolor='white',fontsize="x-large",handlelength=0,framealpha=0)
 
@@ -61,16 +62,16 @@ plt.rc('ytick',labelsize='large')
 #plt.axis([0,3000,0,30000])
 plt.axis([0,1000,0,30000])
 
-plt.ylabel(r"Analysis Time (sec)")
+plt.ylabel(r"Analysis Time (ms)")
 plt.xlabel(r"Cumulative Program Edits")
 
-plt.xticks([0,250,500,750,100],labels=['0','','','','1000'])
-plt.yticks(ticks=[0,5000,10000,15000,20000,25000,30000],labels=['0','','','','','','30'])
+plt.xticks([0,500,1000],label=True)
+plt.yticks(ticks=[0,10000,20000,30000],label=True)
 
 for i in range(runs):
     plt.scatter(x_coords, raw[i], s=0.08, alpha=0.3, color=color,marker=",")
 
 plt.plot([1], [1],color=color, label=label)
 
-plt.savefig(output_file, dpi=400, bbox_inches='tight')
+plt.savefig(output_file, dpi=400)
     
