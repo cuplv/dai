@@ -525,10 +525,10 @@ include T
 module IncrT = D1a.Context.MakeInsensitive (D1a.Incr.Make (T))
 module Daig = D1a.Daig.Make (IncrT)
 
-let%test "build daig, analye, dump dot: list_append.js" =
+let%test "build daig, analyze, dump dot: list_append.js" =
   let cfg =
     D1a.Cfg_parser.(json_of_file >> cfg_of_json)
-      ("/Users/benno/Documents/CU/code/d1a/test_cases/list_append.js")
+      ("/home/pldi/d1a_impl/test_cases/list_append.js")
   in
   let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
   let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in
@@ -541,7 +541,8 @@ let%test "build daig, analye, dump dot: list_append.js" =
   in
   let init_state : IncrT.t = Obj.magic (mem, [], env) in
   let daig = Daig.of_cfg ~init_state cfg in
+  Daig.dump_dot daig ~filename:"/home/pldi/d1a_impl/out/daig/list_append_pre.dot";
   let exit_loc = Daig.Name.Loc (D1a.Cfg.Loc.exit, IncrT.Ctx.init) in
   let _, daig = Daig.get_by_name exit_loc daig in
-  Daig.dump_dot daig ~filename:"list_daig_full.dot";
+  Daig.dump_dot daig ~filename:"/home/pldi/d1a_impl/out/daig/list_append_post.dot";
   true

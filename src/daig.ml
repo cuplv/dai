@@ -1009,7 +1009,7 @@ let%test "build daig and issue queries: while_syntax.js" =
 let%test "build daig and issue query at exit: functions.js" =
   let cfg =
     Cfg_parser.(json_of_file >> cfg_of_json)
-      "/Users/benno/Documents/CU/code/d1a/test_cases/functions.js"
+      "/home/pldi/d1a_impl/test_cases/functions.js"
   in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"functions_initial_daig.dot";
