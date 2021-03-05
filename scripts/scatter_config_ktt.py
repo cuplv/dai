@@ -8,6 +8,7 @@
 #   - input data (on stdin) is a csv where each column is the log output by one run of the experimental harness (../run_d1a_experiment)
 
 import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import csv
 import sys

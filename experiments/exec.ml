@@ -29,7 +29,7 @@ let do_n_edits_and_queries =
         in
         let fs_out =
           Unix.openfile ~mode:[ Unix.O_WRONLY; Unix.O_CREAT ]
-            (Unix.getcwd () ^ Util.exp_output filename)
+            (Util.abs_path @@ Util.exp_output filename)
           |> Unix.out_channel_of_descr |> Format.formatter_of_out_channel
         in
 
@@ -50,10 +50,8 @@ let do_n_edits_and_queries =
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f x n =
-            let x = RE.random_edit x in
-            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
-            issue_queries x
+          let f x _ =
+            issue_queries @@ RE.random_edit x
           in
           let _daig = apply_n_times ~n ~init ~f in
           () )
@@ -64,10 +62,8 @@ let do_n_edits_and_queries =
           let issue_queries init =
             apply_n_times ~n:qpe ~init ~f:(fun x _ -> time fs_out "" ~f:RE.issue_random_query ~x)
           in
-          let f x n =
-            let x = RE.(D.drop_cache >> random_edit) x in
-            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
-            issue_queries x
+          let f x _ =
+            issue_queries @@ RE.(D.drop_cache >> random_edit) x
           in
           let _daig = apply_n_times ~n ~init ~f in
           () )
@@ -75,9 +71,8 @@ let do_n_edits_and_queries =
           let module RE = Random_edits.Make (Incr.Make (Octagon)) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
-          let f x n =
+          let f x _ =
             let x = RE.random_edit x in
-            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             time fs_out "" ~f:RE.issue_exit_query ~x
           in
           let _daig = apply_n_times ~n ~init ~f in
@@ -86,9 +81,8 @@ let do_n_edits_and_queries =
           let module RE = Random_edits.Make (Octagon) in
           Random.init seed;
           let init = RE.D.of_cfg @@ Cfg.empty () in
-          let f x n =
+          let f x _ =
             let x = RE.(D.drop_cache >> random_edit) x in
-            if Int.(equal 0 (n % 100)) then Format.pp_print_flush fs_out ();
             time fs_out "" ~f:RE.issue_exit_query ~x
           in
           let _daig = apply_n_times ~n ~init ~f in

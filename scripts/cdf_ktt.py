@@ -4,6 +4,7 @@
 # where each <config> is one analysis latency observation per row, <observations> rows
 
 import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import csv

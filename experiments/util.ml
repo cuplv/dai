@@ -1,6 +1,8 @@
-let test_case f = "/home/pldi/d1a_impl/test_cases/" ^ f ^ ".js"
+let abs_path = (^) "/home/pldi/d1a_impl/"
 
-let output = ( ^ ) "/out/"
+let test_case f = "test_cases/" ^ f ^ ".js"
+
+let output = ( ^ ) "out/"
 
 let daig_output f = output ("daig/" ^ f ^ ".dot")
 
