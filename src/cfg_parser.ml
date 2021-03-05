@@ -24,7 +24,7 @@ let rec expr_of_json json =
   | Some "Boolean" ->
       let b = member "booleanContent" json |> to_bool in
       Ast.Expr.Lit (Ast.Lit.Bool b)
-  | Some "Null" -> Ast.Expr.Lit Ast.Lit.Null
+  | Some "Null" | Some "Empty" -> Ast.Expr.Lit Ast.Lit.Null
   | Some "Identifier" ->
       let id = member "name" json |> to_string in
       Ast.Expr.Var id
