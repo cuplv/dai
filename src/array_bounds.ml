@@ -198,11 +198,10 @@ let interpret stmt phi =
             Some (am, Abstract1.forget_array man itv [| lhs |] false)
           else (* lhs was unconstrained, treat as a `skip`*) Some (am, itv) )
   | Throw { exn = _ } -> None
-  | Assume e ->
-     (match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
+  | Assume e -> (
+      match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
       | itv when Abstract1.is_bottom man itv -> None
-      | itv -> Some (am, itv)
-     )
+      | itv -> Some (am, itv) )
   | Expr _ | Write _ | Skip | Call _ -> Some (am, itv)
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
@@ -227,17 +226,20 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
 *)
 let is_in_bounds addr (idx : Interval.t) itv =
   let env = Abstract1.env itv in
-  let len_itv =
-    Texpr1.of_expr env (Texpr1.Var (apron_var_of_array_len addr))
-    |> Abstract1.bound_texpr (Itv.get_man ()) itv
-  in
-  let min_len, max_len = (len_itv.inf, len_itv.sup) in
-  let zero = Scalar.of_int 0 in
-  if zero <= idx.inf && idx.sup < min_len then Some true
-  else if idx.sup < zero || idx.inf >= max_len then Some false
-  else None
+  let arr_len = apron_var_of_array_len addr in
+  if not (Environment.mem_var env arr_len) then None
+  else
+    let len_itv =
+      Texpr1.of_expr env (Texpr1.Var arr_len) |> Abstract1.bound_texpr (Itv.get_man ()) itv
+    in
+    let min_len, max_len = (len_itv.inf, len_itv.sup) in
+    let zero = Scalar.of_int 0 in
+    if zero <= idx.inf && idx.sup < min_len then Some true
+    else if idx.sup < zero || idx.inf >= max_len then Some false
+    else None
 
-(** Lift [is_in_bounds] to take a receiver variable and index expression, and return a value of the same form *)
+(** Lift [is_in_bounds] to take a receiver variable and index expression,
+    and return a value of the same form as [is_in_bounds] *)
 let is_safe var idx state =
   match state with
   | None -> Some true (* state is unreachable so access is safe *)

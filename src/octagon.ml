@@ -243,7 +243,9 @@ let interpret stmt oct =
       let new_env =
         if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
       in
-      let oct_new_env = Abstract1.change_environment man oct new_env false in
+      let oct_new_env =
+        try Abstract1.change_environment man oct new_env false with Apron.Manager.Error {exn=_;funid=_;msg} -> failwith msg
+      in
 
       match texpr_of_expr oct rhs with
       | Some rhs_texpr ->
