@@ -260,7 +260,8 @@ let show oct =
   pp Format.str_formatter oct;
   Format.flush_str_formatter ()
 
-let hash seed oct = seeded_hash seed @@ Abstract1.hash (get_man ()) oct
+let hash seed oct =
+  try seeded_hash seed @@ Abstract1.hash (get_man ()) oct with Apron.Manager.Error _ -> seed
 
 let compare _l _r = failwith "todo"
 
@@ -277,7 +278,7 @@ let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
       in
       let caller_state = Abstract1.change_environment man caller_state new_env false in
       let return_val =
-        try Abstract1.bound_variable man return_state (Var.of_string "RETVAL")
+        try Abstract1.bound_variable man return_state (Var.of_string Cfg.retvar)
         with Apron.Manager.Error _ -> Apron.Interval.top
       in
       try

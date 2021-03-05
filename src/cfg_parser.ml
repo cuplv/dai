@@ -48,7 +48,7 @@ let rec expr_of_json json =
   | Some "Plus" -> binop Ast.Binop.Plus json
   | Some "Minus" -> binop Ast.Binop.Minus json
   | Some "Times" -> binop Ast.Binop.Times json
-  | Some "Equal" -> binop Ast.Binop.Eq json
+  | Some "Equal" | Some "StrictEqual" -> binop Ast.Binop.Eq json
   | Some "LessThan" -> binop Ast.Binop.Lt json
   | Some "GreaterThan" -> binop Ast.Binop.Gt json
   | Some "LessThanEqual" -> binop Ast.Binop.Le json
@@ -98,8 +98,11 @@ let assign_of_json json =
 type edge = Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t
 
 let cfg_of_json json : Cfg.t =
-  let is_fn_decl stmt_json =
-    match member "term" stmt_json |> to_string with "Function" -> true | _ -> false
+  let rec is_fn_decl stmt_json =
+    match member "term" stmt_json |> to_string with
+    | "Function" -> true
+    | "Context" -> is_fn_decl (member "contextSubject" stmt_json)
+    | _ -> false
   in
   let rec edge_list_of_json entry exit ret json : edge list =
     match member "term" json |> to_string_option with
@@ -158,16 +161,18 @@ let cfg_of_json json : Cfg.t =
         :: (loop_body_exit, entry, Ast.Stmt.Skip)
         :: loop_body
     | Some "Return" ->
-        (* "return e" statement is interpreted as an edge to program exit with "RETVAL := e"*)
+        (* "return e" statement is interpreted as an edge to program exit with "RETVAR := e"*)
         let rval = member "value" json |> expr_of_json in
-        [ (entry, ret, Ast.Stmt.Assign { lhs = "RETVAL"; rhs = rval }) ]
+        [ (entry, ret, Ast.Stmt.Assign { lhs = Cfg.retvar; rhs = rval }) ]
     | Some "Context" ->
         (* "Context" packages a comment and a statement; ignore the comment and just parse the statement *)
         edge_list_of_json entry exit ret (member "contextSubject" json)
     | Some "Empty" ->
         (* "Empty" statements are else-branches of else-branch-less conditionals *)
         [ (entry, exit, Ast.Stmt.Skip) ]
-    | Some "Function" -> []
+    | Some "Function" ->
+        (* Under static callgraph restrictions, function declarations are treated as no-op*)
+        [ (entry, exit, Ast.Stmt.Skip) ]
     | Some t ->
         failwith @@ "Unrecognized statement with term : \"" ^ t ^ "\" and content: " ^ show json
     | None -> failwith @@ "Malformed statement JSON: no \"term\" element; content: " ^ show json
@@ -177,9 +182,18 @@ let cfg_of_json json : Cfg.t =
   let fn_decls_of_json json : (Cfg.Fn.t * edge list) list =
     match member "term" json |> to_string_option with
     | Some "Statements" ->
-        let stmts = member "statements" json |> to_list in
+        let stmts =
+          member "statements" json |> to_list
+          |> List.filter ~f:(member "term" >> to_string >> function "Empty" -> false | _ -> true)
+        in
         let fn_decls = List.take_while stmts ~f:is_fn_decl in
+        let strip_comment json =
+          match member "term" json |> to_string with
+          | "Context" -> member "contextSubject" json
+          | _ -> json
+        in
         List.map fn_decls ~f:(fun json ->
+            let json = strip_comment json in
             let entry = Cfg.Loc.fresh () in
             let exit = Cfg.Loc.fresh () in
             let name : string = member "functionName" json |> member "name" |> to_string in

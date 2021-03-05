@@ -51,12 +51,10 @@ let join l r =
   let l, r = combine_envs l r in
   Abstract1.join (get_man ()) l r
 
-(* Do not eta-reduce! Will break lazy manager allocation
-   APRON widening argument order is reversed from my expectation; this function widens [l] by [r],
-   treating [l] as the accumulated result of previous joins/widens and [r] as the newest element of that sequence *)
+(* Do not eta-reduce! Will break lazy manager allocation *)
 let widen l r =
   let l, r = combine_envs l r in
-  Abstract1.widening (get_man ()) r l
+  Abstract1.widening (get_man ()) l r
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let equal l r =
@@ -259,7 +257,7 @@ let extend_env_by_uses stmt itv =
   |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   |> Set.to_array |> Array.map ~f:Var.of_string
   |> Environment.add env [||]
-  |> fun new_env -> Abstract1.change_environment man itv new_env false
+  |> fun new_env -> Abstract1.change_environment man itv new_env true
 
 let interpret stmt itv =
   let open Ast.Stmt in
@@ -299,7 +297,7 @@ let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
 
 let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
   match callsite with
-  | Ast.Stmt.Call { lhs; _ } ->
+  | Ast.Stmt.Call { lhs; _ } -> (
       let man = get_man () in
       let lhs = Var.of_string lhs in
       let env = Abstract1.env caller_state in
@@ -307,10 +305,15 @@ let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
         if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
       in
       let caller_state = Abstract1.change_environment man caller_state new_env false in
-      let return_val = Abstract1.bound_variable man return_state (Var.of_string "RETVAL") in
-      Abstract1.assign_texpr man caller_state lhs
-        Texpr1.(of_expr new_env (Cst (Coeff.Interval return_val)))
-        None
+      let return_val =
+        try Abstract1.bound_variable man return_state (Var.of_string Cfg.retvar)
+        with Apron.Manager.Error _ -> Apron.Interval.top
+      in
+      try
+        Abstract1.assign_texpr man caller_state lhs
+          Texpr1.(of_expr new_env (Cst (Coeff.Interval return_val)))
+          None
+      with Apron.Manager.Error _ -> caller_state )
   | _ -> failwith "malformed callsite"
 
 (*let project ~vars itv =

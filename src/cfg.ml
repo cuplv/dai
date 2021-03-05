@@ -163,6 +163,8 @@ let src : G.Edge.t -> Loc.t = G.Edge.src
 
 let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
+let retvar = "RETVAR"
+
 let containing_fn loc (cfg, fns) =
   Fn.Set.find fns ~f:(fun fn -> Graph.is_reachable (module G) cfg (Fn.entry fn) loc)
 

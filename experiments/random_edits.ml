@@ -198,7 +198,7 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
     functions := !functions + 1;
     let name = "f" ^ Int.to_string @@ !functions in
     let formal = gen_arith_ident () in
-    let body_stmt = Ast.Stmt.Assign { lhs = "RETVAL"; rhs = Ast.Expr.Var formal } in
+    let body_stmt = Ast.Stmt.Assign { lhs = Cfg.retvar; rhs = Ast.Expr.Var formal } in
     let new_fn =
       Cfg.Fn.make ~name ~formals:[ formal ] ~entry ~exit ~body:[ (entry, exit, body_stmt) ]
     in
