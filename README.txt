@@ -54,12 +54,16 @@ Step-by-Step Instructions
          Total 1-CFA accesses:  `cat out/log/*1cfa.log | wc -l`
          Safe 0-CFA accesses:   `grep "^SAFE" out/log/*0cfa.log | wc -l`
          Total 0-CFA accesses:  `cat out/log/*0cfa.log | wc -l`
-    1.b) For a more detailed look at the analysis results or to better understand the contents of the the log files, you can also look at the CFG of each program or the DAIG before and after analysis of each program.  These are output in DOT/graphviz format in `out/cfg` and `out/daig` respectively; `_post` suffixes on the DAIG filenames denote the after-analysis versions.
+    1.b) For a more detailed look at the analysis results or to better understand the contents of the the log files, you can also look at the CFG of each program or the DAIG before and after analysis of each program.  These are output in DOT/graphviz format in `./out/cfg` and `./out/daig` respectively; `_post` suffixes on the DAIG filenames denote the after-analysis versions.
     These `.dot` files are human-readable(-ish) or can be rendered as PNG by: `dot -Tpng input.dot > output.png`.  To do so within the container, you wil first need to `sudo apt-get install graphviz` then copy out the result as described in steps 5-7 of Getting Started, or you can copy the `.dot` out and build the PNG on your host machine.
 
-2.) To analyze the list-append program shown in the overview and discussed in Section 7.2, run `dune runtest src/shape`.
-TODO(benno): Finish up here once `semantic` is working from within docker.
+2.) To analyze the list-append program shown in the overview and discussed in Section 7.2, run `dune runtest src/shape`.  This will output two `.dot` files to `./out/daig`: `list_append_pre.dot` with the pre-query DAIG state, and `list_append_post.dot` with the post-query DAIG state.
 
+To check that the analysis indeed verifies the memory safety of the procedure, it should suffice to look in `list_append_post.dot` for the graph node with name beginning "exit{()}" (i.e. the exit location in the initial (unit) context).  Its contents are an abstract state consisting of two parts: a separation logic formula MEM (defined line 1086) and an environment ENV (defined line 1093).  We don't include pure constraints (defined line 1091) in the DOT output as they can get quite unwieldly.
+
+At the exit, the MEM should read "lseg(a1,null)" (i.e. the heap contains a list segment from address a1 to null) and the ENV should read {(RETVAR, a1),(null,null)} (i.e. the distinguished return variables points to address a1 and the "null" variable points to null.  A list segment from a1 to null is simply a well-formed null-terminated list at a1, so this state confirms that the append procedure produces such a list.
+
+For a more detailed look, these `.dot` files can be rendered as PNG images as described in step 1.b above; this will confirm that analysis converges in one demanded unrolling as mentioned line 1134.
 
 # Scalability Experiments
 
