@@ -42,6 +42,37 @@ let implies l r =
   | _, None -> false
   | Some (al, il), Some (ar, ir) -> Addr_map.implies al ar && Itv.implies il ir
 
+let pp = Option.pp (pp_pair Addr_map.pp Itv.pp) "bottom"
+
+let sanitize x = x
+
+let show x =
+  pp Format.str_formatter x;
+  Format.flush_str_formatter ()
+
+let hash = seeded_hash
+
+let equal l r =
+  match (l, r) with
+  | None, None -> true
+  | Some (al, il), Some (ar, ir) -> Addr_map.equal al ar && Itv.equal il ir
+  | _ -> false
+
+let sexp_of_t = function
+  | Some (a, i) -> Sexp.List [ Addr_map.sexp_of_t a; Itv.sexp_of_t i ]
+  | _ -> Sexp.Atom "bottom"
+
+let t_of_sexp = function
+  | Sexp.Atom "bottom" -> None
+  | Sexp.List [ a_sexp; i_sexp ] -> Some (Addr_map.t_of_sexp a_sexp, Itv.t_of_sexp i_sexp)
+  | _ -> failwith "malformed abstract state s-expression"
+
+let hash_fold_t seed = function
+  | Some (a, i) ->
+      let i_hash = Itv.hash_fold_t seed i in
+      Ppx_hash_lib.Std.Hash.fold_int i_hash (Addr.Abstract.hash 13 a)
+  | None -> seed
+
 let apron_var_of_array_cell addr idx = Var.of_string (Format.asprintf "%a.%i" Addr.pp addr idx)
 
 let apron_var_of_array_len addr = Var.of_string (Format.asprintf "%a.len" Addr.pp addr)
@@ -68,27 +99,27 @@ let texpr_of_expr expr (am, itv) =
         Itv.texpr_of_expr ~fallback:handle_array_expr itv field >>| Itv.eval_texpr itv
         >>= fun { inf; sup } ->
         Map.find am rcvr_ident >>= fun aaddr ->
-        let min_idx, max_idx =
-          pair
-            ( ( match inf with
-              | Scalar.Float f -> f
-              | Scalar.Mpqf m -> Mpqf.to_float m
-              | Scalar.Mpfrf m -> Mpfrf.to_float m )
-            |> Float.(round_up >> to_int) )
-            ( ( match sup with
-              | Scalar.Float f -> f
-              | Scalar.Mpqf m -> Mpqf.to_float m
-              | Scalar.Mpfrf m -> Mpfrf.to_float m )
-            |> Float.(round_down >> to_int) )
-        in
-        List.fold (range min_idx max_idx) ~init:Interval.bottom ~f:(fun a idx ->
-            Addr.Abstract.fold aaddr ~init:a ~f:(fun a addr ->
-                let av = apron_var_of_array_cell addr idx in
-                if Environment.mem_var (Abstract1.env itv) av then
-                  let value = Abstract1.bound_variable man itv av in
-                  join_intervals a value
-                else a))
-        |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
+        if Scalar.is_infty inf < 0 || Scalar.is_infty sup > 0 then
+          Some (Texpr1.Cst (Coeff.Interval Interval.top))
+        else if Scalar.is_infty inf > 0 || Scalar.is_infty sup < 0 then
+          Some (Texpr1.Cst (Coeff.Interval Interval.bottom))
+        else
+          let to_float scalar =
+            match scalar with
+            | Scalar.Float f -> f
+            | Scalar.Mpqf m -> Mpqf.to_float m
+            | Scalar.Mpfrf m -> Mpfrf.to_float m
+          in
+          let min_idx = Float.(round_up >> to_int) (to_float inf) in
+          let max_idx = Float.(round_down >> to_int) (to_float sup) in
+          List.fold (range min_idx max_idx) ~init:Interval.bottom ~f:(fun a idx ->
+              Addr.Abstract.fold aaddr ~init:a ~f:(fun a addr ->
+                  let av = apron_var_of_array_cell addr idx in
+                  if Environment.mem_var (Abstract1.env itv) av then
+                    let value = Abstract1.bound_variable man itv av in
+                    join_intervals a value
+                  else a))
+          |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
     | Ast.Expr.Array { elts = _; alloc_site = _ } ->
         failwith
           "Unreachable by construction; array literals only occur at top level of assignment."
@@ -105,14 +136,15 @@ let extend_env_with_uses stmt (am, itv) =
   |> Environment.add env [||]
   |> fun new_env -> (am, Abstract1.change_environment man itv new_env false)
 
+open Ast
+
 let interpret stmt phi =
   let man = Itv.get_man () in
   phi >>| extend_env_with_uses stmt >>= fun (am, itv) ->
-  let open Ast.Stmt in
   match stmt with
-  | Assign { lhs; rhs = Ast.Expr.Var v } when Map.mem am v ->
+  | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
       Some (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
-  | Assign { lhs; rhs = Ast.Expr.Array { elts; alloc_site } } ->
+  | Assign { lhs; rhs = Expr.Array { elts; alloc_site } } ->
       let addr = Addr.of_alloc_site alloc_site in
       let am =
         Map.change am lhs ~f:(function
@@ -166,44 +198,12 @@ let interpret stmt phi =
             Some (am, Abstract1.forget_array man itv [| lhs |] false)
           else (* lhs was unconstrained, treat as a `skip`*) Some (am, itv) )
   | Throw { exn = _ } -> None
-  | Assume e -> (
-      match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
+  | Assume e ->
+     (match Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr e (am, itv)) itv e with
       | itv when Abstract1.is_bottom man itv -> None
-      | itv -> Some (am, itv) )
+      | itv -> Some (am, itv)
+     )
   | Expr _ | Write _ | Skip | Call _ -> Some (am, itv)
-
-let pp = Option.pp (pp_pair Addr_map.pp Itv.pp) "bottom"
-
-let sanitize x = x
-
-let show x =
-  pp Format.str_formatter x;
-  Format.flush_str_formatter ()
-
-let hash = seeded_hash
-
-let equal l r =
-  match (l, r) with
-  | None, None -> true
-  | Some (al, il), Some (ar, ir) -> Addr_map.equal al ar && Itv.equal il ir
-  | _ -> false
-
-let sexp_of_t = function
-  | Some (a, i) -> Sexp.List [ Addr_map.sexp_of_t a; Itv.sexp_of_t i ]
-  | _ -> Sexp.Atom "bottom"
-
-let t_of_sexp = function
-  | Sexp.Atom "bottom" -> None
-  | Sexp.List [ a_sexp; i_sexp ] -> Some (Addr_map.t_of_sexp a_sexp, Itv.t_of_sexp i_sexp)
-  | _ -> failwith "malformed abstract state s-expression"
-
-let hash_fold_t seed = function
-  | Some (a, i) ->
-      let i_hash = Itv.hash_fold_t seed i in
-      Ppx_hash_lib.Std.Hash.fold_int i_hash (Addr.Abstract.hash 13 a)
-  | None -> seed
-
-open Ast
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   let rec expr_derefs = function
@@ -254,4 +254,18 @@ let is_safe var idx state =
         |> List.reduce_exn ~f:(fun x y ->
                match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
 
-let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ = failwith "todo"
+let handle_return ~(caller_state : t) ~(return_state : t) ~callsite ~callee_defs =
+  return_state >>= fun (return_addrs, return_itv) ->
+  caller_state >>| fun (caller_addrs, caller_itv) ->
+  match callsite with
+  | Ast.Stmt.Call { lhs; _ } ->
+      let itv =
+        Itv.handle_return ~caller_state:caller_itv ~return_state:return_itv ~callsite ~callee_defs
+      in
+      let addrs =
+        match Map.find return_addrs Cfg.retvar with
+        | Some data -> Map.set caller_addrs ~key:lhs ~data
+        | None -> caller_addrs
+      in
+      (addrs, itv)
+  | _ -> failwith "malformed callsite"

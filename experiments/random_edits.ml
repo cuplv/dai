@@ -287,9 +287,8 @@ module Make (Dom : D1a.Abstract.DomNoCtx) = struct
     D.add_stmt_at loc call daig
 
   (** Generate a single random [Ast.Stmt.t] with the following distribution:
-   * 70% [Assign] (x := e)
+   * 80% [Assign] (x := e)
      * 75% of assignments are to arithmetic variables, 25% to bools
-   * 10% [Call] (x := f e)
    * 10% [Assume] (assume e)
    * 10% [Skip] (skip)
    *)

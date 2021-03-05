@@ -67,6 +67,7 @@ let test_array_accesses id =
 
 let%test "interproc buckets tests" =
   test_array_accesses "buckets_contains";
+  test_array_accesses "buckets_equals";
   true
 
 (*let%test "intraproc buckets tests" =
