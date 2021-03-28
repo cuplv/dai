@@ -1,43 +1,39 @@
 open Import
 
-module T = struct
-  type t = unit
+type t = unit
 
-  type stmt = Ast.Stmt.t [@@deriving compare, equal, sexp_of]
+type stmt = Ast.Stmt.t [@@deriving compare, equal, sexp_of]
 
-  module Stmt = Ast.Stmt
+module Stmt = Ast.Stmt
 
-  let is_bot () = true
+let is_bot () = true
 
-  let widen () () = ()
+let widen () () = ()
 
-  let join () () = ()
+let join () () = ()
 
-  let implies () () = true
+let implies () () = true
 
-  let interpret _ () = ()
+let interpret _ () = ()
 
-  let init () = ()
+let init () = ()
 
-  let pp fs () = Format.fprintf fs "()"
+let pp fs () = Format.fprintf fs "()"
 
-  let sanitize () = ()
+let sanitize () = ()
 
-  let show () = "()"
+let show () = "()"
 
-  let hash seed () = seed
+let hash seed () = seed
 
-  let compare () () = 0
+let compare () () = 0
 
-  let equal () () = true
+let equal () () = true
 
-  let sexp_of_t () = Sexp.Atom "()"
+let sexp_of_t () = Sexp.Atom "()"
 
-  let t_of_sexp _ = ()
+let t_of_sexp _ = ()
 
-  let hash_fold_t seed () = seed
+let hash_fold_t seed () = seed
 
-  let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
-end
-
-include Context.MakeInsensitive (T)
+let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
