@@ -215,33 +215,35 @@ let cfg_of_json json : Cfg.t =
   let cfg = Graph.create (module Cfg.G) ~edges () in
   (cfg, List.map ~f:fst fns |> Cfg.Fn.Set.of_list)
 
+let file = ( ^ ) "/home/pldi/d1a_impl/test_cases/"
+  
 let%test "cfg_parse and dump dot: arith_syntax.js" =
-  let cfg = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/arith_syntax.js") in
+  let cfg = cfg_of_json @@ json_of_file (file "arith_syntax.js") in
   Cfg.dump_dot cfg ~filename:"arith.dot";
   true
 
 let%test "cfg_parse and dump dot: while_syntax.js" =
-  let cfg = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/while_syntax.js") in
+  let cfg = cfg_of_json @@ json_of_file (file "while_syntax.js") in
   Cfg.dump_dot cfg ~filename:"while.dot";
   true
 
 let%test "cfg_parse and dump dot: array_syntax.js" =
-  let cfg = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/array_syntax.js") in
+  let cfg = cfg_of_json @@ json_of_file (file "array_syntax.js") in
   Cfg.dump_dot cfg ~filename:"array.dot";
   true
 
 let%test "cfg_parse and dump dot: list_append.js" =
-  let cfg = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/list_append.js") in
+  let cfg = cfg_of_json @@ json_of_file (file "list_append.js") in
   Cfg.dump_dot cfg ~filename:"list.dot";
   true
 
 let%test "cfg_parse and dump dot: functions.js" =
-  let cfg = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/functions.js") in
+  let cfg = cfg_of_json @@ json_of_file (file "functions.js") in
   Cfg.dump_dot cfg ~filename:"functions.dot";
   true
 
 let%test "back edge classification: while_syntax.js" =
-  let cfg, _ = cfg_of_json @@ json_of_file (Unix.getcwd () ^ "/while_syntax.js") in
+  let cfg, _ = cfg_of_json @@ json_of_file (file "while_syntax.js") in
   Int.equal 1
   @@ Graph.depth_first_search
        (module Cfg.G)

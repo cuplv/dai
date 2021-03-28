@@ -985,16 +985,16 @@ end
 module Dom = Context.MakeInsensitive (Incr.Make (Itv))
 module Daig = Make (Dom)
 
-let file = ( ^ ) (Unix.getcwd () ^ "/")
+let file = ( ^ ) "/home/pldi/d1a_impl/test_cases/"
 
 let%test "build daig and dump dot: arith_syntax.js" =
-  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/arith_syntax.js") in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "arith_syntax.js") in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"arith_daig.dot";
   true
 
 let%test "build daig and issue queries: while_syntax.js" =
-  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "test_cases/while_syntax.js") in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "while_syntax.js") in
   let l1 = Daig.Name.Loc (Cfg.Loc.of_int_unsafe 1, Dom.Ctx.init) in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"while_daig.dot";
@@ -1008,8 +1008,7 @@ let%test "build daig and issue queries: while_syntax.js" =
 
 let%test "build daig and issue query at exit: functions.js" =
   let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json)
-      "/home/pldi/d1a_impl/test_cases/functions.js"
+    Cfg_parser.(json_of_file >> cfg_of_json) (file "functions.js")
   in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"functions_initial_daig.dot";
