@@ -132,3 +132,66 @@ Claims not supported by this artifact
  * The claim that these domains "cannot be handled by existing incremental and/or demand-driven frameworks" is not in scope here -- see related work for discussion about that, but such a statement is not suited to artifact evaluation.
 
  * The scalability results shown in the CDF and table of Figure 10 are likely not to be reproduced by artifact evaluators -- the compute resources necessary to reproduce experiments at that scale are well beyond what the artifact evaluation committee could reasonably be expected to use.
+
+
+===========================
+Reusability & Extensibility
+===========================
+There are several ways in which this implementation could be extended for different analysis domains and front-end/experiment harnesses.
+
+# Adding a new abstract domain
+
+The most obvious extension to this tool would be to add a new abstract domain.  In order to do so, one must implement a module of type `DomNoCtx`. (src/abstract.ml:27)
+
+To implement a new abstract domain `My_new_domain`, proceed as follows:
+
+1. Define a public interface for your domain:
+   `echo "include Abstract.DomNoCtx" > src/my_new_domain.mli`
+
+2. Create an empty implementation for your domain, attempt to build:
+   `touch src/my_new_domain.ml && make build`
+
+   This should fail with a list of module members (i.e. everything in `Abstract.DomNoCtx`) that you have declared in the `.mli` but have not yet implemented in the `.ml`.
+
+3. Implement missing module members in `src/my_new_domain.ml` until `make build` succeeds; `src/unit_dom.ml`, which implements the trivial 1-element abstract domain, would be a good reference point/example to work from.
+
+4. Done!  You can now lift your domain with one of the provided context functors, e.g. `Context.MakeInsensitive(My_new_domain)` is a context-insensitive domain (of type `Abstract.Dom`) that can be used elsewhere in the framework.
+
+# Adding a new context-sensitivity policy
+
+To implement a new context-sensitivity policy, implement a functor of type `CtxFunctor` as defined in `src/context.ml`.
+
+The three functors therein (`MakeInsensitive`, `Make1CFA`, `Make2CFA`) can serve as examples, and see e.g. `experiments/arrays.ml` for how such functors can then be used.
+
+# Using a different abstract domain for scalability experiments
+
+To use a different abstract domain in the scalability experiment harness, just replace `Octagon` on lines 46, 56, 66, and 76 of `experiments/exec.ml` by the abstract domain of your choice: for example, if you implemented a new context-sensitivity policy `My_ctx_functor : Context.CtxFunctor` and a new abstract domain `My_domain : Abstract.DomNoCtx` per the previous instructions, then you would replace each `Octagon` by `My_ctx_functor (My_domain)`.
+
+Then, run `make build`, which will build a new binary of the experiment harness at `./run_d1a_experiment`.
+
+Finally, run `./run_d1a_experiment` (with arguments for experiment size and configuration, or with `-help` to see possible arguments)
+
+# Running a specific analysis on a specific source file
+
+Given a domain `My_dom` of type `Abstract.Dom` and a JavaScript source file at `/path/to/foo.js`, the following snippet will build a CFG and DAIG, and fully evaluate the DAIG (i.e. compute a fixed-point on all paths from which program exit is reachable)
+
+```
+module Daig = D1a.Daig.Make (My_dom)
+
+let%test "analyze foo.js in My_dom" =
+  (* build a CFG of the program *)
+  let cfg = D1a.Cfg_parser.(json_of_file >> cfg_of_json) "/path/to/foo.js" in
+  (* build a DAIG from that CFG, with the domain's initial abstract state at program entry *) 
+  let daig = Daig.of_cfg ~init_state:(My_dom.init ()) cfg in
+  (* construct the name of the program exit abstract state *)
+  let exit_loc = Daig.Name.Loc (D1a.Cfg.Loc.exit, My_dom.Ctx.init) in
+  (* issue a query for said abstract state (discarding the result by prefixing with an underscore) *)
+  let _abs_state_at_exit,daig = Daig.get_by_name exit_loc daig in
+  (* dump a DOT representation of the resulting DAIG state at /path/to/output.dot *)
+  Daig.dump_dot daig ~filename:"/path/to/output.dot";
+  true
+```
+
+If the above snippet were in a `.ml` file in `~/d1a_impl/some/relative/path", you could then run the analysis with `dune runtest some/relative/path`.
+
+Examples of some variations on the above pattern can be found at the end of `src/shape/state.ml` (using a different precondition/program-entry abstract state), `src/daig.ml` (issuing queries at different locations), and `experiments/arrays.ml` (programmatically checking an invariant at all array accesses in programs, and using multiple different context sensitivities).
