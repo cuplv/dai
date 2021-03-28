@@ -66,7 +66,7 @@ plt.ylabel(r"Analysis Time (ms)")
 plt.xlabel(r"Cumulative Program Edits")
 
 plt.xticks([0,250,500],label=True)
-plt.yticks(ticks=[0,5000,10000],label=True)
+plt.yticks([0,5000,10000],label=True)
 
 for i in range(runs):
     plt.scatter(x_coords, raw[i], s=0.08, alpha=0.3, color=color,marker=",")
