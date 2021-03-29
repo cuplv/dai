@@ -5,7 +5,6 @@
 ##########################
 ## Run some experiments ##
 ##########################
-echo "Running some miniature experiments... this should just take 20 seconds or so."
 for seed in 4 5 6 7; do
     for n in 500; do
 	for qpe in 5; do

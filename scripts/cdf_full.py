@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # expect arguments: <output-file> <observations> <batch> <incr> <dd> <dd+incr>
-# where each <config> is one analysis latency observation per row, <observations> rows
+# where each <config> is a file with one analysis latency observation per line, <observations> lines
 
 import matplotlib as mpl
 mpl.use('Agg')

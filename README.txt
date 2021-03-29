@@ -137,7 +137,7 @@ Claims not supported by this artifact
 ===========================
 Reusability & Extensibility
 ===========================
-There are several ways in which this implementation could be extended for different analysis domains and front-end/experiment harnesses.
+There are several ways in which this implementation could be extended for different analysis domains, context-sensitivity policies, and front-end/experiment harnesses.
 
 # Adding a new abstract domain
 
@@ -151,11 +151,11 @@ To implement a new abstract domain `My_new_domain`, proceed as follows:
 2. Create an empty implementation for your domain, attempt to build:
    `touch src/my_new_domain.ml && make build`
 
-   This should fail with a list of module members (i.e. everything in `Abstract.DomNoCtx`) that you have declared in the `.mli` but have not yet implemented in the `.ml`.
+   This should fail with a list of module members that you have declared in the `.mli` but have not yet implemented in the `.ml` (i.e. everything in `Abstract.DomNoCtx`).
 
-3. Implement missing module members in `src/my_new_domain.ml` until `make build` succeeds; `src/unit_dom.ml`, which implements the trivial 1-element abstract domain, would be a good reference point/example to work from.
+3. Implement missing module members in `src/my_new_domain.ml` until `make build` succeeds; `src/unit_dom.ml`, which implements the trivial 1-element "unit" abstract domain, would be a good reference point/example to work from.
 
-4. Done!  You can now lift your domain with one of the provided context functors, e.g. `Context.MakeInsensitive(My_new_domain)` is a context-insensitive domain (of type `Abstract.Dom`) that can be used elsewhere in the framework.
+4. Done!  You can now lift your domain with one of the provided context functors; e.g. `Context.MakeInsensitive(My_new_domain)` is a context-insensitive domain (of type `Abstract.Dom`) that can be used elsewhere in the framework.
 
 # Adding a new context-sensitivity policy
 
@@ -173,7 +173,7 @@ Finally, run `./run_d1a_experiment` (with arguments for experiment size and conf
 
 # Running a specific analysis on a specific source file
 
-Given a domain `My_dom` of type `Abstract.Dom` and a JavaScript source file at `/path/to/foo.js`, the following snippet will build a CFG and DAIG, and fully evaluate the DAIG (i.e. compute a fixed-point on all paths from which program exit is reachable)
+Given a domain `My_dom` of type `Abstract.Dom` and a JavaScript source file at `/path/to/foo.js` (in the subset of JS supported by our frontend), the following snippet will build a CFG and DAIG, and fully evaluate the DAIG (i.e. compute a fixed-point on all paths from which program exit is reachable)
 
 ```
 module Daig = D1a.Daig.Make (My_dom)
@@ -192,6 +192,6 @@ let%test "analyze foo.js in My_dom" =
   true
 ```
 
-If the above snippet were in a `.ml` file in `~/d1a_impl/some/relative/path", you could then run the analysis with `dune runtest some/relative/path`.
+If that snippet were in a `.ml` file in directory `~/d1a_impl/some/relative/path", you could then run the analysis with `dune runtest some/relative/path`.
 
 Examples of some variations on the above pattern can be found at the end of `src/shape/state.ml` (using a different precondition/program-entry abstract state), `src/daig.ml` (issuing queries at different locations), and `experiments/arrays.ml` (programmatically checking an invariant at all array accesses in programs, and using multiple different context sensitivities).
