@@ -45,7 +45,10 @@ with sys.stdin as csvfile:
     for idx,row in enumerate(data):
         x_coords.append(int(idx))
         for i in range(runs):
-            raw[i].append(float(row[i]))
+            try:
+                raw[i].append(float(row[i]))
+            except:
+                raw[i].append(0.0)
 
 plt.rc('text')
 plt.rc('font', family='serif',size=16.0)
