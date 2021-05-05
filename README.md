@@ -9,5 +9,5 @@ DAI requires:
  * System packages: libgmp-dev libmpfr-dev (for APRON numerical domains)
  * [Adapton](https://github.com/plum-umd/adapton.ocaml) version 0.1-dev (pinned as a local OPAM package via `make install`, per its README)
 
-Build with `make build` and run synthetic-edit experiments (as in PLDI paper) with `./run_d1a_experiment`
+Build with `make build` and run synthetic-edit experiments (as in PLDI [paper](https://arxiv.org/abs/2104.01270)) with `./run_d1a_experiment`
 
