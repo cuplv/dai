@@ -14,5 +14,5 @@ depends: [
   "yojson"
   "apron"
 ]
-synopsis: "Demand-first analysis"
-description: "Demand-first analysis"
+synopsis: "Demanded Abstract Interpretation"
+description: "Demanded Abstract Interpretation"

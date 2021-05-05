@@ -1,8 +1,8 @@
-open D1a
+open Dai
 open Import
 open Ast
 
-module Make (Dom : D1a.Abstract.DomNoCtx) = struct
+module Make (Dom : Abstract.DomNoCtx) = struct
   module Dom = Context.MakeInsensitive (Dom)
   module D = Daig.Make (Dom)
   module E = D.G.Edge

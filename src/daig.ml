@@ -985,7 +985,13 @@ end
 module Dom = Context.MakeInsensitive (Incr.Make (Itv))
 module Daig = Make (Dom)
 
-let file = ( ^ ) "/home/pldi/d1a_impl/test_cases/"
+let file =
+  ( ^ )
+    ( match Sys.getenv "DAI_ROOT" with
+    | Some path -> path ^ "test_cases/"
+    | None ->
+        failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`"
+    )
 
 let%test "build daig and dump dot: arith_syntax.js" =
   let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "arith_syntax.js") in
@@ -1007,9 +1013,7 @@ let%test "build daig and issue queries: while_syntax.js" =
   true
 
 let%test "build daig and issue query at exit: functions.js" =
-  let cfg =
-    Cfg_parser.(json_of_file >> cfg_of_json) (file "functions.js")
-  in
+  let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "functions.js") in
   let daig = Daig.of_cfg cfg in
   Daig.dump_dot daig ~filename:"functions_initial_daig.dot";
   let exit_name = Daig.Name.(Loc (Cfg.Loc.exit, Dom.Ctx.init)) in

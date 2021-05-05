@@ -1,4 +1,4 @@
-open D1a.Import
+open Dai.Import
 open Option.Let_syntax
 
 module Edge_type = struct
@@ -26,7 +26,7 @@ module Pure = struct
   let is_bot = List.exists ~f:(function Neq (a, b) when Memloc.equal a b -> true | _ -> false)
 
   let rec assume expr env pures =
-    let open D1a.Ast in
+    let open Dai.Ast in
     let memloc_of_expr = function
       | Expr.Var v -> Env.find env v
       | Expr.Lit Lit.Null -> Some Memloc.null
@@ -389,7 +389,7 @@ module T = struct
   let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
     let _return_graph, _return_pures, return_env = return_state in
     let _caller_graph, _caller_pures, _caller_env = caller_state in
-    match Env.find return_env D1a.Cfg.retvar with
+    match Env.find return_env Dai.Cfg.retvar with
     | None -> return_state
     | Some _retval_memloc ->
         (* bind lhs of callsite to retval_memloc *)
@@ -399,12 +399,12 @@ module T = struct
   (*let process_pures (g,p,e) = build equivalence classes, collapse addresses known to be equal, go to bottom if contradiction; apply after each [interpret]?*)
 
   let interpret stmt (g, p, e) =
-    let open D1a.Ast in
+    let open Dai.Ast in
     match stmt with
     | Stmt.Assign { lhs; rhs = Expr.Lit Lit.Null } ->
         (g, p, Env.update e lhs ~f:(fun _ -> Memloc.null))
     | Stmt.Assign { lhs; rhs = Expr.Var v } ->
-       let is_ret = String.equal D1a.Cfg.retvar in
+       let is_ret = String.equal Dai.Cfg.retvar in
         let new_e =
           match Env.find e v with
           | Some a -> Env.update e lhs ~f:(fun _ -> a)
@@ -413,10 +413,10 @@ module T = struct
               let e = Env.add_exn e ~key:v ~data:a in
               Env.update e lhs ~f:(fun _ -> a)
         in
-        if is_ret lhs && Option.is_some @@ G.get_linear_path g (Env.find_exn new_e D1a.Cfg.retvar) Memloc.null then
+        if is_ret lhs && Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Dai.Cfg.retvar) Memloc.null then
           (* return value is a well-formed list -- project it out and forget locals *)
-          let ret_addr = Env.find_exn new_e D1a.Cfg.retvar in
-           (G.Edge.insert (G.Edge.create ret_addr Memloc.null `List_seg) (G.emp ()),p,Env.of_alist_exn [(D1a.Cfg.retvar, ret_addr)])
+          let ret_addr = Env.find_exn new_e Dai.Cfg.retvar in
+           (G.Edge.insert (G.Edge.create ret_addr Memloc.null `List_seg) (G.emp ()),p,Env.of_alist_exn [(Dai.Cfg.retvar, ret_addr)])
         else (g,p,new_e)
     | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr = Expr.Var rcvr; field = Expr.Var "next" } } -> (
         let g, e, rcvr_addr =
@@ -522,13 +522,17 @@ module T = struct
 end
 
 include T
-module IncrT = D1a.Context.MakeInsensitive (D1a.Incr.Make (T))
-module Daig = D1a.Daig.Make (IncrT)
+module IncrT = Dai.Context.MakeInsensitive (Dai.Incr.Make (T))
+module Daig = Dai.Daig.Make (IncrT)
 
 let%test "build daig, analyze, dump dot: list_append.js" =
+  let abs_of_rel_path = (^) (match Sys.getenv "DAI_ROOT" with
+                  | Some path -> path
+                  | None -> failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`")
+  in
   let cfg =
-    D1a.Cfg_parser.(json_of_file >> cfg_of_json)
-      ("/home/pldi/d1a_impl/test_cases/list_append.js")
+    Dai.Cfg_parser.(json_of_file >> cfg_of_json)
+      (abs_of_rel_path "test_cases/list_append.js")
   in
   let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
   let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in
@@ -541,8 +545,8 @@ let%test "build daig, analyze, dump dot: list_append.js" =
   in
   let init_state : IncrT.t = Obj.magic (mem, [], env) in
   let daig = Daig.of_cfg ~init_state cfg in
-  Daig.dump_dot daig ~filename:"/home/pldi/d1a_impl/out/daig/list_append_pre.dot";
-  let exit_loc = Daig.Name.Loc (D1a.Cfg.Loc.exit, IncrT.Ctx.init) in
+  Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_pre.dot");
+  let exit_loc = Daig.Name.Loc (Dai.Cfg.Loc.exit, IncrT.Ctx.init) in
   let _, daig = Daig.get_by_name exit_loc daig in
-  Daig.dump_dot daig ~filename:"/home/pldi/d1a_impl/out/daig/list_append_post.dot";
+  Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_post.dot");
   true

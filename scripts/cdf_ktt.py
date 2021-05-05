@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 # expect arguments: <output-file> <observations> <batch> <incr> <dd> <dd+incr>
 # where each <config> is one analysis latency observation per row, <observations> rows

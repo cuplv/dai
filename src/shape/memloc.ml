@@ -1,4 +1,4 @@
-open D1a.Import
+open Dai.Import
 
 module T : sig
   type t [@@deriving equal, compare, hash, sexp]

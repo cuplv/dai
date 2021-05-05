@@ -1,12 +1,12 @@
 (library
  (name experiments)
  (modules util random_edits arrays)
- (libraries d1a)
+ (libraries dai)
  (inline_tests)
  (preprocess (pps ppx_inline_test)))
 
 (executable
   (name exec)
   (modules exec)
-  (libraries d1a experiments)
+  (libraries dai experiments)
   (preprocess (pps ppx_let)))

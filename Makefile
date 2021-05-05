@@ -3,7 +3,7 @@ default: build
 
 .PHONY: build
 build:
-	dune build
+	DAI_ROOT=$(dir $(abspath $(lastword $(MAKEFILE_LIST)))) dune build
 	cp ./_build/default/experiments/exec.exe ./run_d1a_experiment
 
 .PHONY: test

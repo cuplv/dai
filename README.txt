@@ -176,15 +176,15 @@ Finally, run `./run_d1a_experiment` (with arguments for experiment size and conf
 Given a domain `My_dom` of type `Abstract.Dom` and a JavaScript source file at `/path/to/foo.js` (in the subset of JS supported by our frontend), the following snippet will build a CFG and DAIG, and fully evaluate the DAIG (i.e. compute a fixed-point on all paths from which program exit is reachable)
 
 ```
-module Daig = D1a.Daig.Make (My_dom)
+module Daig = Dai.Daig.Make (My_dom)
 
 let%test "analyze foo.js in My_dom" =
   (* build a CFG of the program *)
-  let cfg = D1a.Cfg_parser.(json_of_file >> cfg_of_json) "/path/to/foo.js" in
+  let cfg = Dai.Cfg_parser.(json_of_file >> cfg_of_json) "/path/to/foo.js" in
   (* build a DAIG from that CFG, with the domain's initial abstract state at program entry *) 
   let daig = Daig.of_cfg ~init_state:(My_dom.init ()) cfg in
   (* construct the name of the program exit abstract state *)
-  let exit_loc = Daig.Name.Loc (D1a.Cfg.Loc.exit, My_dom.Ctx.init) in
+  let exit_loc = Daig.Name.Loc (Dai.Cfg.Loc.exit, My_dom.Ctx.init) in
   (* issue a query for said abstract state (discarding the result by prefixing with an underscore) *)
   let _abs_state_at_exit,daig = Daig.get_by_name exit_loc daig in
   (* dump a DOT representation of the resulting DAIG state at /path/to/output.dot *)

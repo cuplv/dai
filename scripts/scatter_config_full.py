@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 # Expects to run as ./scatter_config_full.py <output-file> <config> <columns>
 # where:

@@ -215,8 +215,14 @@ let cfg_of_json json : Cfg.t =
   let cfg = Graph.create (module Cfg.G) ~edges () in
   (cfg, List.map ~f:fst fns |> Cfg.Fn.Set.of_list)
 
-let file = ( ^ ) "/home/pldi/d1a_impl/test_cases/"
-  
+let file =
+  ( ^ )
+    ( match Sys.getenv "DAI_ROOT" with
+    | Some path -> path ^ "test_cases/"
+    | None ->
+        failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`"
+    )
+
 let%test "cfg_parse and dump dot: arith_syntax.js" =
   let cfg = cfg_of_json @@ json_of_file (file "arith_syntax.js") in
   Cfg.dump_dot cfg ~filename:"arith.dot";
