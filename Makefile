@@ -1,9 +1,11 @@
+export DAI_ROOT=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
 .PHONY: default
 default: build
 
 .PHONY: build
 build:
-	DAI_ROOT=$(dir $(abspath $(lastword $(MAKEFILE_LIST)))) dune build
+	dune build
 	cp ./_build/default/experiments/exec.exe ./run_d1a_experiment
 
 .PHONY: test
