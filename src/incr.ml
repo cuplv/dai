@@ -338,14 +338,12 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
     | Atom "bottom" -> None
     | List [ List env_sexp; List heap_sexp ] ->
         let env =
-          List.fold env_sexp ~init:(Env.of_list []) ~f:(fun env ->
-            function
+          List.fold env_sexp ~init:(Env.of_list []) ~f:(fun env -> function
             | List [ Atom k; v ] -> Env.add env k (v_of_sexp v)
             | _ -> failwith "malformed environment s-expression")
         in
         let heap =
-          List.fold heap_sexp ~init:(Heap.of_list []) ~f:(fun heap ->
-            function
+          List.fold heap_sexp ~init:(Heap.of_list []) ~f:(fun heap -> function
             | List [ obj; fld; v ] ->
                 Heap.add heap (Addr.t_of_sexp obj, Int.t_of_sexp fld) (v_of_sexp v)
             | _ -> failwith "malformed environment s-expression")

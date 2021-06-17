@@ -6,8 +6,8 @@ module Addr_map = struct
   type t = Addr.Abstract.t Map.M(String).t [@@deriving compare, sexp]
 
   let join =
-    Map.merge ~f:(fun ~key:_ ->
-      function `Both (a1, a2) -> Some (Addr.Abstract.union a1 a2) | `Left a | `Right a -> Some a)
+    Map.merge ~f:(fun ~key:_ -> function
+      | `Both (a1, a2) -> Some (Addr.Abstract.union a1 a2) | `Left a | `Right a -> Some a)
 
   let implies l r =
     List.for_all (Map.to_alist l) ~f:(fun (k, lv) ->

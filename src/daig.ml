@@ -462,8 +462,7 @@ module Make (Dom : Abstract.Dom) = struct
     in
 
     let all_new_refs =
-      Set.fold curr_iter_loop_nodes ~init:[ next_iter; next_pre_widen ] ~f:(fun acc ->
-        function
+      Set.fold curr_iter_loop_nodes ~init:[ next_iter; next_pre_widen ] ~f:(fun acc -> function
         | Ref.AState { state = _; name } ->
             Ref.AState { state = None; name = increment_iteration loop_head name } :: acc
         | _ -> acc)
@@ -507,8 +506,7 @@ module Make (Dom : Abstract.Dom) = struct
             | Some { name; _ } ->
                 let possible_callers =
                   G.nodes g
-                  |> Seq.fold ~init:[] ~f:(fun acc ->
-                       function
+                  |> Seq.fold ~init:[] ~f:(fun acc -> function
                        | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } as callsite
                          when String.equal fn name ->
                            Seq.filter (G.Node.succs callsite g) ~f:(fun poststate_ref ->
@@ -729,8 +727,7 @@ module Make (Dom : Abstract.Dom) = struct
     (* Given a location/context pair at a function entry and a daig, analyze all data flow into that function entry. *)
     Cfg.call_chains_to ~loc ~cfg:(snd daig)
     |> List.filter ~f:(List.map ~f:Cfg.G.Edge.label >> Dom.Ctx.is_feasible_callchain ctx)
-    |> List.fold ~init:daig ~f:(fun daig ->
-         function
+    |> List.fold ~init:daig ~f:(fun daig -> function
          | [] -> failwith "invalid empty call chain"
          | immediate_caller :: chain -> (
              List.rev chain

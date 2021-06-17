@@ -404,7 +404,7 @@ module T = struct
     | Stmt.Assign { lhs; rhs = Expr.Lit Lit.Null } ->
         (g, p, Env.update e lhs ~f:(fun _ -> Memloc.null))
     | Stmt.Assign { lhs; rhs = Expr.Var v } ->
-       let is_ret = String.equal Dai.Cfg.retvar in
+        let is_ret = String.equal Dai.Cfg.retvar in
         let new_e =
           match Env.find e v with
           | Some a -> Env.update e lhs ~f:(fun _ -> a)
@@ -413,11 +413,16 @@ module T = struct
               let e = Env.add_exn e ~key:v ~data:a in
               Env.update e lhs ~f:(fun _ -> a)
         in
-        if is_ret lhs && Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Dai.Cfg.retvar) Memloc.null then
+        if
+          is_ret lhs
+          && (Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Dai.Cfg.retvar) Memloc.null)
+        then
           (* return value is a well-formed list -- project it out and forget locals *)
           let ret_addr = Env.find_exn new_e Dai.Cfg.retvar in
-           (G.Edge.insert (G.Edge.create ret_addr Memloc.null `List_seg) (G.emp ()),p,Env.of_alist_exn [(Dai.Cfg.retvar, ret_addr)])
-        else (g,p,new_e)
+          ( G.Edge.insert (G.Edge.create ret_addr Memloc.null `List_seg) (G.emp ()),
+            p,
+            Env.of_alist_exn [ (Dai.Cfg.retvar, ret_addr) ] )
+        else (g, p, new_e)
     | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr = Expr.Var rcvr; field = Expr.Var "next" } } -> (
         let g, e, rcvr_addr =
           match Env.find e rcvr with
@@ -527,8 +532,7 @@ module Daig = Dai.Daig.Make (IncrT)
 
 let%test "build daig, analyze, dump dot: list_append.js" =
   let cfg =
-    Dai.Cfg_parser.(json_of_file >> cfg_of_json)
-      (abs_of_rel_path "test_cases/list_append.js")
+    Dai.Cfg_parser.(json_of_file >> cfg_of_json) (abs_of_rel_path "test_cases/list_append.js")
   in
   let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
   let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in

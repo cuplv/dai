@@ -45,7 +45,8 @@ let time ~f ~x fs descr =
   let st = systime () in
   f x $> fun _ -> Format.fprintf fs "%s%.3f\n" descr (1000. *. (systime () -. st))
 
-let abs_of_rel_path rel_path = match Sys.getenv "DAI_ROOT" with
+let abs_of_rel_path rel_path =
+  match Sys.getenv "DAI_ROOT" with
   | Some prefix -> prefix ^ rel_path
   | None -> failwith "environment variable DAI_ROOT is unset; set manually or use `make`"
 

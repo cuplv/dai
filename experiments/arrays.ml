@@ -26,11 +26,9 @@ module Arr_bounds_check (CF : Context.CtxFunctor) = struct
             ~f:(fun poststate_ref ->
               Seq.filter ~f:Ref.is_astate (G.Node.preds poststate_ref (fst daig)))
         in
-        List.fold accesses ~init:daig ~f:(fun daig ->
-          function
+        List.fold accesses ~init:daig ~f:(fun daig -> function
           | Expr.Var rcvr, field ->
-              Seq.fold astates_at_stmt_entry ~init:daig ~f:(fun daig ->
-                function
+              Seq.fold astates_at_stmt_entry ~init:daig ~f:(fun daig -> function
                 | Stmt _ -> failwith "unreachable by preceding filter on Ref.is_astate"
                 | AState _ as astate_ref ->
                     let astate_ref, daig = fixpoint_of astate_ref daig in
