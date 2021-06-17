@@ -985,13 +985,7 @@ end
 module Dom = Context.MakeInsensitive (Incr.Make (Itv))
 module Daig = Make (Dom)
 
-let file =
-  ( ^ )
-    ( match Sys.getenv "DAI_ROOT" with
-    | Some path -> path ^ "test_cases/"
-    | None ->
-        failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`"
-    )
+let file = ( ^ ) (abs_of_rel_path "test_cases/")
 
 let%test "build daig and dump dot: arith_syntax.js" =
   let cfg = Cfg_parser.(json_of_file >> cfg_of_json) (file "arith_syntax.js") in

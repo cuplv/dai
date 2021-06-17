@@ -59,7 +59,7 @@ module Checker_1CFA = Arr_bounds_check (Context.Make1CFA)
 module Checker_2CFA = Arr_bounds_check (Context.Make2CFA)
 
 let test_array_accesses id =
-  let cfg = (Util.test_case >> Util.abs_path >> json_of_file >> cfg_of_json) id in
+  let cfg = (Util.test_case >> Import.abs_of_rel_path >> json_of_file >> cfg_of_json) id in
   Cfg.dump_dot cfg ~filename:(Util.cfg_output id);
   let open Checker_0CFA in
   (let id = id ^ "_0cfa" in

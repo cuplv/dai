@@ -526,10 +526,6 @@ module IncrT = Dai.Context.MakeInsensitive (Dai.Incr.Make (T))
 module Daig = Dai.Daig.Make (IncrT)
 
 let%test "build daig, analyze, dump dot: list_append.js" =
-  let abs_of_rel_path = (^) (match Sys.getenv "DAI_ROOT" with
-                  | Some path -> path
-                  | None -> failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`")
-  in
   let cfg =
     Dai.Cfg_parser.(json_of_file >> cfg_of_json)
       (abs_of_rel_path "test_cases/list_append.js")

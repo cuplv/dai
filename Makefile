@@ -1,3 +1,4 @@
+# DAI_ROOT is set to the directory of this Makefile by default for all targets
 export DAI_ROOT=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 .PHONY: default

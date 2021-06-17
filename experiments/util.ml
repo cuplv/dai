@@ -1,11 +1,9 @@
-let abs_path = (^) (try Sys.getenv "DAI_ROOT" with _ -> failwith "environment variable DAI_ROOT is unset; set manually or build with `make build`")
-
 let test_case f = "test_cases/" ^ f ^ ".js"
 
-let daig_output f = abs_path ("out/daig/" ^ f ^ ".dot")
+let daig_output f = Dai.Import.abs_of_rel_path ("out/daig/" ^ f ^ ".dot")
 
-let cfg_output f = abs_path ("out/cfg/" ^ f ^ ".dot")
+let cfg_output f = Dai.Import.abs_of_rel_path ("out/cfg/" ^ f ^ ".dot")
 
-let log_output f = abs_path ("out/log/" ^ f ^ ".log")
+let log_output f = Dai.Import.abs_of_rel_path ("out/log/" ^ f ^ ".log")
 
-let exp_output f = abs_path ("out/experiments/" ^ f ^ ".log")
+let exp_output f = Dai.Import.abs_of_rel_path ("out/experiments/" ^ f ^ ".log")
