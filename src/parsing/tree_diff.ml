@@ -190,11 +190,21 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
 
 let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   let open List.Monad_infix in
-  let method_decls_by_name : CST.statement -> (string * CST.method_declaration) list = function
+  let rec method_decls_by_name ?(parent_class_name = None) :
+      CST.statement -> (string * CST.method_declaration) list =
+    let parent_class_prefix = match parent_class_name with Some n -> n ^ "#" | None -> "" in
+    function
     | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, (_, body_decls, _))) ->
         List.fold body_decls ~init:[] ~f:(fun acc -> function
           | `Meth_decl ((_, (_, _, (`Id (_, method_name), _, _), _), _) as md) ->
-              (class_name ^ "#" ^ method_name, md) :: acc
+              (parent_class_prefix ^ class_name ^ "#" ^ method_name, md) :: acc
+          | `Class_decl _ as cd ->
+              let nested_method_decls =
+                method_decls_by_name
+                  ~parent_class_name:(Some (parent_class_prefix ^ class_name))
+                  (`Decl cd)
+              in
+              nested_method_decls @ acc
           | _ -> failwith "unrecognized class body declaration")
     | `Decl (`Import_decl _) -> []
     | _ -> failwith "unrecognized top-level definition"
@@ -353,6 +363,31 @@ let%test "conditional branch deletion" =
   let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with [ Delete_statements { from_loc = _; to_loc = _ } ] -> true | _ -> false
+
+let%test "modify condition of conditional" =
+  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional.java" in
+  let next_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional4.java" in
+  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+  let prev_cst =
+    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let updated_prev_tree =
+    prev_tree |> ok
+    >>| Tree.apply
+          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+          ~offsets:(Src_file.line_offsets prev_file)
+  in
+  let next_cst =
+    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+    |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+  match diff with [ Modify_header { at_loc = _; stmt = _ } ] -> true | _ -> false
 
 (*
   (match Dai.Cfg.Fn.Map.data prev_cfg with

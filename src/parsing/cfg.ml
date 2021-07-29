@@ -370,10 +370,22 @@ let rec edge_list_of_block name loc_map ~entry ~exit ~ret : CST.block -> Loc_map
         | `For_stmt (_, _, init, cond, _, update, _, body) ->
             let body_entry = Loc.fresh () in
             let body_exit = Loc.fresh () in
+            let loc_map, (init_intermediate_loc, init_intermediate_stmts) =
+              match init with
+              | `Local_var_decl _ as decl ->
+                let l = Loc.fresh () in
+                let loc_map, es = edge_list_of_stmt loc_map entry l ret decl in
+                (loc_map, (l, es))
+              | `Opt_exp_rep_COMMA_exp_SEMI (None, _) -> (loc_map, (body_exit, []))
+              | `Opt_exp_rep_COMMA_exp_SEMI (Some (e, es), _) ->
+                let exprs = e :: List.map ~f:snd es in
+                (loc_map, expr_of_nonempty_list entry exprs |> snd)
+                (* discard value of initializer expression, as in Java semantics *)
+            in
             let cond, (cond_intermediate_loc, cond_intermediate_stmts) =
               match cond with
               | None -> (Expr.Lit (Lit.Bool true), (entry, []))
-              | Some cond -> expr entry cond
+              | Some cond -> expr init_intermediate_loc cond
             in
             let cond_neg = Expr.Unop { op = Unop.Not; e = cond } in
             let update_intermediate_loc, update_intermediate_stmts =
@@ -383,18 +395,6 @@ let rec edge_list_of_block name loc_map ~entry ~exit ~ret : CST.block -> Loc_map
                   let exprs = e :: List.map ~f:snd es in
                   expr_of_nonempty_list body_exit exprs |> snd
               (* discard value of update expression, as in Java semantics *)
-            in
-            let loc_map, (init_intermediate_loc, init_intermediate_stmts) =
-              match init with
-              | `Local_var_decl _ as decl ->
-                  let l = Loc.fresh () in
-                  let loc_map, es = edge_list_of_stmt loc_map entry l ret decl in
-                  (loc_map, (l, es))
-              | `Opt_exp_rep_COMMA_exp_SEMI (None, _) -> (loc_map, (body_exit, []))
-              | `Opt_exp_rep_COMMA_exp_SEMI (Some (e, es), _) ->
-                  let exprs = e :: List.map ~f:snd es in
-                  (loc_map, expr_of_nonempty_list entry exprs |> snd)
-              (* discard value of initializer expression, as in Java semantics *)
             in
             let loc_map, body = edge_list_of_stmt loc_map body_entry body_exit ret body in
             (cond_intermediate_loc, body_entry, Stmt.Assume cond)
@@ -483,13 +483,16 @@ let rec edge_list_of_block name loc_map ~entry ~exit ~ret : CST.block -> Loc_map
       in
       edges_of_stmts loc_map entry stmts
 
-let parse_class_decl loc_map : CST.class_declaration -> Loc_map.t * (edge list * Dai.Cfg.Fn.t) list
-    = function
-  | _modifiers, _, class_name, _type_params, _superclass, _superinterfaces, (_, decls, _) ->
+let rec parse_class_decl ?(parent_class_name = None) loc_map :
+    CST.class_declaration -> Loc_map.t * (edge list * Dai.Cfg.Fn.t) list =
+  let parent_class_prefix = match parent_class_name with Some n -> n ^ "#" | None -> "" in
+  function
+  | _modifiers, _, (_, class_name), _type_params, _superclass, _superinterfaces, (_, decls, _) ->
       List.fold decls ~init:(loc_map, []) ~f:(fun (loc_map, acc) -> function
         | `Meth_decl
-            (_modifiers, (_tparams, _type, (`Id method_name, formals, _), _throws), `Blk block) ->
-            let name = snd class_name ^ "#" ^ snd method_name in
+            (_modifiers, (_tparams, _type, (`Id (_, method_name), formals, _), _throws), `Blk block)
+          ->
+            let name = parent_class_prefix ^ class_name ^ "#" ^ method_name in
             let formals =
               match formals with
               | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
@@ -507,6 +510,10 @@ let parse_class_decl loc_map : CST.class_declaration -> Loc_map.t * (edge list *
             let fn : Dai.Cfg.Fn.t = { name; formals; locals; entry; exit } in
             let loc_map, edges = edge_list_of_block name loc_map ~entry ~exit ~ret:exit block in
             (loc_map, (edges, fn) :: acc)
+        | `Class_decl cd ->
+            let parent_class_name = Some (parent_class_prefix ^ class_name) in
+            let loc_map, decls = parse_class_decl ~parent_class_name loc_map cd in
+            (loc_map, decls @ acc)
         | d ->
             failwith
               (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
@@ -537,3 +544,15 @@ open Result.Monad_infix
 let%test "hello world program" =
   let file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
+
+let%test "nested classes" =
+  let file = Src_file.of_file ~abspath:false "test_cases/java/NestedClasses.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
+
+let%test "nested loops" =
+  let file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst $> (fun res ->
+      match res with
+      | Error _ -> ( )
+      | Ok (_,cfg) -> Dai.Cfg.dump_dot ~filename:"nested_loops.dot" cfg
+    ) |> Result.is_ok
