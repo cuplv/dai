@@ -4,7 +4,7 @@ type ident = string [@@deriving equal, hash, compare, sexp_of]
 
 module Lit = struct
   module T = struct
-    type t = Bool of bool | Int of int | Float of float | Null | String of string | Undefined
+    type t = Bool of bool | Int of int | Float of float | Null | String of string | Char of char
     [@@deriving equal, compare, sexp, hash]
   end
 
@@ -17,7 +17,7 @@ module Lit = struct
     | Float f -> Format.pp_print_float fs f
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\\\"" ^ s ^ "\\\"")
-    | Undefined -> Format.pp_print_string fs "undefined"
+    | Char c -> Format.pp_print_char fs c
 end
 
 module Binop = struct
@@ -95,8 +95,9 @@ module Expr = struct
     | Lit of Lit.t
     | Binop of { l : t; op : Binop.t; r : t }
     | Unop of { op : Unop.t; e : t }
-    | Deref of { rcvr : t; field : t }
-    | Array of { elts : t list; alloc_site : int * int }
+    | Deref of { rcvr : t; field : ident }
+    | Array_access of { rcvr : t; idx : t }
+    | Array_literal of { elts : t list; alloc_site : int * int }
   [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
@@ -105,8 +106,9 @@ module Expr = struct
     | Lit l -> Lit.pp fs l
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
-    | Deref { rcvr; field } -> Format.fprintf fs "%a[%a]" pp rcvr pp field
-    | Array { elts; alloc_site = line, col } ->
+    | Deref { rcvr; field } -> Format.fprintf fs "%a.%s" pp rcvr field
+    | Array_access { rcvr; idx } -> Format.fprintf fs "%a[%a]" pp rcvr pp idx
+    | Array_literal { elts; alloc_site = line, col } ->
         (List.pp ", " ~pre:"[" ~suf:"]" pp) fs elts;
         Format.fprintf fs "%@(%i,%i)" line col
 
@@ -118,8 +120,9 @@ module Expr = struct
     | Var v -> String.Set.singleton v
     | Binop { l; op = _; r } -> Set.union (uses l) (uses r)
     | Unop { op = _; e } -> uses e
-    | Deref { rcvr; field } -> Set.union (uses rcvr) (uses field)
-    | Array { elts; alloc_site = _ } -> uses_in_list elts
+    | Deref { rcvr; field = _ } -> uses rcvr
+    | Array_literal { elts; alloc_site = _ } -> uses_in_list elts
+    | Array_access { rcvr; idx } -> Set.union (uses rcvr) (uses idx)
     | _ -> String.Set.empty
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)
@@ -130,38 +133,41 @@ end
 
 module Stmt = struct
   type t =
+    | Array_write of { rcvr : string; idx : Expr.t; rhs : Expr.t }
     | Assign of { lhs : string; rhs : Expr.t }
-    | Write of { rcvr : string; field : Expr.t; rhs : Expr.t }
-    | Call of { lhs : string; fn : string; actuals : Expr.t list }
-    | Throw of { exn : Expr.t }
-    | Expr of Expr.t
     | Assume of Expr.t
+    | Call of { lhs : string; rcvr : string; meth : string; actuals : Expr.t list }
+    | Expr of Expr.t
     | Skip
+    | Throw of { exn : Expr.t }
+    | Write of { rcvr : string; field : string; rhs : Expr.t }
   [@@deriving compare, equal, hash, sexp_of]
 
   let pp fs stmt =
     match stmt with
+    | Array_write { rcvr; idx; rhs } ->
+        Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp idx Expr.pp rhs
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
-    | Write { rcvr; field; rhs } -> Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp field Expr.pp rhs
-    | Call { lhs; fn; actuals } ->
-        Format.fprintf fs "%s := %s(%a)" lhs fn (List.pp ", " Expr.pp) actuals
-    | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
-    | Expr e -> Expr.pp fs e
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
+    | Call { lhs; rcvr; meth; actuals } ->
+        Format.fprintf fs "%s := %s.%s(%a)" lhs rcvr meth (List.pp ", " Expr.pp) actuals
+    | Expr e -> Expr.pp fs e
     | Skip -> Format.pp_print_string fs "skip"
+    | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
+    | Write { rcvr; field; rhs } -> Format.fprintf fs "%s.%s := %a" rcvr field Expr.pp rhs
 
   let uses = function
+    | Array_write { rcvr = _; idx; rhs } -> Set.union (Expr.uses idx) (Expr.uses rhs)
     | Assign { lhs = _; rhs } -> Expr.uses rhs
-    | Write { rcvr = _; field; rhs } -> Set.union (Expr.uses field) (Expr.uses rhs)
-    | Call { lhs = _; fn = _; actuals } ->
+    | Assume e -> Expr.uses e
+    | Call { lhs = _; rcvr = _; meth = _; actuals } ->
         List.fold actuals ~init:String.Set.empty ~f:(fun a c -> Set.union a (Expr.uses c))
-    | Throw { exn } -> Expr.uses exn
-    | Expr e | Assume e -> Expr.uses e
+    | Expr e -> Expr.uses e
     | Skip -> String.Set.empty
+    | Throw { exn } -> Expr.uses exn
+    | Write { rcvr = _; field = _; rhs } -> Expr.uses rhs
 
   let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None
-
-  let callee = function Call { fn; _ } -> Some fn | _ -> None
 
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;

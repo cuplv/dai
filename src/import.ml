@@ -114,6 +114,15 @@ module Array = struct
   let pp sep pp_elt fs a = List.pp sep pp_elt fs (to_list a)
 end
 
+module Map = struct
+  include Base.Map
+
+  let pp pp_key pp_data fs m =
+    Format.fprintf fs "{@[<hv 2>";
+    iteri m ~f:(fun ~key ~data -> Format.fprintf fs " %a : %a;@," pp_key key pp_data data);
+    Format.fprintf fs "@]}"
+end
+
 type ('a, 'b) fmt = ('a, Formatter.t, unit, 'b) format4
 
 module Colors = struct

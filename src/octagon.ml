@@ -253,6 +253,7 @@ let interpret stmt oct =
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man oct [| lhs |] false
           else (* lhs was unconstrained, treat as a `skip`*) oct )
+  | Array_write _ -> failwith "todo"
 
 let sanitize oct = oct
 

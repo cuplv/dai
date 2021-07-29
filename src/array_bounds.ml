@@ -73,7 +73,7 @@ let hash_fold_t seed = function
       Ppx_hash_lib.Std.Hash.fold_int i_hash (Addr.Abstract.hash 13 a)
   | None -> seed
 
-let apron_var_of_array_cell addr idx = Var.of_string (Format.asprintf "%a.%i" Addr.pp addr idx)
+let _apron_var_of_array_cell addr idx = Var.of_string (Format.asprintf "%a.%i" Addr.pp addr idx)
 
 let apron_var_of_array_len addr = Var.of_string (Format.asprintf "%a.len" Addr.pp addr)
 
@@ -84,8 +84,8 @@ let texpr_of_expr expr (am, itv) =
     let sup = if Scalar.cmp itv1.sup itv2.sup > 0 then itv1.sup else itv2.sup in
     Interval.of_infsup inf sup
   in
-  let rec handle_array_expr itv = function
-    | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field = Ast.Expr.Var "length" } ->
+  let handle_array_expr itv = function
+    | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field = "length" } ->
         Map.find am rcvr_ident >>= fun aaddr ->
         if Set.is_empty aaddr then None
         else
@@ -95,7 +95,9 @@ let texpr_of_expr expr (am, itv) =
                 join_intervals acc (Abstract1.bound_variable man itv len)
               else acc)
           |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
-    | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field } ->
+    | Ast.Expr.Deref { rcvr = Ast.Expr.Var _rcvr_ident; field = _ } ->
+        failwith "todo"
+        (*
         Itv.texpr_of_expr ~fallback:handle_array_expr itv field >>| Itv.eval_texpr itv
         >>= fun { inf; sup } ->
         Map.find am rcvr_ident >>= fun aaddr ->
@@ -119,8 +121,8 @@ let texpr_of_expr expr (am, itv) =
                     let value = Abstract1.bound_variable man itv av in
                     join_intervals a value
                   else a))
-          |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
-    | Ast.Expr.Array { elts = _; alloc_site = _ } ->
+          |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))*)
+    | Ast.Expr.Array_literal { elts = _; alloc_site = _ } ->
         failwith
           "Unreachable by construction; array literals only occur at top level of assignment."
     | _ -> None
@@ -144,7 +146,7 @@ let interpret stmt phi =
   match stmt with
   | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
       Some (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
-  | Assign { lhs; rhs = Expr.Array { elts; alloc_site } } ->
+  | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } ->
       let addr = Addr.of_alloc_site alloc_site in
       let am =
         Map.change am lhs ~f:(function
@@ -203,23 +205,26 @@ let interpret stmt phi =
       | itv when Abstract1.is_bottom man itv -> None
       | itv -> Some (am, itv) )
   | Expr _ | Write _ | Skip | Call _ -> Some (am, itv)
+  | Array_write _ -> failwith "todo"
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   let rec expr_derefs = function
-    | Expr.Deref { rcvr = _; field = Expr.Var "length" } -> []
-    | Expr.Deref { rcvr; field } -> [ (rcvr, field) ]
+    | Expr.Deref { rcvr; field = _ } -> expr_derefs rcvr
     | Expr.Lit _ | Expr.Var _ -> []
-    | Expr.Binop { l; op = _; r } -> List.append (expr_derefs l) (expr_derefs r)
+    | Expr.Binop { l; op = _; r } -> expr_derefs l @ expr_derefs r
     | Expr.Unop { op = _; e } -> expr_derefs e
-    | Expr.Array { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
+    | Expr.Array_literal { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
+    | Expr.Array_access _ -> failwith "todo"
   in
   function
   | Assign { lhs = _; rhs } -> expr_derefs rhs
-  | Write { rcvr; field; rhs } -> (Expr.Var rcvr, field) :: expr_derefs rhs
+  | Write { rcvr = _; field = _; rhs = _ } ->
+      failwith "Todo" (*(Expr.Var rcvr, field) :: expr_derefs rhs*)
   | Throw { exn } -> expr_derefs exn
   | Expr e | Assume e -> expr_derefs e
   | Call { actuals; _ } -> List.bind actuals ~f:expr_derefs
   | Skip -> []
+  | Array_write _ -> failwith "todo"
 
 (** Some(true/false) indicates [idx] is definitely in/out-side of [addr]'s bounds;
     None indicates it could be either

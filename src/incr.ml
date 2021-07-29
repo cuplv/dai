@@ -67,11 +67,11 @@ end = struct
     let open Ast in
     function
     | Expr.Var v -> (
-        match Env.find env v with Some value -> value | None -> Val.of_lit Lit.Undefined )
+        match Env.find env v with Some value -> value | None -> Val.of_lit Lit.Null )
     | Expr.Lit l -> Val.of_lit l
     | Expr.Binop { l; op; r } -> Val.eval_binop (eval_expr env l) op (eval_expr env r)
     | Expr.Unop { op; e } -> Val.eval_unop op (eval_expr env e)
-    | Expr.Deref _ | Expr.Array _ ->
+    | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ ->
         failwith "Arrays and Objects not handled by this basic environment functor"
 
   let interpret =
@@ -89,7 +89,8 @@ end = struct
               match Val.truthiness (eval_expr env e) with
               | `T | `Either -> Some env
               | `F | `Neither -> None )
-          | Expr _ | Skip | Write _ | Call _ -> Some env)
+          | Expr _ | Skip | Write _ | Call _ -> Some env
+          | Array_write _ -> failwith "todo")
     in
     fun stmt -> flip ( >>= ) (fun env -> mfn.mfn_art (stmt, env) |> Art.force)
 
@@ -164,7 +165,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
       | InR v1, InR v2 -> Some (InR (val_op v1 v2))
       | _ -> None
 
-    let addr = function InL a -> Some a | InR _ -> None
+    let _addr = function InL a -> Some a | InR _ -> None
 
     let value = function InL _ -> None | InR v -> Some v
   end
@@ -202,25 +203,28 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
         | Some (AAddr_or_val.InL _) when Unop.equal op Unop.Typeof ->
             Some (AAddr_or_val.InR (Val.of_lit (Lit.String "object")))
         | _ -> None )
-    | Expr.Deref { rcvr; field } -> (
-        match (eval_expr env heap rcvr, eval_expr env heap field) with
-        | Some (AAddr_or_val.InL addrs), Some (AAddr_or_val.InR field) ->
-            Heap.fold
-              (fun acc (obj, k) -> function
-                | AAddr_or_val.InR v ->
-                    if Addr.Abstract.mem addrs obj && Val.models field (Ast.Lit.Int k) then
-                      match acc with Some acc -> Some (Val.join acc v) | None -> Some v
-                    else acc | _ -> acc)
-              None heap
-            |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
-        | _ -> None )
-    | Expr.Array _ ->
+    | Expr.Deref _ ->
+        failwith "todo"
+        (*(
+          match (eval_expr env heap rcvr, eval_expr env heap field) with
+          | Some (AAddr_or_val.InL addrs), Some (AAddr_or_val.InR field) ->
+              Heap.fold
+                (fun acc (obj, k) -> function
+                  | AAddr_or_val.InR v ->
+                      if Addr.Abstract.mem addrs obj && Val.models field (Ast.Lit.Int k) then
+                        match acc with Some acc -> Some (Val.join acc v) | None -> Some v
+                      else acc | _ -> acc)
+                None heap
+              |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
+                                        | _ -> None )*)
+    | Expr.Array_access _ -> failwith "todo"
+    | Expr.Array_literal _ ->
         (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
            eval_expr so we can store elements there and then return the addr
         *)
         failwith "array literals not supported when nested within compound expression"
 
-  let weak_update heap aaddr field new_v =
+  let _weak_update heap aaddr field new_v =
     Heap.fold
       (fun acc (addr, k) v ->
         if Addr.Abstract.mem aaddr addr && Val.models field (Ast.Lit.Int k) then
@@ -237,7 +241,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
         (fun _mfn (stmt, (env, heap)) ->
           let open Ast.Stmt in
           match stmt with
-          | Assign { lhs; rhs = Ast.Expr.Array { elts; alloc_site } } ->
+          | Assign { lhs; rhs = Ast.Expr.Array_literal { elts; alloc_site } } ->
               let addr = Addr.of_alloc_site alloc_site in
               let abstract_addr = AAddr_or_val.InL (Addr.Abstract.singleton addr) in
               let env = Env.add env lhs abstract_addr in
@@ -249,16 +253,19 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
               in
               Some (env, heap)
           | Assign { lhs; rhs } -> eval_expr env heap rhs >>| fun r -> (Env.add env lhs r, heap)
-          | Write { rcvr; field; rhs } ->
+          | Write { rcvr = _; field = _; rhs = _ } ->
+              failwith "todo"
+              (*
               Env.find env rcvr >>= AAddr_or_val.addr >>= fun rcvr ->
               eval_expr env heap field >>= AAddr_or_val.value >>= fun field ->
-              eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr field rhs)
+              eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr field rhs)*)
           | Throw _ -> None
           | Assume e -> (
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function
               | `T | `Either -> Some (env, heap)
               | _ -> None )
-          | Skip | Expr _ | Call _ -> Some (env, heap))
+          | Skip | Expr _ | Call _ -> Some (env, heap)
+          | Array_write _ -> failwith "todo")
     in
     fun stmt -> flip ( >>= ) (fun state -> mfn.mfn_art (stmt, state) |> Art.force)
 

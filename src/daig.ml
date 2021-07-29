@@ -181,6 +181,10 @@ module Make (Dom : Abstract.Dom) = struct
 
   type t = G.t * Cfg.t
 
+  let query _ _ = failwith "todo"
+
+  let edit _ _ = failwith "todo"
+
   type edge = Ref.t * Ref.t * Comp.t
 
   let ref_by_name nm = fst >> G.nodes >> Seq.find ~f:(Ref.name >> Name.equal nm)
@@ -213,6 +217,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Ref.AState { state = None; name = _ } -> [ `Shape `Box; `Style `Dashed ]
         | Ref.Stmt _ -> [ `Color grey ])
 
+  (*
   (** Directly implements the DAIG Encoding procedure; OCaml variables are labelled by LaTeX equivalents where applicable *)
   let add_region_to_daig ?(init_state = Dom.init ()) ~(from_loc : Cfg.Loc.t) ~(ctx : Dom.Ctx.t) :
       t -> t =
@@ -507,8 +512,8 @@ module Make (Dom : Abstract.Dom) = struct
                 let possible_callers =
                   G.nodes g
                   |> Seq.fold ~init:[] ~f:(fun acc -> function
-                       | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } as callsite
-                         when String.equal fn name ->
+                       | Ref.Stmt { stmt = Ast.Stmt.Call { meth; _ }; _ } as callsite
+                         when String.equal meth name ->
                            Seq.filter (G.Node.succs callsite g) ~f:(fun poststate_ref ->
                                Option.is_some (Ref.astate poststate_ref)
                                &&
@@ -546,7 +551,7 @@ module Make (Dom : Abstract.Dom) = struct
             let succ = G.Edge.dst e in
             let callees =
               Seq.find_map (G.Node.preds succ g) ~f:(function
-                | Ref.Stmt { stmt = Ast.Stmt.Call { fn; _ }; _ } -> Some fn
+                | Ref.Stmt { stmt = Ast.Stmt.Call { meth; _ }; _ } -> Some meth
                 | _ -> None)
               |> function
               | Some fn ->
@@ -676,8 +681,8 @@ module Make (Dom : Abstract.Dom) = struct
 
   and interpret_call callsite daig phi ctx =
     match (phi, callsite) with
-    | AState { state = Some caller_state; _ }, Ast.Stmt.Call { fn; _ } ->
-        let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal fn) in
+    | AState { state = Some caller_state; _ }, Ast.Stmt.Call { meth; _ } ->
+        let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal meth) in
         let callee_ctx = Dom.Ctx.callee_ctx ~caller_state ~callsite ~ctx in
         let callee_entry_state =
           bind_formals caller_state callsite callee
@@ -742,8 +747,8 @@ module Make (Dom : Abstract.Dom) = struct
                         ~ctx:curr_ctx ))
              |> fun (daig, immediate_caller_ctx) ->
              match Cfg.G.Edge.label immediate_caller with
-             | Ast.Stmt.Call { fn; _ } as callsite ->
-                 let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal fn) in
+             | Ast.Stmt.Call { meth; _ } as callsite ->
+                 let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal meth) in
                  let caller_state, daig =
                    get_by_loc (Cfg.G.Edge.src immediate_caller) immediate_caller_ctx daig
                  in
@@ -977,8 +982,11 @@ module Make (Dom : Abstract.Dom) = struct
     match ref_by_name (Name.Loc (Cfg.Loc.entry, Dom.Ctx.init)) d with
     | Some r -> dirty_from r d
     | None -> failwith "no reference found for entry location"
+   *)
 end
 
+(* OLD JS test caes *)
+(*
 module Dom = Context.MakeInsensitive (Incr.Make (Itv))
 module Daig = Make (Dom)
 
@@ -1014,3 +1022,4 @@ let%test "build daig and issue query at exit: functions.js" =
   let daig = Daig.dirty_from entry_ref daig in
   Daig.dump_dot daig ~filename:"functions_dirtied_daig.dot";
   true
+*)

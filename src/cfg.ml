@@ -88,6 +88,15 @@ module Loc = struct
   end
 end
 
+module G =
+  Graph.Make
+    (struct
+      include Regular.Std.Opaque.Make (Loc)
+
+      type t = Loc.t
+    end)
+    (Ast.Stmt)
+
 module Fn = struct
   module T = struct
     type t = {
@@ -146,36 +155,30 @@ module Fn = struct
 
     let of_list = Set.of_list (module T_comparator)
   end
+
+  module Map = struct
+    include (Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
+
+    type 'v t = 'v Map.M(T_comparator).t
+
+    let empty = Map.empty (module T_comparator)
+  end
 end
 
-module G =
-  Graph.Make
-    (struct
-      include Regular.Std.Opaque.Make (Loc)
-
-      type t = Loc.t
-    end)
-    (Ast.Stmt)
-
-type t = G.t * Fn.Set.t
+type t = G.t Fn.Map.t
 
 let src : G.Edge.t -> Loc.t = G.Edge.src
 
 let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
+let empty () = Fn.Map.empty
+
+let add_fn ~fn ~edges prgm = Fn.Map.set prgm ~key:fn ~data:(Graph.create (module G) ~edges ())
+
 let retvar = "RETVAR"
 
 let containing_fn loc (cfg, fns) =
   Fn.Set.find fns ~f:(fun fn -> Graph.is_reachable (module G) cfg (Fn.entry fn) loc)
-
-let empty () =
-  Loc.reset ();
-  Graph.create
-    (module G)
-    ~nodes:[ Loc.entry; Loc.exit ]
-    ~edges:[ (Loc.entry, Loc.exit, Ast.Stmt.skip) ]
-    ()
-  |> flip pair Fn.Set.empty
 
 (** Algorithm given in 2nd ed. Dragon book section 9.6.6, MODIFIED TO EXCLUDE THE LOOP HEAD ITSELF *)
 let natural_loop backedge cfg =
@@ -240,13 +243,19 @@ let reachable_subgraph (cfg : G.t) ~(from : G.node) : G.t =
   in
   Graph.create (module G) ~edges ()
 
-let dump_dot ?print ~filename (cfg, fns) =
+let dump_dot ?print ~filename (cfg : t) =
+  let unioned_cfg =
+    match Map.data cfg with
+    | [] -> G.empty
+    | g :: gs -> List.fold gs ~init:g ~f:(Graph.union (module G))
+  in
+  let fns = Map.keys cfg |> Fn.Set.of_list in
   let output_fd =
     if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
   in
   Graph.to_dot
     (module G)
-    cfg ~filename
+    unioned_cfg ~filename
     ~channel:(Unix.out_channel_of_descr output_fd)
     ~string_of_node:Loc.to_string
     ~string_of_edge:(G.Edge.label >> Ast.Stmt.to_string)
@@ -269,8 +278,9 @@ let rec call_chains_to ~loc ~cfg : G.edge list list =
       (* in other function; recursively get chains to each of its callers, appending that caller to each chain*)
       Seq.filter
         (G.edges (fst cfg))
-        ~f:(fun e ->
-          match Ast.Stmt.callee (G.Edge.label e) with
+        ~f:(fun _e ->
+          (*Ast.Stmt.callee (G.Edge.label e)*)
+          match failwith "todo" with
           | Some edge_callee -> String.equal (Fn.name fn) edge_callee
           | None -> false)
       |> Seq.to_list
