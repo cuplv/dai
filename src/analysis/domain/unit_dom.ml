@@ -1,10 +1,10 @@
+open Dai
 open Import
+open Syntax
 
 type t = unit
 
 type stmt = Ast.Stmt.t [@@deriving compare, equal, sexp_of]
-
-module Stmt = Ast.Stmt
 
 let is_bot () = true
 

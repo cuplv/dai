@@ -26,7 +26,7 @@ module Pure = struct
   let is_bot = List.exists ~f:(function Neq (a, b) when Memloc.equal a b -> true | _ -> false)
 
   let rec assume expr env pures =
-    let open Dai.Ast in
+    let open Syntax.Ast in
     let memloc_of_expr = function
       | Expr.Var v -> Env.find env v
       | Expr.Lit Lit.Null -> Some Memloc.null
@@ -389,7 +389,7 @@ module T = struct
   let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
     let _return_graph, _return_pures, return_env = return_state in
     let _caller_graph, _caller_pures, _caller_env = caller_state in
-    match Env.find return_env Dai.Cfg.retvar with
+    match Env.find return_env Syntax.Cfg.retvar with
     | None -> return_state
     | Some _retval_memloc ->
         (* bind lhs of callsite to retval_memloc *)
@@ -399,12 +399,12 @@ module T = struct
   (*let process_pures (g,p,e) = build equivalence classes, collapse addresses known to be equal, go to bottom if contradiction; apply after each [interpret]?*)
 
   let interpret stmt (g, p, e) =
-    let open Dai.Ast in
+    let open Syntax.Ast in
     match stmt with
     | Stmt.Assign { lhs; rhs = Expr.Lit Lit.Null } ->
         (g, p, Env.update e lhs ~f:(fun _ -> Memloc.null))
     | Stmt.Assign { lhs; rhs = Expr.Var v } ->
-        let is_ret = String.equal Dai.Cfg.retvar in
+        let is_ret = String.equal Syntax.Cfg.retvar in
         let new_e =
           match Env.find e v with
           | Some a -> Env.update e lhs ~f:(fun _ -> a)
@@ -415,15 +415,15 @@ module T = struct
         in
         if
           is_ret lhs
-          && (Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Dai.Cfg.retvar) Memloc.null)
+          && (Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Syntax.Cfg.retvar) Memloc.null)
         then
           (* return value is a well-formed list -- project it out and forget locals *)
-          let ret_addr = Env.find_exn new_e Dai.Cfg.retvar in
+          let ret_addr = Env.find_exn new_e Syntax.Cfg.retvar in
           ( G.Edge.insert (G.Edge.create ret_addr Memloc.null `List_seg) (G.emp ()),
             p,
-            Env.of_alist_exn [ (Dai.Cfg.retvar, ret_addr) ] )
+            Env.of_alist_exn [ (Syntax.Cfg.retvar, ret_addr) ] )
         else (g, p, new_e)
-    | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr = Expr.Var rcvr; field = Expr.Var "next" } } -> (
+    | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr = Expr.Var rcvr; field = "next" } } -> (
         let g, e, rcvr_addr =
           match Env.find e rcvr with
           | Some a -> (G.Node.insert a g, e, a)
@@ -461,7 +461,7 @@ module T = struct
                - bind lhs variable to its destination
             *)
             (g, p, Env.update e lhs ~f:(fun _ -> G.Edge.dst next)) )
-    | Stmt.Write { rcvr; field = Expr.Var "next"; rhs } -> (
+    | Stmt.Write { rcvr; field = "next"; rhs } -> (
         let g, e, rcvr_addr =
           match Env.find e rcvr with
           | Some a -> (G.Node.insert a g, e, a)
@@ -527,8 +527,8 @@ module T = struct
 end
 
 include T
-module IncrT = Dai.Context.MakeInsensitive (Dai.Incr.Make (T))
-module Daig = Dai.Daig.Make (IncrT)
+(*module IncrT = Dai.Context.MakeInsensitive (Domain.Incr.Make (T))
+module Daig = Analysis.Daig.Make (IncrT)
 
 let%test "build daig, analyze, dump dot: list_append.js" =
   let cfg =
@@ -550,3 +550,4 @@ let%test "build daig, analyze, dump dot: list_append.js" =
   let _, daig = Daig.get_by_name exit_loc daig in
   Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_post.dot");
   true
+*)

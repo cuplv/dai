@@ -1,4 +1,6 @@
-open Import
+open Dai.Import
+open Domain
+open Syntax
 
 module Make (Dom : Abstract.Dom) = struct
   module Comp = struct
@@ -181,6 +183,9 @@ module Make (Dom : Abstract.Dom) = struct
 
   type t = G.t * Cfg.t
 
+  let apply (_diff:Frontend.Tree_diff.t) : t -> t = failwith "todo"
+
+  
   let query _ _ = failwith "todo"
 
   let edit _ _ = failwith "todo"

@@ -25,9 +25,11 @@
 
  *)
 
+open Dai
 open Import
 open Apron
 open Option.Monad_infix
+open Syntax
 
 type t = Oct.t Abstract1.t
 

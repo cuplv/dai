@@ -1,4 +1,6 @@
+open Dai
 open Import
+open Syntax
 
 module type Val = sig
   type t [@@deriving compare, equal, hash, sexp]

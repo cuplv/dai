@@ -1,4 +1,6 @@
-open Import
+open Dai.Import
+open Syntax
+open Domain
 
 (** Get the callee [f] of a callsite [stmt] of the form `y = f(x_1,...,x_k)`*)
 let get_callee_unsafe stmt =

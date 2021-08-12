@@ -1,4 +1,6 @@
+open Dai
 open Import
+open Syntax
 
 module Make (Dom : sig
   include Abstract.DomNoCtx

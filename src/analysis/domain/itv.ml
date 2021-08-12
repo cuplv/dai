@@ -25,13 +25,13 @@
 
  *)
 
+open Dai
 open Import
 open Apron
 open Option.Monad_infix
+open Syntax
 
 type t = Box.t Abstract1.t
-
-module Stmt = Ast.Stmt
 
 let man = lazy (Box.manager_alloc ())
 

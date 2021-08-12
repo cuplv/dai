@@ -1,29 +1,35 @@
 open Dai.Import
-module Loc = Dai.Cfg.Loc
+open Syntax
 module CST = Tree_sitter_java.CST
 
 type edit =
-  | Add_function of { name : string; method_decl : CST.method_declaration }
-  | Delete_function of { name : string }
-  | Modify_function of { name : string; new_header : CST.method_header }
-  | Add_statements of { at_loc : Loc.t; stmts : CST.statement list }
-  | Modify_statements of { from_loc : Loc.t; to_loc : Loc.t; new_stmts : CST.statement list }
-  | Modify_header of { at_loc : Loc.t; stmt : CST.statement }
-  | Delete_statements of { from_loc : Loc.t; to_loc : Loc.t }
+  | Add_function of { method_id : string; method_decl : CST.method_declaration }
+  | Delete_function of { method_id : string }
+  | Modify_function of { method_id : string; new_header : CST.method_header }
+  | Add_statements of { method_id : string; at_loc : Cfg.Loc.t; stmts : CST.statement list }
+  | Modify_statements of {
+      method_id : string;
+      from_loc : Cfg.Loc.t;
+      to_loc : Cfg.Loc.t;
+      new_stmts : CST.statement list;
+    }
+  | Modify_header of { method_id : string; at_loc : Cfg.Loc.t; stmt : CST.statement; loop_body_exit : Cfg.Loc.t option }
+  | Delete_statements of { method_id : string; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
 
 type t = edit list
 
 let pp_edit fs = function
-  | Add_function { name; method_decl = _ } -> Format.fprintf fs "(Add function %s)" name
-  | Delete_function { name } -> Format.fprintf fs "(Delete function %s)" name
-  | Modify_function { name; new_header = _ } ->
-      Format.fprintf fs "(Modify function %s's header)" name
-  | Add_statements { at_loc; stmts } ->
-      Format.fprintf fs "(Add %i statements at %a)" (List.length stmts) Loc.pp at_loc
-  | Modify_statements { from_loc; to_loc; new_stmts } ->
-      Format.fprintf fs "(Overwrite range %a->%a with %i new stmts)" Loc.pp from_loc Loc.pp to_loc
-        (List.length new_stmts)
-  | Modify_header { at_loc; stmt } ->
+  | Add_function { method_id; method_decl = _ } -> Format.fprintf fs "(Add function %s)" method_id
+  | Delete_function { method_id } -> Format.fprintf fs "(Delete function %s)" method_id
+  | Modify_function { method_id; new_header = _ } ->
+      Format.fprintf fs "(Modify function %s's header)" method_id
+  | Add_statements { method_id; at_loc; stmts } ->
+      Format.fprintf fs "(Add %i statements at %a in %s)" (List.length stmts) Cfg.Loc.pp at_loc
+        method_id
+  | Modify_statements { method_id; from_loc; to_loc; new_stmts } ->
+      Format.fprintf fs "(Overwrite range %a->%a with %i new stmts in %s)" Cfg.Loc.pp from_loc Cfg.Loc.pp
+        to_loc (List.length new_stmts) method_id
+  | Modify_header { method_id; at_loc; stmt; _ } ->
       let control_flow_type =
         match stmt with
         | `If_stmt _ -> "conditional"
@@ -31,9 +37,10 @@ let pp_edit fs = function
         | `For_stmt _ -> "for-loop"
         | _ -> failwith "unrecognized control-flow construct"
       in
-      Format.fprintf fs "(Modify %s header at %a)" control_flow_type Loc.pp at_loc
-  | Delete_statements { from_loc; to_loc } ->
-      Format.fprintf fs "(Delete statements in range %a->%a)" Loc.pp from_loc Loc.pp to_loc
+      Format.fprintf fs "(Modify %s header at %a in %s)" control_flow_type Cfg.Loc.pp at_loc method_id
+  | Delete_statements { method_id; from_loc; to_loc } ->
+      Format.fprintf fs "(Delete statements in range %a->%a in %s)" Cfg.Loc.pp from_loc Cfg.Loc.pp to_loc
+        method_id
 
 let pp = List.pp ~pre:"DIFF:[@[<hv 2>" ~suf:"@]" ";@," pp_edit
 
@@ -59,7 +66,7 @@ let loc_range method_id loc_map stmts =
       match removed_range with
       | None -> Some (curr_entry, curr_exit)
       | Some (acc_range_start, acc_range_end) ->
-          assert (Loc.equal curr_entry acc_range_end);
+          assert (Cfg.Loc.equal curr_entry acc_range_end);
           Some (acc_range_start, curr_exit))
   |> fun range_opt -> Option.value_exn range_opt
 
@@ -97,8 +104,9 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
   List.foldi ranges ~init:[] ~f:(fun idx acc_edits -> function
     | Prev stmts ->
         let from_loc, to_loc = loc_range method_id loc_map stmts in
-        Delete_statements { from_loc; to_loc } :: acc_edits
-    | Next stmts -> Add_statements { at_loc = loc_by_idx idx; stmts = to_list stmts } :: acc_edits
+        Delete_statements { method_id; from_loc; to_loc } :: acc_edits
+    | Next stmts ->
+        Add_statements { method_id; at_loc = loc_by_idx idx; stmts = to_list stmts } :: acc_edits
     | Replace (prev_stmts, next_stmts) ->
         flip ( @ ) acc_edits
           ( match (prev_stmts, next_stmts) with
@@ -133,7 +141,8 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               then t_branch_diff @ f_branch_diff
               else
                 let at_loc = Loc_map.get method_id prev_stmt loc_map |> fun { entry; _ } -> entry in
-                Modify_header { at_loc; stmt = next_stmt } :: (t_branch_diff @ f_branch_diff)
+                Modify_header { method_id; at_loc; stmt = next_stmt; loop_body_exit=None }
+                :: (t_branch_diff @ f_branch_diff)
           | ( [| `While_stmt (_, (_, prev_cond, _), prev_body) as prev_stmt |],
               [| `While_stmt (_, (_, next_cond, _), next_body) as next_stmt |] ) ->
               let prev = match prev_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
@@ -143,7 +152,7 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               then body_diff
               else
                 let at_loc = Loc_map.get method_id prev_stmt loc_map |> fun { entry; _ } -> entry in
-                Modify_header { at_loc; stmt = next_stmt } :: body_diff
+                Modify_header { method_id; at_loc; stmt = next_stmt; loop_body_exit=None } :: body_diff
           | ( [| `For_stmt (_, _, prev_init, prev_cond, _, prev_iter, _, prev_body) as prev_stmt |],
               [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) as next_stmt |]
             ) ->
@@ -181,18 +190,19 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               if is_header_unchanged then body_diff
               else
                 let at_loc = Loc_map.get method_id prev_stmt loc_map |> fun { entry; _ } -> entry in
-                Modify_header { at_loc; stmt = next_stmt } :: body_diff
+                let loop_body_exit = Loc_map.get method_id (List.last_exn prev) loc_map |> fun {exit; _ } -> Some exit in
+                Modify_header { method_id; at_loc; stmt = next_stmt; loop_body_exit } :: body_diff
           | prevs, nexts ->
               let from_loc, to_loc = loc_range method_id loc_map prevs in
-              [ Modify_statements { from_loc; to_loc; new_stmts = to_list nexts } ] )
+              [ Modify_statements { method_id; from_loc; to_loc; new_stmts = to_list nexts } ] )
     | Same _ -> acc_edits
     | Unified _ -> failwith "Unrecognized diff type: \"Unified\"")
 
 let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   let open List.Monad_infix in
-  let rec method_decls_by_name ?(parent_class_name = None) :
+  let rec method_decls_by_id ?(parent_class = None) :
       CST.statement -> (string * CST.method_declaration) list =
-    let parent_class_prefix = match parent_class_name with Some n -> n ^ "#" | None -> "" in
+    let parent_class_prefix = match parent_class with Some n -> n ^ "#" | None -> "" in
     function
     | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, (_, body_decls, _))) ->
         List.fold body_decls ~init:[] ~f:(fun acc -> function
@@ -200,8 +210,8 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
               (parent_class_prefix ^ class_name ^ "#" ^ method_name, md) :: acc
           | `Class_decl _ as cd ->
               let nested_method_decls =
-                method_decls_by_name
-                  ~parent_class_name:(Some (parent_class_prefix ^ class_name))
+                method_decls_by_id
+                  ~parent_class:(Some (parent_class_prefix ^ class_name))
                   (`Decl cd)
               in
               nested_method_decls @ acc
@@ -209,45 +219,201 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
     | `Decl (`Import_decl _) -> []
     | _ -> failwith "unrecognized top-level definition"
   in
-  let prev_decls_by_name = prev >>= method_decls_by_name |> String.Map.of_alist_exn in
-  let next_decls_by_name = next >>= method_decls_by_name |> String.Map.of_alist_exn in
-  let prev_names = String.Map.key_set prev_decls_by_name in
-  let next_names = String.Map.key_set next_decls_by_name in
-  let shared_names = String.Set.inter prev_names next_names in
-  let deleted_names, added_names =
-    String.Set.symmetric_diff prev_names next_names
+  let prev_decls_by_id = prev >>= method_decls_by_id |> String.Map.of_alist_exn in
+  let next_decls_by_id = next >>= method_decls_by_id |> String.Map.of_alist_exn in
+  let prev_ids = String.Map.key_set prev_decls_by_id in
+  let next_ids = String.Map.key_set next_decls_by_id in
+  let shared_ids = String.Set.inter prev_ids next_ids in
+  let deleted_ids, added_ids =
+    String.Set.symmetric_diff prev_ids next_ids
     |> Sequence.fold ~init:([], []) ~f:(fun (deleted, added) -> function
-         | First nm -> (nm :: deleted, added) | Second nm -> (deleted, nm :: added))
+         | First id -> (id :: deleted, added) | Second id -> (deleted, id :: added))
   in
   let function_additions =
-    List.map added_names ~f:(fun name ->
-        Add_function { name; method_decl = String.Map.find_exn next_decls_by_name name })
+    List.map added_ids ~f:(fun method_id ->
+        Add_function { method_id; method_decl = String.Map.find_exn next_decls_by_id method_id })
   in
-  let function_deletions = List.map deleted_names ~f:(fun name -> Delete_function { name }) in
+  let function_deletions = List.map deleted_ids ~f:(fun method_id -> Delete_function { method_id }) in
   let function_header_modifications =
-    Set.fold shared_names ~init:[] ~f:(fun acc name ->
-        let prev_header = String.Map.find_exn prev_decls_by_name name |> snd3 in
-        let next_header = String.Map.find_exn next_decls_by_name name |> snd3 in
+    Set.fold shared_ids ~init:[] ~f:(fun acc method_id ->
+        let prev_header = String.Map.find_exn prev_decls_by_id method_id |> snd3 in
+        let next_header = String.Map.find_exn next_decls_by_id method_id |> snd3 in
         if
           Sexp.equal (CST.sexp_of_method_header prev_header) (CST.sexp_of_method_header next_header)
         then acc
-        else Modify_function { name; new_header = next_header } :: acc)
+        else Modify_function { method_id; new_header = next_header } :: acc)
   in
   let stmt_edits =
-    Set.fold shared_names ~init:[] ~f:(fun acc name ->
+    Set.fold shared_ids ~init:[] ~f:(fun acc method_id ->
         let prev =
-          String.Map.find_exn prev_decls_by_name name |> trd3 |> function
+          String.Map.find_exn prev_decls_by_id method_id |> trd3 |> function
           | `Blk (_, b, _) -> b
           | `SEMI _ -> []
         in
         let next =
-          String.Map.find_exn next_decls_by_name name |> trd3 |> function
+          String.Map.find_exn next_decls_by_id method_id |> trd3 |> function
           | `Blk (_, b, _) -> b
           | `SEMI _ -> []
         in
-        diff_of_stmt_list name loc_map ~prev ~next @ acc)
+        diff_of_stmt_list method_id loc_map ~prev ~next @ acc)
   in
   stmt_edits @ function_additions @ function_deletions @ function_header_modifications
+
+let apply diff loc_map cfg =
+  let apply_edit (loc_map, cfg) : edit -> Loc_map.t * Syntax.Cfg.t = function
+    | Add_function {method_id;method_decl} ->
+      begin
+        let class_prefix = String.rindex_exn method_id '#' |> String.slice method_id 0 in
+        match Cfg_parser.of_method_decl loc_map ~class_prefix method_decl with
+        | Some (loc_map, edges, fn) ->
+          let cfg = Cfg.add_fn fn ~edges cfg in
+          loc_map, cfg
+        | None -> loc_map, cfg
+      end
+    | Delete_function {method_id} ->
+      let loc_map = Loc_map.remove_fn loc_map method_id in
+      let cfg = Cfg.remove_fn method_id cfg in
+      loc_map,cfg
+    | Modify_function {method_id;new_header} ->
+      let new_name, new_formals = match new_header with
+        | _ -> failwith "todo"
+      in
+      begin
+        match List.find (Cfg.Fn.Map.keys cfg) ~f:(Cfg.Fn.name >> String.equal method_id) with
+        | Some ({name=_; formals=_; locals;entry;exit} as old_fn) ->
+          let old_fn_cfg = Cfg.Fn.Map.find_exn cfg old_fn in
+          let fn : Cfg.Fn.t = {name=new_name; formals=new_formals; locals; entry; exit} in
+          let cfg = Cfg.remove_fn method_id cfg in
+          loc_map, Cfg.set_fn_cfg fn ~cfg:old_fn_cfg cfg
+        | None -> failwith (Format.asprintf "can't modify unknown function %s" method_id)
+      end
+      
+    | Add_statements {method_id ; at_loc; stmts} ->
+      (* for all CFG edges FROM [at_loc], replace their source by the [fresh_loc] (in both CFG and loc-map) *)
+      (* generate CFG edges for [stmts] with entry=at_loc, exit=fresh_loc, ret=(method_id.exit) *)
+      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
+      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
+      let fresh_loc = Cfg.Loc.fresh () in
+      let old_succ_edges = Cfg.G.Node.outputs at_loc old_fn_cfg in
+      let new_succ_edges = Sequence.fold old_succ_edges ~init:[] ~f:(fun acc edge -> (fresh_loc, Cfg.dst edge, Cfg.G.Edge.label edge) :: acc) in
+      let loc_map = Loc_map.rebase_edges method_id ~old_src:at_loc ~new_src:fresh_loc loc_map in
+      let loc_map, added_edges = Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:at_loc ~exit:fresh_loc ~ret:(Cfg.Fn.exit fn) stmts in
+      let new_fn_cfg =
+        Sequence.fold old_succ_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove)
+        |> fun init -> List.fold new_succ_edges ~init ~f:(fun cfg edge -> Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
+        |> fun init -> List.fold added_edges ~init ~f:(fun cfg edge -> Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
+      in 
+      loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg
+      
+    | Modify_statements {method_id; from_loc ; to_loc ; new_stmts} ->
+      (* grab the CFG for [method_id] *)
+      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
+      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
+      (* grab the region of edges reachable between from_loc / to_loc*)
+      let replaced_edges = Cfg.edges_btwn old_fn_cfg ~src:from_loc ~dst:to_loc in 
+      let deleted_locs = Set.fold replaced_edges ~init:(Cfg.Loc.Set.empty) ~f:(fun locs edge ->
+          Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge))
+        )
+      in
+      let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
+      (* generate CFG edges for [new_stmts] with entry=from_loc, exit=to_loc, ret=(method_id.exit) *)
+      let loc_map, added_edges = Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:from_loc ~exit:to_loc ~ret:(Cfg.Fn.exit fn) new_stmts in
+      let new_fn_cfg =
+        Set.fold replaced_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove)
+        |> fun init -> List.fold added_edges ~init ~f:(fun cfg edge -> Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
+      in 
+      loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg
+    | Modify_header {method_id ; at_loc; stmt; loop_body_exit} ->
+      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
+      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
+      let rec count_negations expr = let open Ast in
+        match expr with
+        | Expr.Unop {op=Unop.Not; e} -> 1 + count_negations e
+        | _ -> 0
+      in
+      let rec extract_cond_header at_loc acc =
+        match Cfg.G.Node.outputs at_loc old_fn_cfg |> Sequence.to_list with
+        | [e] -> extract_cond_header (Cfg.dst e) (e::acc)
+        | e1 :: e2 :: [] ->
+          let e1_cond = match Cfg.G.Edge.label e1 with
+            | Ast.Stmt.Assume cond -> cond
+            | _ -> failwith "malformed conditional"
+          in
+          let e2_cond = match Cfg.G.Edge.label e2 with
+            | Ast.Stmt.Assume cond -> cond
+            | _ -> failwith "malformed conditional"
+          in
+          if (count_negations e1_cond) < (count_negations e2_cond)
+          then (acc, e1, e2)
+          else (acc, e2, e1)
+        | _ -> failwith "malformed conditional"
+      in 
+      let loc_map, deleted_edges, added_edges = match stmt with
+        | `If_stmt (_, (_, cond, _), _,_)
+        | `While_stmt (_, (_, cond, _),_) ->
+          (* traverse from at_loc until reaching a out-degree-2 node; delete all traversed edges and those 2 outgoing ones, then build the new edges for the new header *)
+          let old_cond_intermediates, old_assume_pos, old_assume_neg = extract_cond_header at_loc [] in
+          let deleted_edges = old_assume_pos :: old_assume_neg :: old_cond_intermediates in
+          let cond, (branch_loc, cond_intermediates) = Cfg_parser.expr at_loc cond in
+          let new_assume_pos = Cfg.G.Edge.(create branch_loc (dst old_assume_pos) (Ast.Stmt.Assume cond)) in
+          let new_assume_neg = Cfg.G.Edge.(create branch_loc (dst old_assume_neg) Ast.(Stmt.Assume (Expr.Unop {op=Unop.Not;e=cond}))) in
+          let added_edges = new_assume_pos :: new_assume_neg :: (List.map cond_intermediates ~f:(uncurry3 Cfg.G.Edge.create)) in       
+          loc_map, deleted_edges,added_edges
+        | `For_stmt f ->
+          let body_exit = match loop_body_exit with Some l -> l | None -> failwith "no cached loop-body exit for for-loop header modification" in
+          let init_edges,cond,cond_neg = extract_cond_header at_loc [] in
+          let update_edges =
+            let rec gather_update_edges acc curr =
+              match Cfg.G.Node.outputs curr old_fn_cfg |> Sequence.to_list with
+              | [e] when Ast.Stmt.(equal Skip) (Cfg.G.Edge.label e) -> e::acc
+              | [e] -> gather_update_edges (e::acc) (Cfg.G.Edge.dst e)
+              | _ -> failwith "unexpected conditional control flow in for-loop update"
+            in
+            gather_update_edges [] body_exit
+          in
+          let entry = at_loc in
+          let exit = Cfg.G.Edge.dst cond_neg in
+          let body_entry = Cfg.G.Edge.dst cond in
+          let ret = Cfg.Fn.exit fn in
+          let loc_map, new_header = Cfg_parser.for_loop_header method_id ~entry ~exit ~ret ~body_entry ~body_exit loc_map f in
+          let new_header = List.map new_header ~f:(uncurry3 Cfg.G.Edge.create) in
+          loc_map, cond :: cond_neg :: update_edges @ init_edges, new_header
+        | _ -> failwith "unrecognized statement type in Modify_header tree-diff"
+      in
+      let deleted_locs = List.fold deleted_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge -> Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge))) in
+      let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
+      let new_fn_cfg =
+        List.fold deleted_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove)
+        |> fun cfg -> List.fold added_edges ~init:cfg ~f:(flip Cfg.G.Edge.insert)
+      in
+      loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg
+    | Delete_statements { method_id; from_loc; to_loc} ->
+      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
+      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
+      let deleted_edges = Cfg.edges_btwn old_fn_cfg ~src:from_loc ~dst:to_loc in 
+      let deleted_locs = Set.fold deleted_edges ~init:(Cfg.Loc.Set.empty) ~f:(fun locs edge ->
+          Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge))
+        )
+      in
+      let loc_map =
+        Loc_map.remove_region method_id deleted_locs loc_map
+        |> Loc_map.rebase_edges method_id ~old_src:to_loc ~new_src:from_loc
+      in
+      let new_fn_cfg =
+        Set.fold deleted_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove)
+        |> fun cfg ->
+        let dangling_edges = Cfg.G.Node.outputs to_loc cfg in
+        Sequence.fold dangling_edges ~init:cfg ~f:(fun cfg edge ->
+            Cfg.G.Edge.(
+              insert
+                (create from_loc (dst edge) (label edge))
+                (remove edge cfg)
+            )
+          )
+      in
+      loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg      
+  in
+  List.fold diff ~init:(loc_map,cfg) ~f:apply_edit
 
 open Result
 open Option.Monad_infix
@@ -274,12 +440,10 @@ let%test "statement additions" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
-  | [ Add_statements { at_loc = _; stmts = [ _ ] }; Add_statements { at_loc = _; stmts = [ _ ] } ]
-    ->
-      true
+  | [ Add_statements { stmts = [ _ ]; _ }; Add_statements { stmts = [ _ ]; _ } ] -> true
   | _ -> false
 
 let%test "statement deletions" =
@@ -303,11 +467,12 @@ let%test "statement deletions" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
   | [
-   Delete_statements { from_loc = _; to_loc = _ }; Delete_statements { from_loc = _; to_loc = _ };
+   Delete_statements { from_loc = _; to_loc = _; method_id = _ };
+   Delete_statements { from_loc = _; to_loc = _; method_id = _ };
   ] ->
       true
   | _ -> false
@@ -333,10 +498,10 @@ let%test "statement modification in conditional" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
-  | [ Modify_statements { from_loc = _; to_loc = _; new_stmts = _ } ] -> true
+  | [ Modify_statements { method_id = _; from_loc = _; to_loc = _; new_stmts = _ } ] -> true
   | _ -> false
 
 let%test "conditional branch deletion" =
@@ -360,9 +525,11 @@ let%test "conditional branch deletion" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  match diff with [ Delete_statements { from_loc = _; to_loc = _ } ] -> true | _ -> false
+  match diff with
+  | [ Delete_statements { method_id = _; from_loc = _; to_loc = _ } ] -> true
+  | _ -> false
 
 let%test "modify condition of conditional" =
   let prev_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional.java" in
@@ -385,12 +552,90 @@ let%test "modify condition of conditional" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg.of_java_cst prev_cst in
+  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  match diff with [ Modify_header { at_loc = _; stmt = _ } ] -> true | _ -> false
+  let _next_cfg = apply diff loc_map prev_cfg in
+  match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = None} ] -> true | _ -> false
 
+let%test "modify header of for-loop" =
+  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops.java" in
+  let next_file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops2.java" in
+  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+  let prev_cst =
+    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let updated_prev_tree =
+    prev_tree |> ok
+    >>| Tree.apply
+          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+          ~offsets:(Src_file.line_offsets prev_file)
+  in
+  let next_cst =
+    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+    |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+  let _next_cfg = apply diff loc_map prev_cfg in
+  match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = Some _} ] -> true | _ -> false
+
+let%test "modify header of while-loop" =
+  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/While.java" in
+  let next_file = Src_file.of_file ~abspath:false "test_cases/java/While3.java" in
+  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+  let prev_cst =
+    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let updated_prev_tree =
+    prev_tree |> ok
+    >>| Tree.apply
+          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+          ~offsets:(Src_file.line_offsets prev_file)
+  in
+  let next_cst =
+    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+    |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+  let _next_cfg = apply diff loc_map prev_cfg in
+  match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = None} ] -> true | _ -> false
+
+let%test "modify body of while-loop" =
+  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/While.java" in
+  let next_file = Src_file.of_file ~abspath:false "test_cases/java/While2.java" in
+  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+  let prev_cst =
+    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let updated_prev_tree =
+    prev_tree |> ok
+    >>| Tree.apply
+          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+          ~offsets:(Src_file.line_offsets prev_file)
+  in
+  let next_cst =
+    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+    |> function
+    | Ok cst -> cst
+    | Error _ -> failwith "parse error"
+  in
+  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+  let _next_cfg = apply diff loc_map prev_cfg in
+  match diff with [ Delete_statements {method_id=_;_} ; Add_statements {method_id=_;_} ] -> true | _ -> false
 (*
-  (match Dai.Cfg.Fn.Map.data prev_cfg with
+  (match Cfg.Fn.Map.data prev_cfg with
   | [cfg] ->  Dai.Cfg.G.edges cfg
               |> Sequence.to_list
               |> List.map ~f:(fun e -> Format.asprintf "%a--[%a]-->%a" Loc.pp (Dai.Cfg.src e) Dai.Ast.Stmt.pp (Dai.Cfg.G.Edge.label e) Loc.pp (Dai.Cfg.dst e))
@@ -399,5 +644,4 @@ let%test "modify condition of conditional" =
   (match Dai.Cfg.Fn.Map.keys prev_cfg with
    | [fn] -> Format.fprintf Format.std_formatter "\nMain fn entry: %a; exit: %a\n" Loc.pp (Dai.Cfg.Fn.entry fn) Loc.pp (Dai.Cfg.Fn.exit fn)
    | _ ->  failwith "should only be one function (main)");
-  
-*)
+  *)

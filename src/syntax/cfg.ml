@@ -1,3 +1,4 @@
+open Dai
 open Import
 
 module Loc = struct
@@ -173,7 +174,19 @@ let dst : G.Edge.t -> Loc.t = G.Edge.dst
 
 let empty () = Fn.Map.empty
 
-let add_fn ~fn ~edges prgm = Fn.Map.set prgm ~key:fn ~data:(Graph.create (module G) ~edges ())
+let set_fn_cfg fn ~cfg prgm = Fn.Map.set prgm ~key:fn ~data:cfg
+
+let fn_by_method_id method_id prgm = List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id)
+
+let add_fn fn ~edges prgm =
+  let cfg = Graph.create (module G) ~edges () in
+  assert (not @@ Fn.Map.mem prgm fn);
+  set_fn_cfg fn ~cfg prgm
+
+let remove_fn method_id prgm =
+  match List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id) with
+  | Some fn -> Fn.Map.remove prgm fn
+  | None -> failwith (Format.asprintf "Can't remove function %s: does not exist in CFG" method_id)
 
 let retvar = "RETVAR"
 
@@ -242,6 +255,22 @@ let reachable_subgraph (cfg : G.t) ~(from : G.node) : G.t =
             (G.Edge.src e, G.Edge.dst e, G.Edge.label e) :: es))
   in
   Graph.create (module G) ~edges ()
+
+let edges_btwn (cfg : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
+  let rec edges_btwn_impl (frontier: G.node list) (accum : G.Edge.Set.t) =
+    match frontier with
+    | [] -> accum
+    | n :: frontier ->
+      let f,a = Sequence.fold (G.Node.outputs n cfg) ~init:(frontier,accum) ~f:(fun (f,a) e ->
+          if G.Edge.Set.mem a e then f, a
+          else if Loc.equal dst (G.Edge.dst e) then f, (G.Edge.Set.add a e)
+          else (G.Edge.src e) :: f, (G.Edge.Set.add a e)
+        )
+      in edges_btwn_impl f a
+      
+  in
+  edges_btwn_impl [src] G.Edge.Set.empty
+
 
 let dump_dot ?print ~filename (cfg : t) =
   let unioned_cfg =

@@ -1,6 +1,8 @@
+open Dai
 open Import
 open Apron
 open Option.Monad_infix
+open Syntax
 
 module Addr_map = struct
   type t = Addr.Abstract.t Map.M(String).t [@@deriving compare, sexp]

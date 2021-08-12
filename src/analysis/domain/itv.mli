@@ -1,4 +1,5 @@
 open Apron
+open Syntax
 
 include Abstract.DomNoCtx with type t = Box.t Abstract1.t
 
