@@ -3,11 +3,12 @@
  (public_name dai)
  (modules import)
  (libraries adapton core graphlib regular)
+ (preprocess (pps ppx_let)) ; this preprocessor is not actually needed for compilation, but helps dune generate proper `.merlin` info to handle it for the executable stanza below
 )
 
 (executable
  (name exec)
  (modules exec)
- (libraries dai)
+ (libraries dai frontend)
  (preprocess (pps ppx_let))
 )
