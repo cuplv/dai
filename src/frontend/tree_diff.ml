@@ -419,8 +419,8 @@ open Result
 open Option.Monad_infix
 
 let%test "statement additions" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorlds2.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorlds2.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -447,8 +447,8 @@ let%test "statement additions" =
   | _ -> false
 
 let%test "statement deletions" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorlds2.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorlds2.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -478,8 +478,8 @@ let%test "statement deletions" =
   | _ -> false
 
 let%test "statement modification in conditional" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional2.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional2.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -505,8 +505,8 @@ let%test "statement modification in conditional" =
   | _ -> false
 
 let%test "conditional branch deletion" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional3.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional3.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -532,8 +532,8 @@ let%test "conditional branch deletion" =
   | _ -> false
 
 let%test "modify condition of conditional" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/Conditional4.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional4.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -558,8 +558,8 @@ let%test "modify condition of conditional" =
   match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = None} ] -> true | _ -> false
 
 let%test "modify header of for-loop" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops2.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops2.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -584,8 +584,8 @@ let%test "modify header of for-loop" =
   match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = Some _} ] -> true | _ -> false
 
 let%test "modify header of while-loop" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/While.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/While3.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While3.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
@@ -610,8 +610,8 @@ let%test "modify header of while-loop" =
   match diff with [ Modify_header { method_id = _; at_loc = _; stmt = _ ; loop_body_exit = None} ] -> true | _ -> false
 
 let%test "modify body of while-loop" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/While.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/While2.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While2.java" in
   let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
   let prev_cst =
     bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function

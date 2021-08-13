@@ -64,16 +64,16 @@ open Result
 open Option.Monad_infix
 
 let%test "initial parse, valid syntax" =
-  let file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
   parse ~old_tree:None ~file |> bind ~f:(as_java_cst file) |> is_ok
 
 let%test "initial parse, invalid syntax" =
-  let file = Src_file.of_file ~abspath:false "test_cases/java/SyntaxError.java" in
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/SyntaxError.java" in
   parse ~old_tree:None ~file |> bind ~f:(as_java_cst file) |> is_error
 
 let%test "incremental parse, valid syntax, one-hunk edit" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorlds.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorlds.java" in
   let prev_tree = parse ~old_tree:None ~file:prev_file in
   assert (bind ~f:(as_java_cst prev_file) prev_tree |> is_ok);
   let updated_prev_tree =
@@ -85,8 +85,8 @@ let%test "incremental parse, valid syntax, one-hunk edit" =
   parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(as_java_cst next_file) |> is_ok
 
 let%test "incremental parse, valid syntax, two additions" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorlds2.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorlds2.java" in
   let prev_tree = parse ~old_tree:None ~file:prev_file in
   assert (bind ~f:(as_java_cst prev_file) prev_tree |> is_ok);
   let updated_prev_tree =
@@ -98,8 +98,8 @@ let%test "incremental parse, valid syntax, two additions" =
   parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(as_java_cst next_file) |> is_ok
 
 let%test "incremental parse, valid syntax, two deletions" =
-  let prev_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorlds2.java" in
-  let next_file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
+  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorlds2.java" in
+  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
   let prev_tree = parse ~old_tree:None ~file:prev_file in
   assert (bind ~f:(as_java_cst prev_file) prev_tree |> is_ok);
   let diff = Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file) in

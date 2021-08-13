@@ -7,9 +7,7 @@ let path = Ts_src_file.info >> function { path; _ } -> path
 
 let lines = Ts_src_file.lines
 
-let of_file ?abspath:(abs = false) filename =
-  let filename = if abs then filename else abs_of_rel_path filename in
-  Ts_src_file.load_file filename
+let of_file = Ts_src_file.load_file
 
 let line_offsets = lines >> Array.map ~f:(String.length >> Int.succ) >> Array.to_list
 

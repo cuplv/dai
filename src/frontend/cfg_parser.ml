@@ -547,15 +547,15 @@ let of_java_cst (cst : Tree.java_cst) =
 open Result.Monad_infix
 
 let%test "hello world program" =
-  let file = Src_file.of_file ~abspath:false "test_cases/java/HelloWorld.java" in
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
 
 let%test "nested classes" =
-  let file = Src_file.of_file ~abspath:false "test_cases/java/NestedClasses.java" in
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedClasses.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
 
 let%test "nested loops" =
-  let file = Src_file.of_file ~abspath:false "test_cases/java/NestedLoops.java" in
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
   $> (fun res ->
        match res with
