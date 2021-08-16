@@ -415,7 +415,8 @@ module T = struct
         in
         if
           is_ret lhs
-          && (Option.is_some @@ G.get_linear_path g (Env.find_exn new_e Syntax.Cfg.retvar) Memloc.null)
+          && Option.is_some
+             @@ G.get_linear_path g (Env.find_exn new_e Syntax.Cfg.retvar) Memloc.null
         then
           (* return value is a well-formed list -- project it out and forget locals *)
           let ret_addr = Env.find_exn new_e Syntax.Cfg.retvar in
@@ -527,6 +528,7 @@ module T = struct
 end
 
 include T
+
 (*module IncrT = Dai.Context.MakeInsensitive (Domain.Incr.Make (T))
 module Daig = Analysis.Daig.Make (IncrT)
 

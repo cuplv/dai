@@ -1,7 +1,7 @@
 open Dai.Import
 open Syntax.Cfg
 
-type loc_ctx = { entry : Loc.t; exit : Loc.t; ret : Loc.t}
+type loc_ctx = { entry : Loc.t; exit : Loc.t; ret : Loc.t }
 (** the necessary context to build a CFG region for some code: an entry location, exit location, and containing-method return location *)
 
 type t

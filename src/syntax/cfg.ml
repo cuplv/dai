@@ -176,7 +176,8 @@ let empty () = Fn.Map.empty
 
 let set_fn_cfg fn ~cfg prgm = Fn.Map.set prgm ~key:fn ~data:cfg
 
-let fn_by_method_id method_id prgm = List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id)
+let fn_by_method_id method_id prgm =
+  List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id)
 
 let add_fn fn ~edges prgm =
   let cfg = Graph.create (module G) ~edges () in
@@ -257,20 +258,20 @@ let reachable_subgraph (cfg : G.t) ~(from : G.node) : G.t =
   Graph.create (module G) ~edges ()
 
 let edges_btwn (cfg : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
-  let rec edges_btwn_impl (frontier: G.node list) (accum : G.Edge.Set.t) =
+  let rec edges_btwn_impl (frontier : G.node list) (accum : G.Edge.Set.t) =
     match frontier with
     | [] -> accum
     | n :: frontier ->
-      let f,a = Sequence.fold (G.Node.outputs n cfg) ~init:(frontier,accum) ~f:(fun (f,a) e ->
-          if G.Edge.Set.mem a e then f, a
-          else if Loc.equal dst (G.Edge.dst e) then f, (G.Edge.Set.add a e)
-          else (G.Edge.src e) :: f, (G.Edge.Set.add a e)
-        )
-      in edges_btwn_impl f a
-      
+        let f, a =
+          Sequence.fold (G.Node.outputs n cfg) ~init:(frontier, accum) ~f:(fun (f, a) e ->
+              if G.Edge.Set.mem a e then (f, a)
+              else if Loc.equal dst (G.Edge.dst e) then (f, G.Edge.Set.add a e)
+              else (G.Edge.src e :: f, G.Edge.Set.add a e))
+        in
+        edges_btwn_impl f a
   in
-  edges_btwn_impl [src] G.Edge.Set.empty
 
+  edges_btwn_impl [ src ] G.Edge.Set.empty
 
 let dump_dot ?print ~filename (cfg : t) =
   let unioned_cfg =

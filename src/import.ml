@@ -48,7 +48,9 @@ let time ~f ~x fs descr =
 let abs_of_rel_path rel_path =
   match Sys.getenv "DAI_ROOT" with
   | Some prefix -> prefix ^ rel_path
-  | None -> failwith "environment variable DAI_ROOT is unset; either use `make` or set manually to project root"
+  | None ->
+      failwith
+        "environment variable DAI_ROOT is unset; either use `make` or set manually to project root"
 
 module Option = struct
   include Base.Option

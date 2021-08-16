@@ -1,4 +1,5 @@
 open Syntax
+
 include Abstract.DomNoCtx
 
 val is_safe : string -> Ast.Expr.t -> t -> bool option

@@ -1,6 +1,5 @@
 open Dai.Import
 open Tree_sitter_java
-
 open Syntax.Cfg
 
 type loc_ctx = { entry : Loc.t; exit : Loc.t; ret : Loc.t }
@@ -28,33 +27,31 @@ let remove method_id stmt lmap =
 let remove_fn = String.Map.remove
 
 let remove_region method_id (region : Loc.Set.t) lmap =
-  let new_method_lmap = Int.Map.filter (String.Map.find_exn lmap method_id)
-      ~f:(fun {entry;exit;ret=_} -> Loc.Set.(mem region entry && mem region exit)) 
+  let new_method_lmap =
+    Int.Map.filter (String.Map.find_exn lmap method_id) ~f:(fun { entry; exit; ret = _ } ->
+        Loc.Set.(mem region entry && mem region exit))
   in
   String.Map.set lmap ~key:method_id ~data:new_method_lmap
-  
 
 let get method_id stmt lmap =
   let stmt_hash = CST.sexp_of_statement stmt |> Sexp.hash in
   String.Map.find_exn lmap method_id |> flip Int.Map.find_exn stmt_hash
 
-let union l r = String.Map.merge l r ~f:(fun ~key:_ -> function
-    | `Both (x,y) -> Int.Map.merge x y ~f:(fun ~key:_ -> function
-        | `Both _ -> failwith "collision"
-        | `Left x | `Right x -> Some x
-      ) |> Option.return
+let union l r =
+  String.Map.merge l r ~f:(fun ~key:_ -> function
+    | `Both (x, y) ->
+        Int.Map.merge x y ~f:(fun ~key:_ -> function
+          | `Both _ -> failwith "collision" | `Left x | `Right x -> Some x)
+        |> Option.return
     | `Left x -> Some x
-    | `Right y ->  Some y
-  ) 
+    | `Right y -> Some y)
 
 let rebase_edges method_id ~old_src ~new_src loc_map =
-  let new_method_locs = Int.Map.map (String.Map.find_exn loc_map method_id) ~f:(fun {entry;exit;ret} ->
-      if Loc.equal entry old_src then
-        {entry=new_src;exit;ret}
-      else
-        {entry;exit;ret}
-    )
-  in String.Map.set loc_map ~key:method_id ~data:new_method_locs
+  let new_method_locs =
+    Int.Map.map (String.Map.find_exn loc_map method_id) ~f:(fun { entry; exit; ret } ->
+        if Loc.equal entry old_src then { entry = new_src; exit; ret } else { entry; exit; ret })
+  in
+  String.Map.set loc_map ~key:method_id ~data:new_method_locs
 
 let pp =
   let pp_inner = Map.pp Int.pp pp_loc_ctx in
