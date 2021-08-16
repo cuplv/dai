@@ -24,10 +24,9 @@ clean:
 
 .PHONY: fmt
 fmt:
-	ocamlformat src/*.ml* -i --enable-outside-detected-project -m 100
-	ocamlformat src/frontend/*.ml* -i --enable-outside-detected-project -m 100
-	ocamlformat src/shape/*.ml* -i --enable-outside-detected-project -m 100
-	ocamlformat experiments/*.ml* -i --enable-outside-detected-project -m 100
+	find src experiments \
+		\( -name '*.ml' -o -name '*.mli' \) \
+		-exec ocamlformat {} -i --enable-outside-detected-project -m 100 \;
 
 .PHONY: repl
 repl:
