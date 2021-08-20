@@ -4,3 +4,4 @@ out/*
 run_d1a_experiment
 *.dot
 *.png
+_bugswarm
