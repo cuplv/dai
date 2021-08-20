@@ -270,58 +270,35 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   in
   stmt_edits @ function_additions @ function_deletions @ function_header_modifications
 
-let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
-  | Add_function { method_id; method_decl } -> (
-      let class_prefix = String.rindex_exn method_id '#' |> String.slice method_id 0 in
-      match Cfg_parser.of_method_decl loc_map ~class_prefix method_decl with
-      | Some (loc_map, edges, fn) ->
-          let cfg = Cfg.add_fn fn ~edges cfg in
-          (loc_map, cfg)
-      | None -> (loc_map, cfg) )
-  | Delete_function { method_id } ->
-      let loc_map = Loc_map.remove_fn loc_map method_id in
-      let cfg = Cfg.remove_fn method_id cfg in
-      (loc_map, cfg)
-  | Modify_function { method_id; new_header } -> (
-      let new_name, new_formals = match new_header with _ -> failwith "todo" in
-      match List.find (Cfg.Fn.Map.keys cfg) ~f:(Cfg.Fn.name >> String.equal method_id) with
-      | Some ({ name = _; formals = _; locals; entry; exit } as old_fn) ->
-          let old_fn_cfg = Cfg.Fn.Map.find_exn cfg old_fn in
-          let fn : Cfg.Fn.t = { name = new_name; formals = new_formals; locals; entry; exit } in
-          let cfg = Cfg.remove_fn method_id cfg in
-          (loc_map, Cfg.set_fn_cfg fn ~cfg:old_fn_cfg cfg)
-      | None -> failwith (Format.asprintf "can't modify unknown function %s" method_id) )
+let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
+  match edit with
+  | Add_function _ | Delete_function _ | Modify_function _ ->
+      failwith "Can't apply interprocedural edit to intraprocedural CFG"
   | Add_statements { method_id; at_loc; stmts } ->
       (* for all CFG edges FROM [at_loc], replace their source by the [fresh_loc] (in both CFG and loc-map) *)
       (* generate CFG edges for [stmts] with entry=at_loc, exit=fresh_loc, ret=(method_id.exit) *)
-      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
-      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
       let fresh_loc = Cfg.Loc.fresh () in
-      let old_succ_edges = Cfg.G.Node.outputs at_loc old_fn_cfg in
+      let old_succ_edges = Cfg.G.Node.outputs at_loc cfg in
       let new_succ_edges =
         Sequence.fold old_succ_edges ~init:[] ~f:(fun acc edge ->
             (fresh_loc, Cfg.dst edge, Cfg.G.Edge.label edge) :: acc)
       in
       let loc_map = Loc_map.rebase_edges method_id ~old_src:at_loc ~new_src:fresh_loc loc_map in
       let loc_map, added_edges =
-        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:at_loc ~exit:fresh_loc
-          ~ret:(Cfg.Fn.exit fn) stmts
+        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:at_loc ~exit:fresh_loc ~ret stmts
       in
-      let new_fn_cfg =
-        Sequence.fold old_succ_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
+      let cfg =
+        Sequence.fold old_succ_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
         List.fold new_succ_edges ~init ~f:(fun cfg edge ->
             Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
         |> fun init ->
         List.fold added_edges ~init ~f:(fun cfg edge ->
             Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
       in
-      (loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg)
+      (loc_map, cfg)
   | Modify_statements { method_id; from_loc; to_loc; new_stmts } ->
-      (* grab the CFG for [method_id] *)
-      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
-      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
       (* grab the region of edges reachable between from_loc / to_loc*)
-      let replaced_edges = Cfg.edges_btwn old_fn_cfg ~src:from_loc ~dst:to_loc in
+      let replaced_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc in
       let deleted_locs =
         Set.fold replaced_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
             Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
@@ -329,24 +306,22 @@ let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
       let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
       (* generate CFG edges for [new_stmts] with entry=from_loc, exit=to_loc, ret=(method_id.exit) *)
       let loc_map, added_edges =
-        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:from_loc ~exit:to_loc
-          ~ret:(Cfg.Fn.exit fn) new_stmts
+        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:from_loc ~exit:to_loc ~ret
+          new_stmts
       in
-      let new_fn_cfg =
-        Set.fold replaced_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
+      let cfg =
+        Set.fold replaced_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
         List.fold added_edges ~init ~f:(fun cfg edge ->
             Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
       in
-      (loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg)
+      (loc_map, cfg)
   | Modify_header { method_id; at_loc; stmt; loop_body_exit } ->
-      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
-      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
       let rec count_negations expr =
         let open Ast in
         match expr with Expr.Unop { op = Unop.Not; e } -> 1 + count_negations e | _ -> 0
       in
       let rec extract_cond_header at_loc acc =
-        match Cfg.G.Node.outputs at_loc old_fn_cfg |> Sequence.to_list with
+        match Cfg.G.Node.outputs at_loc cfg |> Sequence.to_list with
         | [ e ] -> extract_cond_header (Cfg.dst e) (e :: acc)
         | [ e1; e2 ] ->
             let e1_cond =
@@ -394,7 +369,7 @@ let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
             let init_edges, cond, cond_neg = extract_cond_header at_loc [] in
             let update_edges =
               let rec gather_update_edges acc curr =
-                match Cfg.G.Node.outputs curr old_fn_cfg |> Sequence.to_list with
+                match Cfg.G.Node.outputs curr cfg |> Sequence.to_list with
                 | [ e ] when Ast.Stmt.(equal Skip) (Cfg.G.Edge.label e) -> e :: acc
                 | [ e ] -> gather_update_edges (e :: acc) (Cfg.G.Edge.dst e)
                 | _ -> failwith "unexpected conditional control flow in for-loop update"
@@ -404,7 +379,6 @@ let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
             let entry = at_loc in
             let exit = Cfg.G.Edge.dst cond_neg in
             let body_entry = Cfg.G.Edge.dst cond in
-            let ret = Cfg.Fn.exit fn in
             let loc_map, new_header =
               Cfg_parser.for_loop_header method_id ~entry ~exit ~ret ~body_entry ~body_exit loc_map
                 f
@@ -418,15 +392,13 @@ let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
             Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
       in
       let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
-      let new_fn_cfg =
-        List.fold deleted_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
+      let cfg =
+        List.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
         List.fold added_edges ~init:cfg ~f:(flip Cfg.G.Edge.insert)
       in
-      (loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg)
+      (loc_map, cfg)
   | Delete_statements { method_id; from_loc; to_loc } ->
-      let fn = Option.value_exn (Cfg.fn_by_method_id method_id cfg) in
-      let old_fn_cfg = Option.value_exn (Cfg.Fn.Map.find cfg fn) in
-      let deleted_edges = Cfg.edges_btwn old_fn_cfg ~src:from_loc ~dst:to_loc in
+      let deleted_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc in
       let deleted_locs =
         Set.fold deleted_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
             Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
@@ -435,15 +407,47 @@ let apply_edit edit loc_map cfg : Loc_map.t * Syntax.Cfg.t = match edit with
         Loc_map.remove_region method_id deleted_locs loc_map
         |> Loc_map.rebase_edges method_id ~old_src:to_loc ~new_src:from_loc
       in
-      let new_fn_cfg =
-        Set.fold deleted_edges ~init:old_fn_cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
+      let cfg =
+        Set.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
         let dangling_edges = Cfg.G.Node.outputs to_loc cfg in
         Sequence.fold dangling_edges ~init:cfg ~f:(fun cfg edge ->
             Cfg.G.Edge.(insert (create from_loc (dst edge) (label edge)) (remove edge cfg)))
       in
-      (loc_map, Cfg.set_fn_cfg fn ~cfg:new_fn_cfg cfg)
+      (loc_map, cfg)
 
-let apply diff loc_map cfg = List.fold diff ~init:(loc_map, cfg) ~f:(fun (lm,cfg) edit -> apply_edit edit lm cfg)
+let apply diff loc_map cfgs =
+  List.fold diff ~init:(loc_map, cfgs) ~f:(fun (lm, cfgs) edit ->
+      match edit with
+      | Add_function { method_id; method_decl } -> (
+          let class_prefix = String.rindex_exn method_id '#' |> String.slice method_id 0 in
+          match Cfg_parser.of_method_decl loc_map ~class_prefix method_decl with
+          | Some (loc_map, edges, fn) ->
+              let cfgs = Cfg.add_fn fn ~edges cfgs in
+              (loc_map, cfgs)
+          | None -> (loc_map, cfgs) )
+      | Delete_function { method_id } ->
+          let loc_map = Loc_map.remove_fn loc_map method_id in
+          let cfgs = Cfg.remove_fn method_id cfgs in
+          (loc_map, cfgs)
+      | Modify_function { method_id; new_header } -> (
+          let name, formals = match new_header with _ -> failwith "todo" in
+          match Cfg.Fn.Map.fn_by_method_id method_id cfgs with
+          | Some ({ name = _; formals = _; locals; entry; exit } as old_fn) ->
+              let old_fn_cfg = Cfg.Fn.Map.find_exn cfgs old_fn in
+              let fn : Cfg.Fn.t = { name; formals; locals; entry; exit } in
+              let cfgs = Cfg.remove_fn method_id cfgs in
+              (loc_map, Cfg.set_fn_cfg fn ~cfg:old_fn_cfg cfgs)
+          | None -> failwith (Format.asprintf "can't modify unknown function %s" method_id) )
+      | Add_statements { method_id; _ }
+      | Modify_statements { method_id; _ }
+      | Modify_header { method_id; _ }
+      | Delete_statements { method_id; _ } -> (
+          match Cfg.Fn.Map.fn_by_method_id method_id cfgs with
+          | None -> failwith (Format.asprintf "can't modify unknown function %s" method_id)
+          | Some fn ->
+              let old_fn_cfg = Cfg.Fn.Map.find_exn cfgs fn in
+              let loc_map, new_fn_cfg = apply_edit ~ret:fn.exit edit lm old_fn_cfg in
+              (loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:new_fn_cfg) ))
 
 open Result
 open Option.Monad_infix

@@ -27,6 +27,6 @@ val pp : t Import.pp
 
 val btwn : Loc_map.t -> prev:Tree.java_cst -> next:Tree.java_cst -> t
 
-val apply : t -> Loc_map.t -> Cfg.t -> Loc_map.t * Cfg.t
+val apply : t -> Loc_map.t -> Cfg.t Cfg.Fn.Map.t -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
 
-val apply_edit : edit -> Loc_map.t -> Cfg.t -> Loc_map.t * Cfg.t
+val apply_edit : edit -> Loc_map.t -> Cfg.t -> ret:Cfg.Loc.t -> Loc_map.t * Cfg.t

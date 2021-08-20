@@ -163,10 +163,12 @@ module Fn = struct
     type 'v t = 'v Map.M(T_comparator).t
 
     let empty = Map.empty (module T_comparator)
+
+    let fn_by_method_id method_id = keys >> List.find ~f:(name >> String.equal method_id)
   end
 end
 
-type t = G.t Fn.Map.t
+type t = G.t
 
 let src : G.Edge.t -> Loc.t = G.Edge.src
 
@@ -175,9 +177,6 @@ let dst : G.Edge.t -> Loc.t = G.Edge.dst
 let empty () = Fn.Map.empty
 
 let set_fn_cfg fn ~cfg prgm = Fn.Map.set prgm ~key:fn ~data:cfg
-
-let fn_by_method_id method_id prgm =
-  List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id)
 
 let add_fn fn ~edges prgm =
   let cfg = Graph.create (module G) ~edges () in
@@ -273,7 +272,19 @@ let edges_btwn (cfg : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
 
   edges_btwn_impl [ src ] G.Edge.Set.empty
 
-let dump_dot ?print ~filename (cfg : t) =
+let dump_dot_intraproc ?print ~filename (cfg : t) =
+  let output_fd =
+    if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
+  in
+  Graph.to_dot
+    (module G)
+    cfg ~filename
+    ~channel:(Unix.out_channel_of_descr output_fd)
+    ~string_of_node:Loc.to_string
+    ~string_of_edge:(G.Edge.label >> Ast.Stmt.to_string);
+  if Option.is_none print then Unix.close output_fd
+
+let dump_dot_interproc ?print ~filename (cfg : t Fn.Map.t) =
   let unioned_cfg =
     match Map.data cfg with
     | [] -> G.empty

@@ -11,13 +11,16 @@ type t = loc_ctx Int.Map.t String.Map.t
 
 let empty = String.Map.empty
 
+type 'a or_collision = [ `Ok of 'a | `Collision ]
+
 let add method_id stmt loc_ctx lmap =
   let stmt_hash = CST.sexp_of_statement stmt |> Sexp.hash in
   match String.Map.find lmap method_id with
-  | None -> String.Map.add_exn lmap ~key:method_id ~data:(Int.Map.singleton stmt_hash loc_ctx)
-  | Some stmt_hash_map ->
-      String.Map.set lmap ~key:method_id
-        ~data:(Int.Map.set stmt_hash_map ~key:stmt_hash ~data:loc_ctx)
+  | None -> `Ok (String.Map.add_exn lmap ~key:method_id ~data:(Int.Map.singleton stmt_hash loc_ctx))
+  | Some stmt_hash_map -> (
+      match Int.Map.add stmt_hash_map ~key:stmt_hash ~data:loc_ctx with
+      | `Duplicate -> `Collision
+      | `Ok data -> `Ok (String.Map.set lmap ~key:method_id ~data) )
 
 let remove method_id stmt lmap =
   let stmt_hash = CST.sexp_of_statement stmt |> Sexp.hash in

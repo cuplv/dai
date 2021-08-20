@@ -15,8 +15,8 @@ val expr : ?exit_loc:Cfg.Loc.t -> Cfg.Loc.t -> CST.expression -> Ast.Expr.t * (C
 
 *)
 
-val of_java_cst : CST.program -> Loc_map.t * Cfg.t
-(** Construct a CFG in our IR from a (java) tree-sitter concrete syntax tree *)
+val of_java_cst : CST.program -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
+(** Construct a CFG in our IR for each method in a (java) tree-sitter concrete syntax tree *)
 
 val of_method_decl :
   Loc_map.t ->

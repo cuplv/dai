@@ -21,7 +21,8 @@ let fresh_tmp_var () =
 
     Optional [exit_loc] param is used to special-case the common statement syntax of [`Exp_stmt (`Assign_exp _)] and avoid generating extraneous locations and [Skip] edges
 *)
-let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) : Ast.Expr.t * (Cfg.Loc.t * edge list) =
+let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
+    Ast.Expr.t * (Cfg.Loc.t * edge list) =
   let open Ast in
   match cst with
   | `Assign_exp (lhs, op, rhs) ->
@@ -340,7 +341,17 @@ let rec declarations stmts : string list =
 
 let rec edge_list_of_stmt method_id loc_map entry exit ret stmt : Loc_map.t * edge list =
   let open Ast in
-  let loc_map = Loc_map.add method_id stmt { entry; exit; ret } loc_map in
+  let loc_map =
+    match Loc_map.add method_id stmt { entry; exit; ret } loc_map with
+    | `Ok lm -> lm
+    | `Collision ->
+        Format.print_string
+          "WARNING: todo: two syntactically-identical statements in the same method. handle this \
+           case if it comes up in evaluation.  Perhaps by enumerating the occurrences \
+           topologically to disambiguate, storing a sequence of loc_ctx's for the statement and \
+           scanning parse trees for the order as needed?\n";
+        loc_map
+  in
   match stmt with
   | `Assert_stmt assertion ->
       let expr, (entry, intermediate_stmts) =
@@ -362,10 +373,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret stmt : Loc_map.t * ed
       |> pair loc_map
   | `Enha_for_stmt _ -> failwith "todo: Enha_for_stmt"
   | `Exp_stmt (e, _) ->
-    let _value_of_e, (intermediate_loc, intermediate_stmts) = expr ~exit_loc:exit entry e in
-    if Cfg.Loc.equal intermediate_loc exit
-    then (loc_map, intermediate_stmts)
-    else (loc_map, (intermediate_loc, exit, Stmt.Skip) :: intermediate_stmts)
+      let _value_of_e, (intermediate_loc, intermediate_stmts) = expr ~exit_loc:exit entry e in
+      if Cfg.Loc.equal intermediate_loc exit then (loc_map, intermediate_stmts)
+      else (loc_map, (intermediate_loc, exit, Stmt.Skip) :: intermediate_stmts)
   | `For_stmt ((_, _, _, _, _, _, _, body) as f) ->
       let body_entry = Cfg.Loc.fresh () in
       let body_exit = Cfg.Loc.fresh () in
@@ -568,5 +578,7 @@ let%test "nested loops" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
   $> (fun res ->
-       match res with Error _ -> () | Ok (_, cfg) -> Cfg.dump_dot ~filename:"nested_loops.dot" cfg)
+       match res with
+       | Error _ -> ()
+       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfg)
   |> Result.is_ok

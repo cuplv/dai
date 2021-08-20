@@ -10,8 +10,12 @@ type t
 val empty : t
 (** an empty cache *)
 
-val add : string -> Tree_sitter_java.CST.statement -> loc_ctx -> t -> t
-(** add [loc_ctx] for a [statement] in a method named by the [string] to some cache.  Side-effect-free. *)
+type 'a or_collision = [ `Ok of 'a | `Collision ]
+
+val add : string -> Tree_sitter_java.CST.statement -> loc_ctx -> t -> t or_collision
+(** add [loc_ctx] for a [statement] in a method named by the [string].
+    If that statement is syntactically identical to another statement in the method, return [`Collision].
+ *)
 
 val get : string -> Tree_sitter_java.CST.statement -> t -> loc_ctx
 (** get the [loc_ctx] for some [statement] in a method named by the [string] *)

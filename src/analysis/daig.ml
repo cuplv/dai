@@ -181,13 +181,23 @@ module Make (Dom : Abstract.Dom) = struct
 
   module G = Graph.Make (Opaque_ref) (Comp)
 
-  type t = G.t * Cfg.t
-
-  (*  let apply (_diff : Frontend.Tree_diff.t) : t -> t = List.fold*)
+  type t = G.t * Cfg.G.t
 
   let query _ _ = failwith "todo"
 
-  let edit _ _ = failwith "todo"
+  let apply_edit _loc_map (_daig, _cfg) ~ret:_ =
+    let open Frontend.Tree_diff in
+    function
+    | Add_function _ | Delete_function _ | Modify_function _ ->
+        failwith "Can't apply interprocedural edit to intraprocedural DAIG"
+    | Add_statements { method_id = _; at_loc = _; stmts = _ } ->
+        failwith "todo: Daig#apply_edit add_statements"
+    | Modify_statements { method_id = _; from_loc = _; to_loc = _; new_stmts = _ } ->
+        failwith "todo: Daig#apply_edit modify_statements"
+    | Modify_header { method_id = _; at_loc = _; stmt = _; loop_body_exit = _ } ->
+        failwith "todo: Daig#apply_edit modify_header"
+    | Delete_statements { method_id = _; from_loc = _; to_loc = _ } ->
+        failwith "todo: Daig#apply_edit delete_statements"
 
   type edge = Ref.t * Ref.t * Comp.t
 
