@@ -158,7 +158,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
             (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
       in
       let lhs = fresh_tmp_var () in
-      let next_loc = Cfg.Loc.fresh () in
+      let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let call =
         (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "constructor"; actuals })
       in
@@ -206,7 +206,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
             (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
       in
       let lhs = fresh_tmp_var () in
-      let next_loc = Cfg.Loc.fresh () in
+      let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals }) in
       (Expr.Var lhs, (next_loc, rcvr_intermediates @ arg_intermediates @ [ call ]))
   | `Prim_exp (`Meth_ref _) -> failwith "todo: Prim_exp (Meth_ref)"
@@ -217,7 +217,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
       let if_exp, (curr_loc, cond_intermediates) = expr curr_loc if_exp in
       let then_branch_head = Cfg.Loc.fresh () in
       let else_branch_head = Cfg.Loc.fresh () in
-      let next_loc = Cfg.Loc.fresh () in
+      let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let then_exp, (then_branch_tail, then_intermediates) = expr then_branch_head then_exp in
       let else_exp, (else_branch_tail, else_intermediates) = expr else_branch_head else_exp in
       let stmts =
@@ -256,7 +256,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
       let e, (curr_loc, intermediates) = expr curr_loc e in
       match e with
       | Expr.Var v as var ->
-          let next_loc = Cfg.Loc.fresh () in
+          let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
           let update_edge =
             ( curr_loc,
               next_loc,
@@ -379,7 +379,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret stmt : Loc_map.t * ed
   | `For_stmt ((_, _, _, _, _, _, _, body) as f) ->
       let body_entry = Cfg.Loc.fresh () in
       let body_exit = Cfg.Loc.fresh () in
-      let loc_map, header =
+      let loc_map, header, _ =
         for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map f
       in
       let loc_map, body = edge_list_of_stmt method_id loc_map body_entry body_exit ret body in
@@ -465,7 +465,7 @@ and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret stmts : Loc_map.t
   edges_of_stmts loc_map entry stmts
 
 and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map :
-    CST.for_statement -> Loc_map.t * edge list = function
+    CST.for_statement -> Loc_map.t * edge list * edge = function
   | _, _, init, cond, _, update, _, _body ->
       let loc_map, (init_intermediate_loc, init_intermediate_stmts) =
         match init with
@@ -473,7 +473,7 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map :
             let l = Cfg.Loc.fresh () in
             let loc_map, es = edge_list_of_stmt method_id loc_map entry l ret decl in
             (loc_map, (l, es))
-        | `Opt_exp_rep_COMMA_exp_SEMI (None, _) -> (loc_map, (body_exit, []))
+        | `Opt_exp_rep_COMMA_exp_SEMI (None, _) -> (loc_map, (entry, []))
         | `Opt_exp_rep_COMMA_exp_SEMI (Some (e, es), _) ->
             let exprs = e :: List.map ~f:snd es in
             (loc_map, expr_of_nonempty_list entry exprs |> snd)
@@ -481,7 +481,7 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map :
       in
       let cond, (cond_intermediate_loc, cond_intermediate_stmts) =
         match cond with
-        | None -> Ast.(Expr.Lit (Lit.Bool true), (entry, []))
+        | None -> Ast.(Expr.Lit (Lit.Bool true), (init_intermediate_loc, []))
         | Some cond -> expr init_intermediate_loc cond
       in
       let cond_neg = Ast.(Expr.Unop { op = Unop.Not; e = cond }) in
@@ -493,11 +493,12 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map :
             expr_of_nonempty_list body_exit exprs |> snd
         (* discard value of update expression, as in Java semantics *)
       in
+      let back_edge = (update_intermediate_loc, init_intermediate_loc, Ast.Stmt.Skip) in
       (cond_intermediate_loc, body_entry, Ast.Stmt.Assume cond)
       :: (cond_intermediate_loc, exit, Ast.Stmt.Assume cond_neg)
-      :: (update_intermediate_loc, init_intermediate_loc, Ast.Stmt.Skip)
+      :: back_edge
       :: (init_intermediate_stmts @ update_intermediate_stmts @ cond_intermediate_stmts)
-      |> pair loc_map
+      |> fun edges -> (loc_map, edges, back_edge)
 
 let of_method_decl loc_map ~class_prefix (md : CST.method_declaration) =
   match md with
@@ -565,6 +566,13 @@ let of_java_cst (cst : Tree.java_cst) =
   (loc_map, List.fold cfgs ~init:(Cfg.empty ()) ~f:(fun cfg (edges, fn) -> Cfg.add_fn fn ~edges cfg))
 
 open Result.Monad_infix
+
+let of_file_exn ~filename =
+  let file = Src_file.of_file filename in
+  let tree = Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file in
+  match tree with
+  | Ok tree -> of_java_cst tree
+  | Error _e -> failwith @@ "parse error in " ^ filename
 
 let%test "hello world program" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in

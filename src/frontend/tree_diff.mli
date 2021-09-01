@@ -29,4 +29,13 @@ val btwn : Loc_map.t -> prev:Tree.java_cst -> next:Tree.java_cst -> t
 
 val apply : t -> Loc_map.t -> Cfg.t Cfg.Fn.Map.t -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
 
-val apply_edit : edit -> Loc_map.t -> Cfg.t -> ret:Cfg.Loc.t -> Loc_map.t * Cfg.t
+type cfg_edit_result = {
+  cfg : Cfg.t;
+  new_loc_map : Loc_map.t;
+  added_edges : Cfg_parser.edge list;
+  deleted_edges : Cfg.G.edge list;
+  added_loc : Cfg.Loc.t option;
+  added_for_loop_backedge : Cfg_parser.edge option;
+}
+
+val apply_edit : edit -> Loc_map.t -> Cfg.t -> ret:Cfg.Loc.t -> cfg_edit_result

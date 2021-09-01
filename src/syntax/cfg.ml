@@ -265,11 +265,10 @@ let edges_btwn (cfg : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
           Sequence.fold (G.Node.outputs n cfg) ~init:(frontier, accum) ~f:(fun (f, a) e ->
               if G.Edge.Set.mem a e then (f, a)
               else if Loc.equal dst (G.Edge.dst e) then (f, G.Edge.Set.add a e)
-              else (G.Edge.src e :: f, G.Edge.Set.add a e))
+              else (G.Edge.dst e :: f, G.Edge.Set.add a e))
         in
         edges_btwn_impl f a
   in
-
   edges_btwn_impl [ src ] G.Edge.Set.empty
 
 let dump_dot_intraproc ?print ~filename (cfg : t) =

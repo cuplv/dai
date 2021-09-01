@@ -270,7 +270,20 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   in
   stmt_edits @ function_additions @ function_deletions @ function_header_modifications
 
-let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
+type cfg_edit_result = {
+  cfg : Cfg.t;
+  new_loc_map : Loc_map.t;
+  added_edges : Cfg_parser.edge list;
+  deleted_edges : Cfg.G.edge list;
+  added_loc : Cfg.Loc.t option;
+  added_for_loop_backedge : Cfg_parser.edge option;
+}
+
+let apply_edit edit loc_map cfg ~ret : cfg_edit_result =
+  let edit_result ?added_loc ?(added_for_loop_backedge = None) ?(added_edges = [])
+      ?(deleted_edges = []) cfg new_loc_map : unit -> cfg_edit_result =
+   fun () -> { cfg; new_loc_map; added_edges; deleted_edges; added_loc; added_for_loop_backedge }
+  in
   match edit with
   | Add_function _ | Delete_function _ | Modify_function _ ->
       failwith "Can't apply interprocedural edit to intraprocedural CFG"
@@ -292,15 +305,14 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
         List.fold new_succ_edges ~init ~f:(fun cfg edge ->
             Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
         |> fun init ->
-        List.fold added_edges ~init ~f:(fun cfg edge ->
-            Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
+        List.fold added_edges ~init ~f:(fun cfg e -> Cfg.G.Edge.(insert (uncurry3 create e) cfg))
       in
-      (loc_map, cfg)
+      edit_result cfg loc_map ~added_edges ~added_loc:fresh_loc ()
   | Modify_statements { method_id; from_loc; to_loc; new_stmts } ->
       (* grab the region of edges reachable between from_loc / to_loc*)
-      let replaced_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc in
+      let deleted_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc |> Set.to_list in
       let deleted_locs =
-        Set.fold replaced_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
+        List.fold deleted_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
             Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
       in
       let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
@@ -310,12 +322,14 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
           new_stmts
       in
       let cfg =
-        Set.fold replaced_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
-        List.fold added_edges ~init ~f:(fun cfg edge ->
-            Cfg.G.Edge.(insert (uncurry3 create edge) cfg))
+        List.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
+        List.fold added_edges ~init ~f:(fun cfg e -> Cfg.G.Edge.(insert (uncurry3 create e) cfg))
       in
-      (loc_map, cfg)
+      edit_result cfg loc_map ~added_edges ~deleted_edges ()
   | Modify_header { method_id; at_loc; stmt; loop_body_exit } ->
+      (* Traverse from [at_loc] until reaching a control-flow fork (also grabbing the `update` expression of a for-loop by traversing from [loop_body_exit]);
+          delete everything in range, then construct the replacement from [stmt]
+      *)
       let rec count_negations expr =
         let open Ast in
         match expr with Expr.Unop { op = Unop.Not; e } -> 1 + count_negations e | _ -> 0
@@ -338,7 +352,7 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
             else (acc, e2, e1)
         | _ -> failwith "malformed conditional"
       in
-      let loc_map, deleted_edges, added_edges =
+      let loc_map, deleted_edges, added_edges, added_for_loop_backedge =
         match stmt with
         | `If_stmt (_, (_, cond, _), _, _) | `While_stmt (_, (_, cond, _), _) ->
             (* traverse from at_loc until reaching a out-degree-2 node; delete all traversed edges and those 2 outgoing ones, then build the new edges for the new header *)
@@ -348,18 +362,15 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
             let deleted_edges = old_assume_pos :: old_assume_neg :: old_cond_intermediates in
             let cond, (branch_loc, cond_intermediates) = Cfg_parser.expr at_loc cond in
             let new_assume_pos =
-              Cfg.G.Edge.(create branch_loc (dst old_assume_pos) (Ast.Stmt.Assume cond))
+              (branch_loc, Cfg.G.Edge.dst old_assume_pos, Ast.Stmt.Assume cond)
             in
             let new_assume_neg =
-              Cfg.G.Edge.(
-                create branch_loc (dst old_assume_neg)
-                  Ast.(Stmt.Assume (Expr.Unop { op = Unop.Not; e = cond })))
+              ( branch_loc,
+                Cfg.G.Edge.dst old_assume_neg,
+                Ast.(Stmt.Assume (Expr.Unop { op = Unop.Not; e = cond })) )
             in
-            let added_edges =
-              new_assume_pos :: new_assume_neg
-              :: List.map cond_intermediates ~f:(uncurry3 Cfg.G.Edge.create)
-            in
-            (loc_map, deleted_edges, added_edges)
+            let added_edges = new_assume_pos :: new_assume_neg :: cond_intermediates in
+            (loc_map, deleted_edges, added_edges, None)
         | `For_stmt f ->
             let body_exit =
               match loop_body_exit with
@@ -367,24 +378,30 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
               | None -> failwith "no cached loop-body exit for for-loop header modification"
             in
             let init_edges, cond, cond_neg = extract_cond_header at_loc [] in
+            let init_locs =
+              List.fold init_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
+                  Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
+            in
             let update_edges =
+              let is_back_edge = Cfg.G.Edge.dst >> Cfg.Loc.Set.mem init_locs in
               let rec gather_update_edges acc curr =
                 match Cfg.G.Node.outputs curr cfg |> Sequence.to_list with
-                | [ e ] when Ast.Stmt.(equal Skip) (Cfg.G.Edge.label e) -> e :: acc
+                | [ e ] when Ast.Stmt.(equal Skip) (Cfg.G.Edge.label e) && is_back_edge e ->
+                    e :: acc
                 | [ e ] -> gather_update_edges (e :: acc) (Cfg.G.Edge.dst e)
                 | _ -> failwith "unexpected conditional control flow in for-loop update"
               in
               gather_update_edges [] body_exit
             in
+            let all_edges = cond :: cond_neg :: (update_edges @ init_edges) in
             let entry = at_loc in
             let exit = Cfg.G.Edge.dst cond_neg in
             let body_entry = Cfg.G.Edge.dst cond in
-            let loc_map, new_header =
+            let loc_map, new_header, back_edge =
               Cfg_parser.for_loop_header method_id ~entry ~exit ~ret ~body_entry ~body_exit loc_map
                 f
             in
-            let new_header = List.map new_header ~f:(uncurry3 Cfg.G.Edge.create) in
-            (loc_map, (cond :: cond_neg :: update_edges) @ init_edges, new_header)
+            (loc_map, all_edges, new_header, Some back_edge)
         | _ -> failwith "unrecognized statement type in Modify_header tree-diff"
       in
       let deleted_locs =
@@ -394,26 +411,33 @@ let apply_edit edit loc_map cfg ~ret : Loc_map.t * Syntax.Cfg.t =
       let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
       let cfg =
         List.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
-        List.fold added_edges ~init:cfg ~f:(flip Cfg.G.Edge.insert)
+        List.fold added_edges ~init:cfg ~f:(fun cfg e ->
+            Cfg.G.Edge.(insert (uncurry3 create e) cfg))
       in
-      (loc_map, cfg)
+      edit_result cfg loc_map ~added_edges ~deleted_edges ~added_for_loop_backedge ()
   | Delete_statements { method_id; from_loc; to_loc } ->
-      let deleted_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc in
+      let collapse_locs = not (Cfg.Loc.equal to_loc ret) in
+      let if_collapsing f = if collapse_locs then f else fun x -> x in
+      let deleted_edges = Cfg.edges_btwn cfg ~src:from_loc ~dst:to_loc |> Set.to_list in
       let deleted_locs =
-        Set.fold deleted_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
+        List.fold deleted_edges ~init:Cfg.Loc.Set.empty ~f:(fun locs edge ->
             Cfg.Loc.Set.(add (add locs (Cfg.src edge)) (Cfg.dst edge)))
+        |> flip Cfg.Loc.Set.remove from_loc
+        |> if_collapsing @@ flip Cfg.Loc.Set.remove to_loc
       in
+      let added_edges = if collapse_locs then [] else [ (from_loc, to_loc, Ast.Stmt.Skip) ] in
       let loc_map =
         Loc_map.remove_region method_id deleted_locs loc_map
-        |> Loc_map.rebase_edges method_id ~old_src:to_loc ~new_src:from_loc
+        |> if_collapsing @@ Loc_map.rebase_edges method_id ~old_src:to_loc ~new_src:from_loc
       in
       let cfg =
-        Set.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun cfg ->
-        let dangling_edges = Cfg.G.Node.outputs to_loc cfg in
-        Sequence.fold dangling_edges ~init:cfg ~f:(fun cfg edge ->
-            Cfg.G.Edge.(insert (create from_loc (dst edge) (label edge)) (remove edge cfg)))
+        List.fold deleted_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove)
+        |> if_collapsing @@ fun cfg ->
+           let dangling_edges = Cfg.G.Node.outputs to_loc cfg in
+           Sequence.fold dangling_edges ~init:cfg ~f:(fun cfg edge ->
+               Cfg.G.Edge.(insert (create from_loc (dst edge) (label edge)) (remove edge cfg)))
       in
-      (loc_map, cfg)
+      edit_result cfg loc_map ~deleted_edges ~added_edges ()
 
 let apply diff loc_map cfgs =
   List.fold diff ~init:(loc_map, cfgs) ~f:(fun (lm, cfgs) edit ->
@@ -446,8 +470,8 @@ let apply diff loc_map cfgs =
           | None -> failwith (Format.asprintf "can't modify unknown function %s" method_id)
           | Some fn ->
               let old_fn_cfg = Cfg.Fn.Map.find_exn cfgs fn in
-              let loc_map, new_fn_cfg = apply_edit ~ret:fn.exit edit lm old_fn_cfg in
-              (loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:new_fn_cfg) ))
+              let { cfg; new_loc_map; _ } = apply_edit ~ret:fn.exit edit lm old_fn_cfg in
+              (new_loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:cfg) ))
 
 open Result
 open Option.Monad_infix

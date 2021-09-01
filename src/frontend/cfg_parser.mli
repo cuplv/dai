@@ -16,7 +16,10 @@ val expr : ?exit_loc:Cfg.Loc.t -> Cfg.Loc.t -> CST.expression -> Ast.Expr.t * (C
 *)
 
 val of_java_cst : CST.program -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
-(** Construct a CFG in our IR for each method in a (java) tree-sitter concrete syntax tree *)
+(** Construct a CFG for each method in a (java) tree-sitter concrete syntax tree *)
+
+val of_file_exn : filename:string -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
+(** Construct a CFG for each method in a (java) source file *)
 
 val of_method_decl :
   Loc_map.t ->
@@ -34,6 +37,17 @@ val edge_list_of_stmt_list :
   CST.program ->
   Loc_map.t * edge list
 
+(* Return value is composed of:
+   (1) updated loc_map,
+   (2) all CFG edges for the for-loop excluding its body,
+   (3) the back edge from the update back up to the condition.
+
+   This is distinguished to support updates to the loop-header without updating the full loop body.
+
+   Return value (3) is contained in (2), but is useful when constructing the updated DAIG region for an edited loop.
+
+   Analogs to this function are not needed for conditional/while-loop headers because those can easily be identified from the CFG structure.
+*)
 val for_loop_header :
   string ->
   body_entry:Cfg.Loc.t ->
@@ -43,4 +57,4 @@ val for_loop_header :
   ret:Cfg.Loc.t ->
   Loc_map.t ->
   CST.for_statement ->
-  Loc_map.t * edge list
+  Loc_map.t * edge list * edge
