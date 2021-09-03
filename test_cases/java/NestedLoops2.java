@@ -15,6 +15,7 @@ public class NestedLoops {
 	    }
 	    i++;
 	}
+	return result;
     }
     int quux (int x) {
 	int result = 0, i=0;
@@ -26,5 +27,6 @@ public class NestedLoops {
 	    } while (j < i);
 	    i++;
 	} while  (i < x);
+	return result;
     }
 }

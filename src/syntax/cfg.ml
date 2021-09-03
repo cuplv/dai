@@ -78,6 +78,8 @@ module Loc = struct
     let empty = Set.empty (module T_comparator)
 
     let singleton = Set.singleton (module T_comparator)
+
+    let of_list = Set.of_list (module T_comparator)
   end
 
   module Map = struct
@@ -222,12 +224,19 @@ let back_edges =
 
 let loop_heads = back_edges >> List.map ~f:dst
 
-(** Map from locations to set of loop heads of containing loops.  Locations not in any loop are not in the domain, so [find_exn] is unsafe! *)
-let containing_loop_heads cfg : Loc.t Loc.Map.t =
-  let back_edges = back_edges cfg in
-  List.fold back_edges ~init:Loc.Map.empty ~f:(fun map backedge ->
-      let head = dst backedge in
-      Set.fold (natural_loop backedge cfg) ~init:map ~f:(fun map l -> Map.set map ~key:l ~data:head))
+(** Map from locations to loop heads of containing loops.  Locations not in any loop are not in the domain, so [find_exn] is unsafe! *)
+let containing_loop_heads cfg : Loc.t list Loc.Map.t =
+  let natural_loops =
+    back_edges cfg |> List.map ~f:(fun e -> (natural_loop e cfg, e))
+    (*    |> List.sort ~compare:(fun (nat_loop_1,_) (nat_loop_2,_) -> Int.compare (Set.length nat_loop_1) (Set.length nat_loop_2))*)
+  in
+
+  List.fold natural_loops ~init:Loc.Map.empty ~f:(fun map (loop, edge) ->
+      let head = dst edge in
+      Set.fold loop ~init:map ~f:(fun map l ->
+          match Map.find map l with
+          | None -> Map.set map ~key:l ~data:[ head ]
+          | Some heads -> Map.set map ~key:l ~data:(head :: heads)))
 
 (** Returns a partition of [cfg]'s nodes into non-join and join locations;
       the [fst] list returned contains all nodes with at most 1 incoming forward edge,

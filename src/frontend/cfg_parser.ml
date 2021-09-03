@@ -365,10 +365,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret stmt : Loc_map.t * ed
   | `Decl _ -> failwith "todo: Decl"
   | `Do_stmt (_, body, _, (_, cond, _), _) ->
       let body_exit = Cfg.Loc.fresh () in
-      let cond, (body_entry, cond_intermediate_stmts) = expr entry cond in
+      let cond, (cond_exit, cond_intermediate_stmts) = expr body_exit cond in
       let cond_neg = Expr.Unop { op = Unop.Not; e = cond } in
-      let loc_map, body = edge_list_of_stmt method_id loc_map body_entry body_exit ret body in
-      (body_exit, entry, Stmt.Assume cond) :: (body_exit, exit, Stmt.Assume cond_neg) :: body
+      let loc_map, body = edge_list_of_stmt method_id loc_map entry body_exit ret body in
+      (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
       |> pair loc_map
   | `Enha_for_stmt _ -> failwith "todo: Enha_for_stmt"
