@@ -7,15 +7,10 @@ default: build
 .PHONY: build
 build:
 	dune build
-	cp ./_build/default/experiments/exec.exe ./run_d1a_experiment
 
 .PHONY: test
 test: build
 	dune runtest src
-
-.PHONY: test_exps
-test_exps: build
-	dune runtest experiments
 
 .PHONY: clean
 clean:
@@ -24,7 +19,7 @@ clean:
 
 .PHONY: fmt
 fmt:
-	find src experiments \
+	find src \
 		\( -name '*.ml' -o -name '*.mli' \) \
 		-exec ocamlformat {} -i --enable-outside-detected-project -m 100 \;
 
