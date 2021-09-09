@@ -735,7 +735,7 @@ module Make (Dom : Abstract.DomNoCtx) = struct
     | Stmt _ -> (Result r, daig)
     | AState { state = Some _; _ } -> (Result r, daig)
     | AState { state = None; _ } when Seq.is_empty (G.Node.inputs r daig) ->
-        analyze_to_fn_entry r daig
+        failwith "malformed DAIG: all empty cells have in-degree > 0"
     | AState phi ->
         (* recursively [get] all predecessors (or a summary query) *)
         ( Seq.fold (G.Node.preds r daig) ~init:(Result [], daig) ~f:(fun (acc, g) pred ->
@@ -866,9 +866,8 @@ module Make (Dom : Abstract.DomNoCtx) = struct
          (Dom.handle_return ~caller_state ~return_state ~callsite ~callee_defs, daig)
      | _ -> failwith "Malformed callsite"
   *)
-  and analyze_to_fn_entry _r _daig = failwith "todo"
-
   (*
+  and analyze_to_fn_entry r daig =
        let loc, ctx =
          match Ref.name r with
          | Name.Loc (l, c) -> (l, c)
@@ -1076,7 +1075,7 @@ let%test "build daig, edit, and dump dot: HelloWorld.java" =
       let edit =
         Frontend.Tree_diff.Delete_statements
           {
-            method_id = fn.name;
+            method_id = fn.method_id;
             from_loc = Cfg.Loc.of_int_unsafe 1;
             to_loc = Cfg.Loc.of_int_unsafe 2;
           }
@@ -1095,7 +1094,9 @@ let%test "analyze nested loops" =
   Map.to_alist cfgs
   |> List.iter ~f:(fun (fn, cfg) ->
          let daig = Daig.of_cfg ~init_state:(Dom.init ()) ~cfg ~fn in
-         Daig.dump_dot ~filename:(abs_of_rel_path (fn.name ^ ".dot")) daig;
+         Daig.dump_dot ~filename:(abs_of_rel_path (fn.method_id.method_name ^ ".dot")) daig;
          let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
-         Daig.dump_dot ~filename:(abs_of_rel_path ("analyzed_" ^ fn.name ^ ".dot")) analyzed_daig);
+         Daig.dump_dot
+           ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ ".dot"))
+           analyzed_daig);
   true

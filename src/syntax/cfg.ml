@@ -103,7 +103,7 @@ module G =
 module Fn = struct
   module T = struct
     type t = {
-      name : string;
+      method_id : Method_id.t;
       formals : string list;
       locals : string list;
       entry : Loc.t;
@@ -111,7 +111,7 @@ module Fn = struct
     }
     [@@deriving compare, equal, hash, sexp_of]
 
-    let name { name; _ } = name
+    let name { method_id; _ } = method_id
 
     let formals { formals; _ } = formals
 
@@ -121,15 +121,15 @@ module Fn = struct
 
     let exit { exit; _ } = exit
 
-    let pp fs { name; formals; _ } =
-      Format.fprintf fs "%s(%a)" name (List.pp ", " String.pp) formals
+    let pp fs { method_id; formals; _ } =
+      Format.fprintf fs "%a(%a)" Method_id.pp method_id (List.pp ", " String.pp) formals
 
-    let make ~name ~formals ~entry ~exit ~body =
+    let make ~method_id ~formals ~entry ~exit ~body =
       let locals =
         List.fold body ~init:[] ~f:(fun locals (_, _, stmt) ->
             Option.cons (Ast.Stmt.def stmt) locals)
       in
-      { name; formals; locals; entry; exit }
+      { method_id; formals; locals; entry; exit }
 
     let defs { formals; locals; _ } = List.append formals locals
   end
@@ -166,7 +166,7 @@ module Fn = struct
 
     let empty = Map.empty (module T_comparator)
 
-    let fn_by_method_id method_id = keys >> List.find ~f:(name >> String.equal method_id)
+    let fn_by_method_id method_id = keys >> List.find ~f:(name >> Method_id.equal method_id)
   end
 end
 
@@ -186,9 +186,11 @@ let add_fn fn ~edges prgm =
   set_fn_cfg fn ~cfg prgm
 
 let remove_fn method_id prgm =
-  match List.find (Fn.Map.keys prgm) ~f:(Fn.name >> String.equal method_id) with
+  match List.find (Fn.Map.keys prgm) ~f:(Fn.name >> Method_id.equal method_id) with
   | Some fn -> Fn.Map.remove prgm fn
-  | None -> failwith (Format.asprintf "Can't remove function %s: does not exist in CFG" method_id)
+  | None ->
+      failwith
+        (Format.asprintf "Can't remove function %a: does not exist in CFG" Method_id.pp method_id)
 
 let retvar = "RETVAR"
 
@@ -320,8 +322,9 @@ let dump_dot_interproc ?print ~filename (cfg : t Fn.Map.t) =
   if Option.is_none print then Unix.close output_fd
 
 (** Given a program [cfg] and a location [loc] therein, return those sequences of callsites such that [loc] is reachable from the program entry with that sequence on the stack *)
-let rec call_chains_to ~loc ~cfg : G.edge list list =
-  match containing_fn loc cfg with
+let call_chains_to ~loc:_ ~cfg:_ : G.edge list list = failwith "todo"
+
+(*  match containing_fn loc cfg with
   | None -> [ [] ] (* in main function, reachable with empty stack *)
   | Some fn ->
       (* in other function; recursively get chains to each of its callers, appending that caller to each chain*)
@@ -335,7 +338,7 @@ let rec call_chains_to ~loc ~cfg : G.edge list list =
       |> Seq.to_list
       |> List.bind ~f:(fun caller ->
              call_chains_to ~loc:(G.Edge.src caller) ~cfg |> List.(map ~f:(cons caller)))
-
+*)
 (* module Interpreter (Dom : sig
      include Abstract.Dom
    end) =

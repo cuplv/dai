@@ -3,23 +3,23 @@ open Syntax
 open Tree_sitter_java
 
 type edit =
-  | Add_function of { method_id : string; method_decl : CST.method_declaration }
-  | Delete_function of { method_id : string }
-  | Modify_function of { method_id : string; new_header : CST.method_header }
-  | Add_statements of { method_id : string; at_loc : Cfg.Loc.t; stmts : CST.statement list }
+  | Add_function of { method_id : Method_id.t; method_decl : CST.method_declaration }
+  | Delete_function of { method_id : Method_id.t }
+  | Modify_function of { method_id : Method_id.t; new_header : CST.method_header }
+  | Add_statements of { method_id : Method_id.t; at_loc : Cfg.Loc.t; stmts : CST.statement list }
   | Modify_statements of {
-      method_id : string;
+      method_id : Method_id.t;
       from_loc : Cfg.Loc.t;
       to_loc : Cfg.Loc.t;
       new_stmts : CST.statement list;
     }
   | Modify_header of {
-      method_id : string;
+      method_id : Method_id.t;
       at_loc : Cfg.Loc.t;
       stmt : CST.statement;
       loop_body_exit : Cfg.Loc.t option;
     }
-  | Delete_statements of { method_id : string; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
+  | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
 
 type t = edit list
 

@@ -23,13 +23,26 @@ val of_file_exn : filename:string -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
 
 val of_method_decl :
   Loc_map.t ->
-  class_prefix:string ->
+  ?package:string list ->
+  class_name:string ->
   CST.method_declaration ->
   (Loc_map.t * edge list * Cfg.Fn.t) option
 (** construct a procedure's CFG from its declaration's concrete syntax tree *)
 
+val of_constructor_decl :
+  Loc_map.t ->
+  ?package:string list ->
+  class_name:string ->
+  CST.constructor_declarator ->
+  CST.constructor_body ->
+  (Loc_map.t * edge list * Cfg.Fn.t) option
+(** construct a constructor's CFG from its declaration's concrete syntax tree *)
+
+val types_of_formals : CST.formal_parameters -> string list
+(** simpler representation of a formal parameter list, for distinguishing overloading *)
+
 val edge_list_of_stmt_list :
-  string ->
+  Method_id.t ->
   Loc_map.t ->
   entry:Cfg.Loc.t ->
   exit:Cfg.Loc.t ->
@@ -37,7 +50,17 @@ val edge_list_of_stmt_list :
   CST.program ->
   Loc_map.t * edge list
 
-(* Return value is composed of:
+val for_loop_header :
+  Method_id.t ->
+  body_entry:Cfg.Loc.t ->
+  body_exit:Cfg.Loc.t ->
+  entry:Cfg.Loc.t ->
+  exit:Cfg.Loc.t ->
+  ret:Cfg.Loc.t ->
+  Loc_map.t ->
+  CST.for_statement ->
+  Loc_map.t * edge list * edge
+(** Return value is composed of:
    (1) updated loc_map,
    (2) all CFG edges for the for-loop excluding its body,
    (3) the back edge from the update back up to the condition.
@@ -48,13 +71,3 @@ val edge_list_of_stmt_list :
 
    Analogs to this function are not needed for conditional/while-loop headers because those can easily be identified from the CFG structure.
 *)
-val for_loop_header :
-  string ->
-  body_entry:Cfg.Loc.t ->
-  body_exit:Cfg.Loc.t ->
-  entry:Cfg.Loc.t ->
-  exit:Cfg.Loc.t ->
-  ret:Cfg.Loc.t ->
-  Loc_map.t ->
-  CST.for_statement ->
-  Loc_map.t * edge list * edge

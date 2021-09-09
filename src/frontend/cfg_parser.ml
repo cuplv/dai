@@ -345,11 +345,12 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret stmt : Loc_map.t * ed
     match Loc_map.add method_id stmt { entry; exit; ret } loc_map with
     | `Ok lm -> lm
     | `Collision ->
-        Format.print_string
-          "WARNING: todo: two syntactically-identical statements in the same method. handle this \
-           case if it comes up in evaluation.  Perhaps by enumerating the occurrences \
-           topologically to disambiguate, storing a sequence of loc_ctx's for the statement and \
-           scanning parse trees for the order as needed?\n";
+        Format.(fprintf std_formatter)
+          "WARNING: todo: two syntactically-identical statements in method %a. handle this case if \
+           it comes up in evaluation.  Perhaps by enumerating the occurrences topologically to \
+           disambiguate, storing a sequence of loc_ctx's for the statement and scanning parse \
+           trees for the order as needed?\n"
+          Method_id.pp method_id;
         loc_map
   in
   match stmt with
@@ -500,47 +501,118 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret loc_map :
       :: (init_intermediate_stmts @ update_intermediate_stmts @ cond_intermediate_stmts)
       |> fun edges -> (loc_map, edges, back_edge)
 
-let of_method_decl loc_map ~class_prefix (md : CST.method_declaration) =
+let parse_formals = function
+  | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
+      let formal_name = function
+        | `Formal_param (_mods, _type, (`Id (_, id), _dims)) -> id
+        | _ -> failwith "spread params not yet handled"
+      in
+      List.fold rest ~init:[ formal_name first ] ~f:(fun acc curr ->
+          (snd curr |> formal_name) :: acc)
+  | _, _, None, _ -> []
+
+let types_of_formals = function
+  | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
+      let rec string_of_unannotated_type =
+        let string_of_simple_type = function
+          | `Void_type _ -> "void"
+          | `Inte_type (`Byte _) -> "byte"
+          | `Inte_type (`Short _) -> "short"
+          | `Inte_type (`Int _) -> "int"
+          | `Inte_type (`Long _) -> "long"
+          | `Inte_type (`Char _) -> "char"
+          | `Floa_point_type (`Float _) -> "float"
+          | `Floa_point_type (`Double _) -> "double"
+          | `Bool_type _ -> "boolean"
+          | `Id (_, ident) -> ident
+          | `Scoped_type_id _ -> failwith "todo: scoped type identifiers"
+          | `Gene_type _ -> failwith "todo: generic types"
+        in
+        function
+        | `Choice_void_type st -> string_of_simple_type st
+        | `Array_type (ut, _) -> string_of_unannotated_type ut ^ "[]"
+      in
+      let type_of_formal = function
+        | `Spread_param _ -> failwith "spread params not yet handled"
+        | `Formal_param (_mods, t, _) -> string_of_unannotated_type t
+      in
+      List.fold rest ~init:[ type_of_formal first ] ~f:(fun acc curr ->
+          (snd curr |> type_of_formal) :: acc)
+  | _, _, None, _ -> []
+
+let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declaration) =
   match md with
   | _modifiers, (_tparams, _type, (`Id (_, method_name), formals, _), _throws), `Blk (_, stmts, _)
     ->
-      let name = class_prefix ^ "#" ^ method_name in
-      let formals =
-        match formals with
-        | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
-            let formal_name = function
-              | `Formal_param (_mods, _type, (`Id (_, id), _dims)) -> id
-              | _ -> failwith "spread params not yet handled"
-            in
-            List.fold rest ~init:[ formal_name first ] ~f:(fun acc curr ->
-                (snd curr |> formal_name) :: acc)
-        | _, _, None, _ -> []
-      in
-      let locals = declarations stmts in
       let entry = Cfg.Loc.fresh () in
       let exit = Cfg.Loc.fresh () in
-      let fn : Cfg.Fn.t = { name; formals; locals; entry; exit } in
-      let loc_map, edges = edge_list_of_stmt_list name loc_map ~entry ~exit ~ret:exit stmts in
+      let arg_types = types_of_formals formals in
+      let formals = parse_formals formals in
+      let locals = declarations stmts in
+      let method_id : Method_id.t = { package; class_name; method_name; arg_types } in
+      let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit } in
+      let loc_map, edges = edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit stmts in
       Some (loc_map, edges, fn)
   | _, (_, _, (`Choice_open _, _, _), _), _ -> None
   | _, _, `SEMI _ -> None
 
+let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructor_declarator)
+    (body : CST.constructor_body) =
+  match (cd, body) with
+  | (_tparams, _, formals), (_, explicit_constructor_invo, stmts, _) ->
+      let entry = Cfg.Loc.fresh () in
+      let exit = Cfg.Loc.fresh () in
+      let arg_types = types_of_formals formals in
+      let formals = parse_formals formals in
+      let locals = declarations stmts in
+      let method_id : Method_id.t = { package; class_name; method_name = "<init>"; arg_types } in
+      let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit } in
+      let loc_map, edges =
+        match explicit_constructor_invo with
+        | None -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit stmts
+        | Some (`Opt_type_args_choice_this (_typargs, `This _), args, _) ->
+            let args = match args with _, Some (e, es), _ -> e :: List.map ~f:snd es | _ -> [] in
+            let actuals, (pre_invocation_loc, pre_invocation_edges) =
+              List.fold args
+                ~init:([], (entry, []))
+                ~f:(fun (acc_exprs, (curr_loc, acc_intermediates)) arg ->
+                  let arg_expr, (curr_loc, arg_intermediates) = expr curr_loc arg in
+                  (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
+            in
+            let post_invocation_loc = Cfg.Loc.fresh () in
+            let loc_map, body_edges =
+              edge_list_of_stmt_list method_id loc_map ~entry:post_invocation_loc ~exit ~ret:exit
+                stmts
+            in
+            let invocation =
+              ( pre_invocation_loc,
+                post_invocation_loc,
+                Ast.Stmt.Call { lhs = "this"; rcvr = "this"; meth = "<init>"; actuals } )
+            in
+            (loc_map, invocation :: (pre_invocation_edges @ body_edges))
+        | Some _ -> failwith "TODO: unrecognized explicit constructor invocation"
+      in
+
+      Some (loc_map, edges, fn)
+
 let rec parse_class_decl ?(parent_class_name = None) loc_map :
     CST.class_declaration -> Loc_map.t * (edge list * Cfg.Fn.t) list = function
   | _modifiers, _, (_, class_name), _type_params, _superclass, _superinterfaces, (_, decls, _) ->
-      let class_prefix =
+      let class_name =
         match parent_class_name with Some n -> n ^ "#" ^ class_name | None -> class_name
       in
       List.fold decls ~init:(loc_map, []) ~f:(fun (loc_map, acc) -> function
         | `Meth_decl md -> (
-            match of_method_decl loc_map ~class_prefix md with
+            match of_method_decl loc_map ~class_name md with
             | Some (lm, es, fn) -> (lm, (es, fn) :: acc)
             | None -> (loc_map, acc) )
         | `Class_decl cd ->
-            let loc_map, decls =
-              parse_class_decl ~parent_class_name:(Some class_prefix) loc_map cd
-            in
+            let loc_map, decls = parse_class_decl ~parent_class_name:(Some class_name) loc_map cd in
             (loc_map, decls @ acc)
+        | `Cons_decl (_, cd, _, body) -> (
+            match of_constructor_decl loc_map ~class_name cd body with
+            | Some (lm, es, fn) -> (lm, (es, fn) :: acc)
+            | None -> (loc_map, acc) )
         | `Field_decl (_, _, _, _) -> (loc_map, acc)
         | d ->
             failwith
@@ -589,4 +661,13 @@ let%test "nested loops" =
        match res with
        | Error _ -> ()
        | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfg)
+  |> Result.is_ok
+
+let%test "constructors" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Constructors.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (fun res ->
+       match res with
+       | Error _ -> ()
+       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfg)
   |> Result.is_ok
