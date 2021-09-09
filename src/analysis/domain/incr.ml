@@ -3,9 +3,9 @@ open Import
 open Syntax
 
 module Make (Dom : sig
-  include Abstract.DomNoCtx
+  include Abstract.Dom
 end) : sig
-  include Abstract.DomNoCtx
+  include Abstract.Dom
 
   val lift : Dom.t -> t
 end = struct
@@ -34,7 +34,7 @@ end = struct
 end
 
 module Make_env (Val : Abstract.Val) : sig
-  include Abstract.DomNoCtx
+  include Abstract.Dom
 end = struct
   module Env = Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (Val)
   include Adapton.Types.Option (Env)
@@ -157,7 +157,7 @@ end = struct
     | None -> Format.print_string "bottom"
 end
 
-module Make_env_with_heap (Val : Abstract.Val) : Abstract.DomNoCtx = struct
+module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
   module AAddr_or_val = struct
     include Adapton.Types.Sum2 (Addr.Abstract) (Val)
 

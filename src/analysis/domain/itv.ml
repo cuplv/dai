@@ -54,7 +54,9 @@ let join l r =
 (* Do not eta-reduce! Will break lazy manager allocation *)
 let widen l r =
   let l, r = combine_envs l r in
-  Abstract1.widening (get_man ()) l r
+  let man = get_man () in
+  (* check that [r] is included in [l] before widening (just returning [l] if not), since APRON's widening assumes that to be the case *)
+  if Abstract1.is_leq man r l then l else Abstract1.widening man l r
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let equal l r =
@@ -76,9 +78,16 @@ let bindings (itv : t) =
   let vars = Environment.vars box.box1_env |> uncurry Array.append in
   Array.zip_exn vars box.interval_array
 
+let pp_interval fs (interval : Interval.t) =
+  let truncate scalar =
+    let s = Scalar.to_string scalar in
+    if String.length s > 5 then String.prefix s 5 ^ "..." else s
+  in
+  Format.fprintf fs "[%s, %s]" (truncate interval.inf) (truncate interval.sup)
+
 let pp fs itv =
   if is_bot itv then Format.fprintf fs "bottom"
-  else bindings itv |> Array.pp "@," (pp_pair Var.print Interval.print) fs
+  else bindings itv |> Array.pp "@," (pp_pair Var.print pp_interval) fs
 
 let sexp_of_t (itv : t) =
   let sexps =

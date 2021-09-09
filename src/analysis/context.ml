@@ -8,14 +8,14 @@ let get_callee_unsafe stmt =
   | Ast.Stmt.Call { meth; _ } -> meth
   | _ -> failwith "can't get callee of non-call statement"
 
-module type CtxFunctor = functor (Dom : Abstract.DomNoCtx) -> sig
-  include Abstract.Dom with type t := Dom.t
+module type CtxFunctor = functor (Dom : Abstract.Dom) -> sig
+  include Abstract.CtxSensitiveDom with type t := Dom.t
 
   type t = Dom.t
 end
 
-module MakeInsensitive (Dom : Abstract.DomNoCtx) : sig
-  include Abstract.Dom with type t := Dom.t
+module MakeInsensitive (Dom : Abstract.Dom) : sig
+  include Abstract.CtxSensitiveDom with type t := Dom.t
 
   type t = Dom.t
 end = struct
@@ -42,8 +42,8 @@ end = struct
   end
 end
 
-module Make1CFA (Dom : Abstract.DomNoCtx) : sig
-  include Abstract.Dom with type t := Dom.t
+module Make1CFA (Dom : Abstract.Dom) : sig
+  include Abstract.CtxSensitiveDom with type t := Dom.t
 
   type t = Dom.t
 end = struct
@@ -76,8 +76,8 @@ end = struct
   end
 end
 
-module Make2CFA (Dom : Abstract.DomNoCtx) : sig
-  include Abstract.Dom with type t := Dom.t
+module Make2CFA (Dom : Abstract.Dom) : sig
+  include Abstract.CtxSensitiveDom with type t := Dom.t
 
   type t = Dom.t
 end = struct

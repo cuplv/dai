@@ -197,9 +197,9 @@ module Make (Dom : Abstract.DomNoCtx) = struct
 
       type t = Set.M(T_comparator).t [@@deriving compare]
 
-      let _empty = Set.empty (module T_comparator)
+      let empty = Set.empty (module T_comparator)
 
-      let _singleton = Set.singleton (module T_comparator)
+      let singleton = Set.singleton (module T_comparator)
     end
   end
 
@@ -520,7 +520,7 @@ module Make (Dom : Abstract.DomNoCtx) = struct
         )
     | _ -> failwith "error: multiple refs found at given location"
 
-  let _increment_iteration loop_head =
+  let increment_iteration loop_head =
     let rec incr_iter_ctx = function
       | [] -> failwith "loop_head not found in iter_ctx"
       | (i, l) :: ctx when Cfg.Loc.equal l loop_head -> (i + 1, l) :: ctx
@@ -535,82 +535,83 @@ module Make (Dom : Abstract.DomNoCtx) = struct
     | n -> n
 
   (* Transform the DAIG [g] by unrolling one step further the loop whose current abstract iterate is at [curr_iter] *)
-  let unroll_loop (_daig : t) (_curr_iter : Ref.t) = failwith "todo: update for hodaigs"
+  let unroll_loop (daig : t) (curr_iter : Ref.t) =
+    (* First, find the entire previous unrolling [loop_edges]: all DAIG edges backwards-reachable from [curr_iter] without going through the previous iteration *)
+    let curr_idx, loop_head =
+      match Ref.name curr_iter with
+      | Name.(Iterate (ic, Loc l)) -> (List.find_exn ic ~f:(snd >> Cfg.Loc.equal l) |> fst, l)
+      | _ -> failwith "Current iterate [curr_iter] must be an iterate."
+    in
+    let fixpoint = ref_by_name_exn (Name.unset_iterate loop_head (Ref.name curr_iter)) daig in
+    let prev_iter =
+      ref_by_name_exn (Name.set_iterate (curr_idx - 1) loop_head (Ref.name curr_iter)) daig
+    in
+    let next_iter =
+      Ref.AState { state = None; name = increment_iteration loop_head (Ref.name curr_iter) }
+    in
+    let curr_pre_widen =
+      ref_by_name_exn (Name.Prod (Ref.name prev_iter, Ref.name curr_iter)) daig
+    in
+    let next_pre_widen =
+      Ref.AState { state = None; name = Name.Prod (Ref.name curr_iter, Ref.name next_iter) }
+    in
 
-  (* let g, cfg = daig in
-     (* First, find the entire previous unrolling [loop_edges]: all DAIG edges backwards-reachable from [curr_iter] without going through the previous iteration *)
-     let curr_idx, loop_head =
-       match Ref.name curr_iter with
-       | Name.Iterate (n, l) -> (n, l)
-       | _ -> failwith "Current iterate [curr_iter] must be an iterate."
-     in
-     let fixpoint = ref_by_name_exn loop_head daig in
-     let prev_iter = ref_by_name_exn (Name.Iterate (curr_idx - 1, loop_head)) daig in
-     let next_iter =
-       Ref.AState { state = None; name = increment_iteration loop_head (Ref.name curr_iter) }
-     in
-     let curr_pre_widen =
-       ref_by_name_exn (Name.Prod (Ref.name prev_iter, Ref.name curr_iter)) daig
-     in
-     let next_pre_widen =
-       Ref.AState { state = None; name = Name.Prod (Ref.name curr_iter, Ref.name next_iter) }
-     in
+    let rec get_loop frontier nodes edges =
+      if Set.is_empty frontier then (nodes, edges)
+      else
+        let process_node acc n =
+          Seq.fold (G.Node.inputs n daig) ~init:acc ~f:(fun (f, ns, es) e ->
+              let pred = G.Edge.src e in
+              if not (Ref.equal pred prev_iter || Set.mem ns pred) then
+                (Set.add f pred, Set.add ns pred, Set.add es e)
+              else (f, ns, Set.add es e))
+        in
+        (uncurry3 get_loop) (Set.fold frontier ~init:(Ref.Set.empty, nodes, edges) ~f:process_node)
+    in
+    let init_frontier = Ref.Set.singleton curr_pre_widen in
+    let init_nodes = Ref.Set.empty in
+    let init_edges = G.Edge.Set.empty in
 
-     let rec get_loop frontier nodes edges =
-       if Set.is_empty frontier then (nodes, edges)
-       else
-         let process_node acc n =
-           Seq.fold (G.Node.inputs n g) ~init:acc ~f:(fun (f, ns, es) e ->
-               let pred = G.Edge.src e in
-               if not (Ref.equal pred prev_iter || Set.mem ns pred) then
-                 (Set.add f pred, Set.add ns pred, Set.add es e)
-               else (f, ns, Set.add es e))
-         in
-         (uncurry3 get_loop) (Set.fold frontier ~init:(Ref.Set.empty, nodes, edges) ~f:process_node)
-     in
-     let init_frontier = Ref.Set.singleton curr_pre_widen in
-     let init_nodes = Ref.Set.empty in
-     let init_edges = G.Edge.Set.empty in
+    let curr_iter_loop_nodes, curr_iter_loop_edges = get_loop init_frontier init_nodes init_edges in
 
-     let curr_iter_loop_nodes, curr_iter_loop_edges = get_loop init_frontier init_nodes init_edges in
+    (* Then, construct a copy of those nodes and edges, incrementing the loop iteration for AState refs and reusing Stmt refs. *)
+    let new_fix_and_widen_edges =
+      [
+        G.Edge.create curr_iter fixpoint `Fix;
+        G.Edge.create next_iter fixpoint `Fix;
+        G.Edge.create next_pre_widen next_iter `Widen;
+        G.Edge.create curr_iter next_iter `Widen;
+      ]
+    in
 
-     (* Then, construct a copy of those nodes and edges, incrementing the loop iteration for AState refs and reusing Stmt refs. *)
-     let new_fix_and_widen_edges =
-       [
-         G.Edge.create curr_iter fixpoint `Fix;
-         G.Edge.create next_iter fixpoint `Fix;
-         G.Edge.create next_pre_widen next_iter `Widen;
-         G.Edge.create curr_iter next_iter `Widen;
-       ]
-     in
+    let all_new_refs =
+      Set.fold curr_iter_loop_nodes ~init:[ next_iter; next_pre_widen ] ~f:(fun acc -> function
+        | Ref.AState { state = _; name } ->
+            Ref.AState { state = None; name = increment_iteration loop_head name } :: acc
+        | _ -> acc)
+    in
+    let ref_of_name n = List.find_exn all_new_refs ~f:(Ref.name >> Name.equal n) in
 
-     let all_new_refs =
-       Set.fold curr_iter_loop_nodes ~init:[ next_iter; next_pre_widen ] ~f:(fun acc -> function
-         | Ref.AState { state = _; name } ->
-             Ref.AState { state = None; name = increment_iteration loop_head name } :: acc
-         | _ -> acc)
-     in
-     let ref_of_name n = List.find_exn all_new_refs ~f:(Ref.name >> Name.equal n) in
+    let daig = List.fold all_new_refs ~init:daig ~f:(fun acc n -> G.Node.insert n acc) in
 
-     let g = List.fold all_new_refs ~init:g ~f:(fun acc n -> G.Node.insert n acc) in
-
-     let all_new_edges =
-       Set.fold curr_iter_loop_edges ~init:new_fix_and_widen_edges ~f:(fun acc e ->
-           let dst = G.Edge.dst e |> Ref.name |> increment_iteration loop_head |> ref_of_name in
-           let src =
-             let prev_iter_name = Ref.name prev_iter in
-             match G.Edge.src e with
-             | Ref.Stmt _ as src -> src
-             | Ref.AState { state = _; name } ->
-                 if Name.equal name prev_iter_name then curr_iter
-                 else ref_of_name @@ increment_iteration loop_head name
-           in
-           G.Edge.create src dst (G.Edge.label e) :: acc)
-     in
-     (* Finally, remove the old "fix" edges and add the newly constructed edges. Incident nodes are added automatically.*)
-     let g_without_fix_edges = Seq.fold (G.Node.inputs fixpoint g) ~init:g ~f:(flip G.Edge.remove) in
-     List.fold all_new_edges ~init:g_without_fix_edges ~f:(flip G.Edge.insert) |> flip pair cfg
-  *)
+    let all_new_edges =
+      Set.fold curr_iter_loop_edges ~init:new_fix_and_widen_edges ~f:(fun acc e ->
+          let dst = G.Edge.dst e |> Ref.name |> increment_iteration loop_head |> ref_of_name in
+          let src =
+            let prev_iter_name = Ref.name prev_iter in
+            match G.Edge.src e with
+            | Ref.Stmt _ as src -> src
+            | Ref.AState { state = _; name } ->
+                if Name.equal name prev_iter_name then curr_iter
+                else ref_of_name @@ increment_iteration loop_head name
+          in
+          G.Edge.create src dst (G.Edge.label e) :: acc)
+    in
+    (* Finally, remove the old "fix" edges and add the newly constructed edges. Incident nodes are added automatically.*)
+    let daig_without_fix_edges =
+      Seq.fold (G.Node.inputs fixpoint daig) ~init:daig ~f:(flip G.Edge.remove)
+    in
+    List.fold all_new_edges ~init:daig_without_fix_edges ~f:(flip G.Edge.insert)
 
   let dirty_from (r : Ref.t) (daig : t) (fn : Cfg.Fn.t) =
     let change_prop_step acc n =

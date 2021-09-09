@@ -26,7 +26,7 @@ module type Val = sig
   val models : t -> Ast.Lit.t -> bool
 end
 
-module type DomNoCtx = sig
+module type Dom = sig
   type t [@@deriving compare, equal, hash, sexp]
 
   include Adapton.Data.S with type t := t
@@ -53,8 +53,8 @@ module type DomNoCtx = sig
     caller_state:t -> return_state:t -> callsite:Ast.Stmt.t -> callee_defs:string list -> t
 end
 
-module type Dom = sig
-  include DomNoCtx
+module type CtxSensitiveDom = sig
+  include Dom
 
   module Ctx : sig
     type dom = t
