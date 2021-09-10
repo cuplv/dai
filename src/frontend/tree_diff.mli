@@ -38,4 +38,4 @@ type cfg_edit_result = {
   added_for_loop_backedge : Cfg_parser.edge option;
 }
 
-val apply_edit : edit -> Loc_map.t -> Cfg.t -> ret:Cfg.Loc.t -> cfg_edit_result
+val apply_edit : edit -> Loc_map.t -> Cfg.t -> ret:Cfg.Loc.t -> exc:Cfg.Loc.t -> cfg_edit_result

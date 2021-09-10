@@ -149,13 +149,12 @@ let interpret stmt phi =
   | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
       Some (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
   | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } ->
-      let addr = Addr.of_alloc_site alloc_site in
       let am =
         Map.change am lhs ~f:(function
-          | Some old_aaddr -> Some (Addr.Abstract.add old_aaddr addr)
-          | None -> Some (Addr.Abstract.singleton addr))
+          | Some old_aaddr -> Some (Addr.Abstract.add old_aaddr alloc_site)
+          | None -> Some (Addr.Abstract.singleton alloc_site))
       in
-      let array_len_var = [| apron_var_of_array_len addr |] in
+      let array_len_var = [| apron_var_of_array_len alloc_site |] in
       let env = Environment.lce (Abstract1.env itv) (Environment.make [||] array_len_var) in
       let array_length_binding =
         Abstract1.of_box man env array_len_var
@@ -216,7 +215,7 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
     | Expr.Binop { l; op = _; r } -> expr_derefs l @ expr_derefs r
     | Expr.Unop { op = _; e } -> expr_derefs e
     | Expr.Array_literal { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
-    | Expr.Array_access _ -> failwith "todo"
+    | Expr.Array_access _ | Expr.Array_create _ -> failwith "todo"
   in
   function
   | Assign { lhs = _; rhs } -> expr_derefs rhs

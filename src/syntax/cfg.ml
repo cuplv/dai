@@ -5,10 +5,6 @@ module Loc = struct
   module T : sig
     type t [@@deriving equal, compare, hash, sexp]
 
-    val entry : t
-
-    val exit : t
-
     val fresh : unit -> t
 
     val sample : unit -> t
@@ -24,10 +20,6 @@ module Loc = struct
     val to_string : t -> string
   end = struct
     type t = int [@@deriving equal, compare, hash, sexp]
-
-    let entry = 0
-
-    let exit = -1
 
     let next = ref 1
 
@@ -46,11 +38,7 @@ module Loc = struct
       next := curr + 1;
       curr
 
-    let pp fs l =
-      match l with
-      | 0 -> Format.fprintf fs "entry"
-      | -1 -> Format.fprintf fs "exit"
-      | _ -> Format.fprintf fs "l%i" l
+    let pp fs l = Format.fprintf fs "l%i" l
 
     let to_string l =
       pp Format.str_formatter l;
@@ -108,6 +96,7 @@ module Fn = struct
       locals : string list;
       entry : Loc.t;
       exit : Loc.t;
+      exc_exit : Loc.t;
     }
     [@@deriving compare, equal, hash, sexp_of]
 
@@ -121,15 +110,17 @@ module Fn = struct
 
     let exit { exit; _ } = exit
 
+    let exc_exit { exc_exit; _ } = exc_exit
+
     let pp fs { method_id; formals; _ } =
       Format.fprintf fs "%a(%a)" Method_id.pp method_id (List.pp ", " String.pp) formals
 
-    let make ~method_id ~formals ~entry ~exit ~body =
+    let make ~method_id ~formals ~entry ~exit ~exc_exit ~body =
       let locals =
         List.fold body ~init:[] ~f:(fun locals (_, _, stmt) ->
             Option.cons (Ast.Stmt.def stmt) locals)
       in
-      { method_id; formals; locals; entry; exit }
+      { method_id; formals; locals; entry; exit; exc_exit }
 
     let defs { formals; locals; _ } = List.append formals locals
   end
@@ -192,7 +183,9 @@ let remove_fn method_id prgm =
       failwith
         (Format.asprintf "Can't remove function %a: does not exist in CFG" Method_id.pp method_id)
 
-let retvar = "RETVAR"
+let retvar = "RET_VAR"
+
+let exc_retvar = "EXCEPTIONAL_RET_VAR"
 
 let containing_fn loc (cfg, fns) =
   Fn.Set.find fns ~f:(fun fn -> Graph.is_reachable (module G) cfg (Fn.entry fn) loc)

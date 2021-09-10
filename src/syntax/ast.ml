@@ -98,7 +98,8 @@ module Expr = struct
     | Unop of { op : Unop.t; e : t }
     | Deref of { rcvr : t; field : ident }
     | Array_access of { rcvr : t; idx : t }
-    | Array_literal of { elts : t list; alloc_site : int * int }
+    | Array_literal of { elts : t list; alloc_site : Alloc_site.t }
+    | Array_create of { elt_type : string; size : t; alloc_site : Alloc_site.t }
   [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
@@ -109,9 +110,10 @@ module Expr = struct
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
     | Deref { rcvr; field } -> Format.fprintf fs "%a.%s" pp rcvr field
     | Array_access { rcvr; idx } -> Format.fprintf fs "%a[%a]" pp rcvr pp idx
-    | Array_literal { elts; alloc_site = line, col } ->
-        (List.pp ", " ~pre:"[" ~suf:"]" pp) fs elts;
-        Format.fprintf fs "%@(%i,%i)" line col
+    | Array_literal { elts; alloc_site } ->
+        Format.fprintf fs "%a%@%a" (List.pp ", " ~pre:"{" ~suf:"}" pp) elts Alloc_site.pp alloc_site
+    | Array_create { elt_type; size; alloc_site } ->
+        Format.fprintf fs "new@%a %a[%a]" Alloc_site.pp alloc_site String.pp elt_type pp size
 
   let rec uses =
     let uses_in_list exprs =
@@ -124,6 +126,7 @@ module Expr = struct
     | Deref { rcvr; field = _ } -> uses rcvr
     | Array_literal { elts; alloc_site = _ } -> uses_in_list elts
     | Array_access { rcvr; idx } -> Set.union (uses rcvr) (uses idx)
+    | Array_create { elt_type = _; size; alloc_site = _ } -> uses size
     | _ -> String.Set.empty
 
   (** fold hash as int, rather than as Ppx_hash_lib.Std.Hash.state *)

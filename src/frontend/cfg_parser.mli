@@ -47,6 +47,7 @@ val edge_list_of_stmt_list :
   entry:Cfg.Loc.t ->
   exit:Cfg.Loc.t ->
   ret:Cfg.Loc.t ->
+  exc:Cfg.Loc.t ->
   CST.program ->
   Loc_map.t * edge list
 
@@ -57,6 +58,7 @@ val for_loop_header :
   entry:Cfg.Loc.t ->
   exit:Cfg.Loc.t ->
   ret:Cfg.Loc.t ->
+  exc:Cfg.Loc.t ->
   Loc_map.t ->
   CST.for_statement ->
   Loc_map.t * edge list * edge

@@ -67,7 +67,7 @@ module Range = Patience_diff_lib.Patience_diff.Range
 let loc_range method_id loc_map stmts =
   assert (Array.length stmts > 0);
   Array.fold stmts ~init:None ~f:(fun removed_range curr_stmt ->
-      let ({ entry = curr_entry; exit = curr_exit; ret = _ } : Loc_map.loc_ctx) =
+      let ({ entry = curr_entry; exit = curr_exit; ret = _; exc = _ } : Loc_map.loc_ctx) =
         Loc_map.get method_id curr_stmt loc_map
       in
       match removed_range with
@@ -98,7 +98,8 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
       | _ -> None
     in
     match pred_opt with
-    | Some pred -> Loc_map.get method_id pred loc_map |> fun { entry = _; exit; ret = _ } -> exit
+    | Some pred ->
+        Loc_map.get method_id pred loc_map |> fun { entry = _; exit; ret = _; exc = _ } -> exit
     | None ->
         let succ =
           match List.nth ranges (idx + 1) with
@@ -106,7 +107,7 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
           | Some (Replace (succs, _)) | Some (Prev succs) -> get succs 0
           | _ -> failwith "unable to find CFG location for \"Next\" range from patdiff"
         in
-        Loc_map.get method_id succ loc_map |> fun { entry; exit = _; ret = _ } -> entry
+        Loc_map.get method_id succ loc_map |> fun { entry; exit = _; ret = _; exc = _ } -> entry
   in
   List.foldi ranges ~init:[] ~f:(fun idx acc_edits -> function
     | Prev stmts ->
@@ -285,7 +286,7 @@ type cfg_edit_result = {
   added_for_loop_backedge : Cfg_parser.edge option;
 }
 
-let apply_edit edit loc_map cfg ~ret : cfg_edit_result =
+let apply_edit edit loc_map cfg ~ret ~exc : cfg_edit_result =
   let edit_result ?added_loc ?(added_for_loop_backedge = None) ?(added_edges = [])
       ?(deleted_edges = []) cfg new_loc_map : unit -> cfg_edit_result =
    fun () -> { cfg; new_loc_map; added_edges; deleted_edges; added_loc; added_for_loop_backedge }
@@ -304,7 +305,8 @@ let apply_edit edit loc_map cfg ~ret : cfg_edit_result =
       in
       let loc_map = Loc_map.rebase_edges method_id ~old_src:at_loc ~new_src:fresh_loc loc_map in
       let loc_map, added_edges =
-        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:at_loc ~exit:fresh_loc ~ret stmts
+        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:at_loc ~exit:fresh_loc ~ret ~exc
+          stmts
       in
       let cfg =
         Sequence.fold old_succ_edges ~init:cfg ~f:(flip Cfg.G.Edge.remove) |> fun init ->
@@ -324,7 +326,7 @@ let apply_edit edit loc_map cfg ~ret : cfg_edit_result =
       let loc_map = Loc_map.remove_region method_id deleted_locs loc_map in
       (* generate CFG edges for [new_stmts] with entry=from_loc, exit=to_loc, ret=(method_id.exit) *)
       let loc_map, added_edges =
-        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:from_loc ~exit:to_loc ~ret
+        Cfg_parser.edge_list_of_stmt_list method_id loc_map ~entry:from_loc ~exit:to_loc ~ret ~exc
           new_stmts
       in
       let cfg =
@@ -404,8 +406,8 @@ let apply_edit edit loc_map cfg ~ret : cfg_edit_result =
             let exit = Cfg.G.Edge.dst cond_neg in
             let body_entry = Cfg.G.Edge.dst cond in
             let loc_map, new_header, back_edge =
-              Cfg_parser.for_loop_header method_id ~entry ~exit ~ret ~body_entry ~body_exit loc_map
-                f
+              Cfg_parser.for_loop_header method_id ~entry ~exit ~ret ~body_entry ~body_exit ~exc
+                loc_map f
             in
             (loc_map, all_edges, new_header, Some back_edge)
         | _ -> failwith "unrecognized statement type in Modify_header tree-diff"
@@ -463,9 +465,11 @@ let apply diff loc_map cfgs =
             match new_header with _ -> failwith "todo: modify function header"
           in
           match Cfg.Fn.Map.fn_by_method_id method_id cfgs with
-          | Some ({ method_id = _; formals = _; locals; entry; exit } as old_fn) ->
+          | Some ({ method_id = _; formals = _; locals; entry; exit; exc_exit } as old_fn) ->
               let old_fn_cfg = Cfg.Fn.Map.find_exn cfgs old_fn in
-              let fn : Cfg.Fn.t = { method_id = new_method_id; formals; locals; entry; exit } in
+              let fn : Cfg.Fn.t =
+                { method_id = new_method_id; formals; locals; entry; exit; exc_exit }
+              in
               let cfgs = Cfg.remove_fn method_id cfgs in
               (loc_map, Cfg.set_fn_cfg fn ~cfg:old_fn_cfg cfgs)
           | None ->
@@ -479,7 +483,9 @@ let apply diff loc_map cfgs =
               failwith (Format.asprintf "can't modify unknown function %a" Method_id.pp method_id)
           | Some fn ->
               let old_fn_cfg = Cfg.Fn.Map.find_exn cfgs fn in
-              let { cfg; new_loc_map; _ } = apply_edit ~ret:fn.exit edit lm old_fn_cfg in
+              let { cfg; new_loc_map; _ } =
+                apply_edit ~ret:fn.exit ~exc:fn.exc_exit edit lm old_fn_cfg
+              in
               (new_loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:cfg) ))
 
 open Result

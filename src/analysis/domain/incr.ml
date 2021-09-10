@@ -73,7 +73,7 @@ end = struct
     | Expr.Lit l -> Val.of_lit l
     | Expr.Binop { l; op; r } -> Val.eval_binop (eval_expr env l) op (eval_expr env r)
     | Expr.Unop { op; e } -> Val.eval_unop op (eval_expr env e)
-    | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ ->
+    | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _ ->
         failwith "Arrays and Objects not handled by this basic environment functor"
 
   let interpret =
@@ -219,7 +219,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
                 None heap
               |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
                                         | _ -> None )*)
-    | Expr.Array_access _ -> failwith "todo"
+    | Expr.Array_access _ | Expr.Array_create _ -> failwith "todo"
     | Expr.Array_literal _ ->
         (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
            eval_expr so we can store elements there and then return the addr
@@ -244,13 +244,12 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
           let open Ast.Stmt in
           match stmt with
           | Assign { lhs; rhs = Ast.Expr.Array_literal { elts; alloc_site } } ->
-              let addr = Addr.of_alloc_site alloc_site in
-              let abstract_addr = AAddr_or_val.InL (Addr.Abstract.singleton addr) in
+              let abstract_addr = AAddr_or_val.InL (Addr.Abstract.singleton alloc_site) in
               let env = Env.add env lhs abstract_addr in
               let heap =
                 List.foldi elts ~init:heap ~f:(fun i acc curr ->
                     match eval_expr env heap curr with
-                    | Some v -> Heap.add acc (addr, i) v
+                    | Some v -> Heap.add acc (alloc_site, i) v
                     | None -> acc)
               in
               Some (env, heap)

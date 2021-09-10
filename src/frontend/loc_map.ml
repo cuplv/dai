@@ -3,10 +3,10 @@ open Tree_sitter_java
 open Syntax
 open Cfg
 
-type loc_ctx = { entry : Loc.t; exit : Loc.t; ret : Loc.t }
+type loc_ctx = { entry : Loc.t; exit : Loc.t; ret : Loc.t; exc : Loc.t }
 
-let pp_loc_ctx fs { entry; exit; ret } =
-  Format.fprintf fs "{%a -> %a; ret=%a}" Loc.pp entry Loc.pp exit Loc.pp ret
+let pp_loc_ctx fs { entry; exit; ret; exc } =
+  Format.fprintf fs "{%a -> %a; ret=%a; exc=%a}" Loc.pp entry Loc.pp exit Loc.pp ret Loc.pp exc
 
 type t = loc_ctx Int.Map.t Method_id.Map.t
 
@@ -33,8 +33,8 @@ let remove_fn = Method_id.Map.remove
 
 let remove_region method_id (region : Loc.Set.t) lmap =
   let new_method_lmap =
-    Int.Map.filter (Method_id.Map.find_exn lmap method_id) ~f:(fun { entry; exit; ret = _ } ->
-        Loc.Set.(mem region entry && mem region exit))
+    Int.Map.filter (Method_id.Map.find_exn lmap method_id)
+      ~f:(fun { entry; exit; ret = _; exc = _ } -> Loc.Set.(mem region entry && mem region exit))
   in
   Method_id.Map.set lmap ~key:method_id ~data:new_method_lmap
 
@@ -53,8 +53,9 @@ let union l r =
 
 let rebase_edges method_id ~old_src ~new_src loc_map =
   let new_method_locs =
-    Int.Map.map (Method_id.Map.find_exn loc_map method_id) ~f:(fun { entry; exit; ret } ->
-        if Loc.equal entry old_src then { entry = new_src; exit; ret } else { entry; exit; ret })
+    Int.Map.map (Method_id.Map.find_exn loc_map method_id) ~f:(fun { entry; exit; ret; exc } ->
+        if Loc.equal entry old_src then { entry = new_src; exit; ret; exc }
+        else { entry; exit; ret; exc })
   in
   Method_id.Map.set loc_map ~key:method_id ~data:new_method_locs
 
