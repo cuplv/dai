@@ -133,6 +133,10 @@ module Expr = struct
   let hash_fold_int acc curr =
     let open Ppx_hash_lib.Std in
     hash_fold_t (Hash.fold_int (Hash.alloc ()) acc) curr |> Hash.get_hash_value
+
+  let unop op e = Unop { op; e }
+
+  let binop l op r = Binop { l; op; r }
 end
 
 module Stmt = struct
