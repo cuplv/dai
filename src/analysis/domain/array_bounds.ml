@@ -87,8 +87,8 @@ let texpr_of_expr expr (am, itv) =
     Interval.of_infsup inf sup
   in
   let handle_array_expr itv = function
-    | Ast.Expr.Deref { rcvr = Ast.Expr.Var rcvr_ident; field = "length" } ->
-        Map.find am rcvr_ident >>= fun aaddr ->
+    | Ast.Expr.Deref { rcvr; field = "length" } ->
+        Map.find am rcvr >>= fun aaddr ->
         if Set.is_empty aaddr then None
         else
           Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
@@ -97,7 +97,7 @@ let texpr_of_expr expr (am, itv) =
                 join_intervals acc (Abstract1.bound_variable man itv len)
               else acc)
           |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
-    | Ast.Expr.Deref { rcvr = Ast.Expr.Var _rcvr_ident; field = _ } ->
+    | Ast.Expr.Deref { rcvr = _; field = _ } ->
         failwith "todo"
         (*
         Itv.texpr_of_expr ~fallback:handle_array_expr itv field >>| Itv.eval_texpr itv
@@ -210,7 +210,7 @@ let interpret stmt phi =
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   let rec expr_derefs = function
-    | Expr.Deref { rcvr; field = _ } -> expr_derefs rcvr
+    | Expr.Deref { rcvr = _; field = _ } -> failwith "todo"
     | Expr.Lit _ | Expr.Var _ -> []
     | Expr.Binop { l; op = _; r } -> expr_derefs l @ expr_derefs r
     | Expr.Unop { op = _; e } -> expr_derefs e

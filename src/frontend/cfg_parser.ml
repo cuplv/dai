@@ -52,9 +52,8 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         | `Field_access (rcvr, _, _, field) ->
             let rcvr, aux_info =
               match rcvr with
-              | `Super _ -> (Expr.Var "super", (curr_loc, []))
-              | `Prim_exp _ as e ->
-                  expr_as_var curr_loc e |> fun (v, aux_info) -> (Expr.Var v, aux_info)
+              | `Super _ -> "super", (curr_loc, [])
+              | `Prim_exp _ as e -> expr_as_var curr_loc e
             in
             let field =
               match field with
@@ -89,10 +88,9 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         | `Id (_, lhs) -> Stmt.Assign { lhs; rhs = rhs_expr_with_op }
         | `Choice_open _ -> failwith "todo: Choice_open"
         | `Field_access _ ->
-            (* rcvr guaranteed to be a Var by expr_as_var call above *)
             let rcvr, field =
               match lhs_expr with
-              | Expr.Deref { rcvr = Expr.Var v; field } -> (v, field)
+              | Expr.Deref { rcvr; field } -> (rcvr, field)
               | _ -> failwith "unreachable"
             in
             Stmt.Write { rcvr; field; rhs = rhs_expr_with_op }
@@ -189,8 +187,8 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
   | `Prim_exp (`Field_access (rcvr, _, _, field)) ->
       let rcvr, aux_info =
         match rcvr with
-        | `Super _ -> (Expr.Var "super", (curr_loc, []))
-        | `Prim_exp _ as e -> expr_as_var curr_loc e |> fun (v, aux_info) -> (Expr.Var v, aux_info)
+        | `Super _ -> "super", (curr_loc, [])
+        | `Prim_exp _ as e -> expr_as_var curr_loc e
       in
       let field =
         match field with
@@ -834,4 +832,13 @@ let%test "Cibai example" =
        match res with
        | Error _ -> ()
        | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfg)
+  |> Result.is_ok
+
+let%test "exceptions, try, catch, finally" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Exceptions.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (fun res ->
+       match res with
+       | Error _ -> ()
+       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfg)
   |> Result.is_ok

@@ -96,7 +96,7 @@ module Expr = struct
     | Lit of Lit.t
     | Binop of { l : t; op : Binop.t; r : t }
     | Unop of { op : Unop.t; e : t }
-    | Deref of { rcvr : t; field : ident }
+    | Deref of { rcvr : ident; field : ident }
     | Array_access of { rcvr : t; idx : t }
     | Array_literal of { elts : t list; alloc_site : Alloc_site.t }
     | Array_create of { elt_type : string; size : t; alloc_site : Alloc_site.t }
@@ -108,7 +108,7 @@ module Expr = struct
     | Lit l -> Lit.pp fs l
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
     | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
-    | Deref { rcvr; field } -> Format.fprintf fs "%a.%s" pp rcvr field
+    | Deref { rcvr; field } -> Format.fprintf fs "%s.%s" rcvr field
     | Array_access { rcvr; idx } -> Format.fprintf fs "%a[%a]" pp rcvr pp idx
     | Array_literal { elts; alloc_site } ->
         Format.fprintf fs "%a%@%a" (List.pp ", " ~pre:"{" ~suf:"}" pp) elts Alloc_site.pp alloc_site
@@ -123,7 +123,7 @@ module Expr = struct
     | Var v -> String.Set.singleton v
     | Binop { l; op = _; r } -> Set.union (uses l) (uses r)
     | Unop { op = _; e } -> uses e
-    | Deref { rcvr; field = _ } -> uses rcvr
+    | Deref { rcvr; field = _ } -> String.Set.singleton rcvr
     | Array_literal { elts; alloc_site = _ } -> uses_in_list elts
     | Array_access { rcvr; idx } -> Set.union (uses rcvr) (uses idx)
     | Array_create { elt_type = _; size; alloc_site = _ } -> uses size

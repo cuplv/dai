@@ -424,7 +424,7 @@ module T = struct
             p,
             Env.of_alist_exn [ (Syntax.Cfg.retvar, ret_addr) ] )
         else (g, p, new_e)
-    | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr = Expr.Var rcvr; field = "next" } } -> (
+    | Stmt.Assign { lhs; rhs = Expr.Deref { rcvr; field = "next" } } -> (
         let g, e, rcvr_addr =
           match Env.find e rcvr with
           | Some a -> (G.Node.insert a g, e, a)
