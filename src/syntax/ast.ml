@@ -145,6 +145,7 @@ module Stmt = struct
     | Assign of { lhs : string; rhs : Expr.t }
     | Assume of Expr.t
     | Call of { lhs : string; rcvr : string; meth : string; actuals : Expr.t list }
+    | Exceptional_call of {rcvr : string; meth : string; actuals : Expr.t list }
     | Expr of Expr.t
     | Skip
     | Throw of { exn : Expr.t }
@@ -159,6 +160,8 @@ module Stmt = struct
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
     | Call { lhs; rcvr; meth; actuals } ->
         Format.fprintf fs "%s := %s.%s(%a)" lhs rcvr meth (List.pp ", " Expr.pp) actuals
+    | Exceptional_call { rcvr; meth; actuals } ->
+        Format.fprintf fs "exc-return %s.%s(%a)" rcvr meth (List.pp ", " Expr.pp) actuals
     | Expr e -> Expr.pp fs e
     | Skip -> Format.pp_print_string fs "skip"
     | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
@@ -168,12 +171,13 @@ module Stmt = struct
     | Array_write { rcvr = _; idx; rhs } -> Set.union (Expr.uses idx) (Expr.uses rhs)
     | Assign { lhs = _; rhs } -> Expr.uses rhs
     | Assume e -> Expr.uses e
-    | Call { lhs = _; rcvr = _; meth = _; actuals } ->
-        List.fold actuals ~init:String.Set.empty ~f:(fun a c -> Set.union a (Expr.uses c))
+    | Call { lhs = _; rcvr; meth = _; actuals }
+    | Exceptional_call { rcvr; meth = _; actuals } ->
+        List.fold actuals ~init:(String.Set.singleton rcvr) ~f:(fun a c -> Set.union a (Expr.uses c))
     | Expr e -> Expr.uses e
     | Skip -> String.Set.empty
     | Throw { exn } -> Expr.uses exn
-    | Write { rcvr = _; field = _; rhs } -> Expr.uses rhs
+    | Write { rcvr; field = _; rhs } -> String.Set.add (Expr.uses rhs) rcvr
 
   let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None
 
@@ -190,4 +194,6 @@ module Stmt = struct
   let hash = seeded_hash
 
   let skip = Skip
+
+  let is_exc = function | Exceptional_call _ -> true | _ -> false
 end

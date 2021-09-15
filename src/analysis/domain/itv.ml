@@ -273,7 +273,7 @@ let interpret stmt itv =
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
-  | Array_write _ -> failwith "todo"
+  | Array_write _ | Exceptional_call _ -> failwith "todo"
   | Write _ | Skip | Expr _ | Call _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
   | Assume e -> meet_with_constraint itv e

@@ -39,12 +39,12 @@ let rec string_of_unannotated_type = function
 
     Optional [exit_loc] param is used to special-case the common statement syntax of [`Exp_stmt (`Assign_exp _)] and avoid generating extraneous locations and [Skip] edges
 *)
-let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
+let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) :
     Ast.Expr.t * (Cfg.Loc.t * edge list) =
   let open Ast in
   match cst with
   | `Assign_exp (lhs, op, rhs) ->
-      let rhs_expr, (curr_loc, rhs_intermediates) = expr curr_loc rhs in
+      let rhs_expr, (curr_loc, rhs_intermediates) = expr ~curr_loc ~exc rhs in
       let lhs_expr, (curr_loc, lhs_intermediates) =
         match lhs with
         | `Id (_, ident) -> (Expr.Var ident, (curr_loc, []))
@@ -53,7 +53,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
             let rcvr, aux_info =
               match rcvr with
               | `Super _ -> "super", (curr_loc, [])
-              | `Prim_exp _ as e -> expr_as_var curr_loc e
+              | `Prim_exp _ as e -> expr_as_var ~curr_loc ~exc e
             in
             let field =
               match field with
@@ -63,8 +63,8 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
             in
             (Expr.Deref { rcvr; field }, aux_info)
         | `Array_access (rcvr, _, idx, _) ->
-            let idx, (curr_loc, idx_intermediates) = expr curr_loc idx in
-            let rcvr, (curr_loc, rcvr_intermediates) = expr_as_var curr_loc (`Prim_exp rcvr) in
+            let idx, (curr_loc, idx_intermediates) = expr ~curr_loc ~exc idx in
+            let rcvr, (curr_loc, rcvr_intermediates) = expr_as_var ~curr_loc ~exc (`Prim_exp rcvr) in
             ( Expr.Array_access { rcvr = Expr.Var rcvr; idx },
               (curr_loc, idx_intermediates @ rcvr_intermediates) )
       in
@@ -127,10 +127,10 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         | `Exp_GTGT_exp (_, _, _) -> failwith "todo: Exp_GTGT_exp"
         | `Exp_GTGTGT_exp (_, _, _) -> failwith "todo: Exp_GTGTGT_exp"
       in
-      let l, (curr_loc, l_intermediates) = expr curr_loc l in
-      let r, (curr_loc, r_intermediates) = expr curr_loc r in
+      let l, (curr_loc, l_intermediates) = expr ~curr_loc ~exc l in
+      let r, (curr_loc, r_intermediates) = expr ~curr_loc ~exc r in
       (Expr.Binop { l; op; r }, (curr_loc, l_intermediates @ r_intermediates))
-  | `Cast_exp (_, _type, _, _, e) -> expr curr_loc e
+  | `Cast_exp (_, _type, _, _, e) -> expr ~curr_loc ~exc e
   | `Inst_exp _ -> failwith "todo: Inst_exp"
   | `Lambda_exp _ -> failwith "todo: Lambda_exp"
   | `Prim_exp (`Lit l) ->
@@ -157,7 +157,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
   | `Prim_exp (`This _) -> (Expr.Var "this", (curr_loc, []))
   | `Prim_exp (`Id (_, ident)) -> (Expr.Var ident, (curr_loc, []))
   | `Prim_exp (`Choice_open _) -> failwith "todo: Prim_exp (Choice_open) "
-  | `Prim_exp (`Paren_exp (_, e, _)) -> expr curr_loc e
+  | `Prim_exp (`Paren_exp (_, e, _)) -> expr ?exit_loc ~curr_loc ~exc e
   | `Prim_exp (`Obj_crea_exp (`Unqu_obj_crea_exp unqualified))
   | `Prim_exp (`Obj_crea_exp (`Prim_exp_DOT_unqu_obj_crea_exp (_, _, unqualified))) ->
       (* todo: deal with fully-qualified constructors *)
@@ -175,20 +175,22 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         List.fold args
           ~init:([], (curr_loc, []))
           ~f:(fun (acc_exprs, (curr_loc, acc_intermediates)) arg ->
-            let arg_expr, (curr_loc, arg_intermediates) = expr curr_loc arg in
+            let arg_expr, (curr_loc, arg_intermediates) = expr ~curr_loc ~exc arg in
             (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
       in
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
-      let call =
-        (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "<init>"; actuals })
+      let edges =
+        (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "<init>"; actuals }) ::
+        (curr_loc, exc, Stmt.Exceptional_call {rcvr = ctor_name; meth = "<init>"; actuals }) ::
+        arg_intermediates
       in
-      (Expr.Var lhs, (next_loc, arg_intermediates @ [ call ]))
+      Expr.Var lhs, (next_loc, edges)
   | `Prim_exp (`Field_access (rcvr, _, _, field)) ->
       let rcvr, aux_info =
         match rcvr with
         | `Super _ -> "super", (curr_loc, [])
-        | `Prim_exp _ as e -> expr_as_var curr_loc e
+        | `Prim_exp _ as e -> expr_as_var ~curr_loc ~exc e
       in
       let field =
         match field with
@@ -198,8 +200,8 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
       in
       (Expr.Deref { rcvr; field }, aux_info)
   | `Prim_exp (`Array_access (rcvr, _, idx, _)) ->
-      let idx, (curr_loc, idx_intermediates) = expr curr_loc idx in
-      let rcvr, (curr_loc, rcvr_intermediates) = expr_as_var curr_loc (`Prim_exp rcvr) in
+      let idx, (curr_loc, idx_intermediates) = expr ~curr_loc ~exc idx in
+      let rcvr, (curr_loc, rcvr_intermediates) = expr_as_var ~curr_loc ~exc (`Prim_exp rcvr) in
       ( Expr.Array_access { rcvr = Expr.Var rcvr; idx },
         (curr_loc, idx_intermediates @ rcvr_intermediates) )
   | `Prim_exp (`Meth_invo (rcvr_and_meth, (_, args, _))) ->
@@ -211,7 +213,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
             (rcvr, _dot, super, _typeargs, meth) -> (
             let rcvr, aux_info =
               match rcvr with
-              | `Prim_exp _ as e when Option.is_none super -> expr_as_var curr_loc e
+              | `Prim_exp _ as e when Option.is_none super -> expr_as_var ~curr_loc ~exc e
               | _ -> failwith "todo: handle \"super\" in method invocations"
             in
             match meth with
@@ -223,35 +225,36 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         List.fold args
           ~init:([], (curr_loc, []))
           ~f:(fun (acc_exprs, (curr_loc, acc_intermediates)) arg ->
-            let arg_expr, (curr_loc, arg_intermediates) = expr curr_loc arg in
+            let arg_expr, (curr_loc, arg_intermediates) = expr ~curr_loc ~exc arg in
             (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
       in
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals }) in
-      (Expr.Var lhs, (next_loc, rcvr_intermediates @ arg_intermediates @ [ call ]))
+      let exc_call = (curr_loc, exc, Stmt.Exceptional_call {rcvr; meth; actuals}) in 
+      (Expr.Var lhs, (next_loc, call :: exc_call :: rcvr_intermediates @ arg_intermediates))
   | `Prim_exp (`Meth_ref _) -> failwith "todo: Prim_exp (Meth_ref)"
   | `Prim_exp (`Array_crea_exp (_new, simple_type, initial_array)) -> (
       match initial_array with
-      | `Dimens_array_init (_, ai) -> array_lit curr_loc ai
+      | `Dimens_array_init (_, ai) -> array_lit ~curr_loc ~exc ai
       | `Rep1_dimens_expr_opt_dimens (dim_exprs, _) ->
           let elt_type = string_of_simple_type simple_type in
           let alloc_site = Alloc_site.fresh () in
           let _, _, outermost_dim_expr, _ = List.hd_exn dim_exprs in
           let outermost_dim_size, (curr_loc, intermediate_stmts) =
-            expr curr_loc outermost_dim_expr
+            expr ~curr_loc ~exc outermost_dim_expr
           in
           let e = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
           (e, (curr_loc, intermediate_stmts)) )
   | `Switch_exp _ -> failwith "todo: Switch_exp"
   | `Tern_exp (if_exp, _, then_exp, _, else_exp) ->
       let tmp = fresh_tmp_var () in
-      let if_exp, (curr_loc, cond_intermediates) = expr curr_loc if_exp in
+      let if_exp, (curr_loc, cond_intermediates) = expr ~curr_loc ~exc if_exp in
       let then_branch_head = Cfg.Loc.fresh () in
       let else_branch_head = Cfg.Loc.fresh () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
-      let then_exp, (then_branch_tail, then_intermediates) = expr then_branch_head then_exp in
-      let else_exp, (else_branch_tail, else_intermediates) = expr else_branch_head else_exp in
+      let then_exp, (then_branch_tail, then_intermediates) = expr ~curr_loc:then_branch_head ~exc then_exp in
+      let else_exp, (else_branch_tail, else_intermediates) = expr ~curr_loc:else_branch_head ~exc else_exp in
       let stmts =
         (curr_loc, then_branch_head, Stmt.Assume if_exp)
         :: (curr_loc, else_branch_head, Stmt.Assume (Expr.unop Unop.Not if_exp))
@@ -268,7 +271,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         | `BANG_exp (_, e) -> (e, Unop.Not)
         | `TILDE_exp (_, e) -> (e, Unop.BNot)
       in
-      let e, (curr_loc, intermediates) = expr curr_loc e in
+      let e, (curr_loc, intermediates) = expr ~curr_loc ~exc e in
       (Expr.unop op e, (curr_loc, intermediates))
   | `Update_exp u -> (
       (* translate (pre/post)-(increment/decrement) as follows:
@@ -285,7 +288,7 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
         | `PLUSPLUS_exp (_, e) -> (e, Binop.Plus, true)
         | `DASHDASH_exp (_, e) -> (e, Binop.Minus, true)
       in
-      let e, (curr_loc, intermediates) = expr curr_loc e in
+      let e, (curr_loc, intermediates) = expr ~curr_loc ~exc e in
       match e with
       | Expr.Var v as var ->
           let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
@@ -310,9 +313,9 @@ let rec expr ?exit_loc (curr_loc : Cfg.Loc.t) (cst : CST.expression) :
           if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1)), (curr_loc, intermediates))
           else (e, (curr_loc, intermediates)) )
 
-and expr_as_var (curr_loc : Cfg.Loc.t) (cst : CST.expression) : string * (Cfg.Loc.t * edge list) =
+and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) : string * (Cfg.Loc.t * edge list) =
   let open Ast in
-  let e, (curr_loc, intermediates) = expr curr_loc cst in
+  let e, (curr_loc, intermediates) = expr ~curr_loc ~exc cst in
   match e with
   | Expr.Var v -> (v, (curr_loc, intermediates))
   | e ->
@@ -320,10 +323,10 @@ and expr_as_var (curr_loc : Cfg.Loc.t) (cst : CST.expression) : string * (Cfg.Lo
       let next_loc = Cfg.Loc.fresh () in
       (tmp, (next_loc, intermediates @ [ (curr_loc, next_loc, Stmt.Assign { lhs = tmp; rhs = e }) ]))
 
-and array_lit (curr_loc : Cfg.Loc.t) (lit : CST.array_initializer) :
+and array_lit ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (lit : CST.array_initializer) :
     Ast.Expr.t * (Cfg.Loc.t * edge list) =
   let expr_of_var_initializer curr_loc (vi : CST.variable_initializer) =
-    match vi with `Exp e -> expr curr_loc e | `Array_init ai -> array_lit curr_loc ai
+    match vi with `Exp e -> expr ~curr_loc ~exc e | `Array_init ai -> array_lit ~curr_loc ~exc ai
   in
   match lit with
   | _, Some (first, rest), _, _ ->
@@ -340,13 +343,13 @@ and array_lit (curr_loc : Cfg.Loc.t) (lit : CST.array_initializer) :
       (Ast.Expr.Array_literal { elts = []; alloc_site = Alloc_site.fresh () }, (curr_loc, []))
 
 (** lift [expr] to non-empty lists of expressions, according to Java semantics: i.e. throwing away value of all but last *)
-let rec expr_of_nonempty_list (curr_loc : Cfg.Loc.t) :
+let rec expr_of_nonempty_list ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) :
     CST.expression list -> Ast.Expr.t * (Cfg.Loc.t * edge list) = function
   | [] -> failwith "only non-empty lists of expressions supported"
-  | [ e ] -> expr curr_loc e
+  | [ e ] -> expr ~curr_loc ~exc e
   | e :: es ->
-      let _, (intermediate_loc, intermediate_stmts) = expr curr_loc e in
-      expr_of_nonempty_list intermediate_loc es |> fun (e, (l, stmts)) ->
+      let _, (intermediate_loc, intermediate_stmts) = expr ~curr_loc ~exc e in
+      expr_of_nonempty_list ~curr_loc:intermediate_loc ~exc es |> fun (e, (l, stmts)) ->
       (e, (l, intermediate_stmts @ stmts))
 
 let rec declarations stmts : string list =
@@ -407,7 +410,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
   | `Assert_stmt assertion ->
       let expr, (entry, intermediate_stmts) =
         match assertion with
-        | `Assert_exp_SEMI (_, e, _) | `Assert_exp_COLON_exp_SEMI (_, e, _, _, _) -> expr entry e
+        | `Assert_exp_SEMI (_, e, _) | `Assert_exp_COLON_exp_SEMI (_, e, _, _, _) -> expr ~curr_loc:entry ~exc e
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
   | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc stmts
@@ -416,7 +419,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
   | `Decl _ -> failwith "todo: Decl"
   | `Do_stmt (_, body, _, (_, cond, _), _) ->
       let body_exit = Cfg.Loc.fresh () in
-      let cond, (cond_exit, cond_intermediate_stmts) = expr body_exit cond in
+      let cond, (cond_exit, cond_intermediate_stmts) = expr ~curr_loc:body_exit ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body = edge_list_of_stmt method_id loc_map entry body_exit ret exc body in
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
@@ -424,7 +427,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       |> pair loc_map
   | `Enha_for_stmt _ -> failwith "todo: Enha_for_stmt"
   | `Exp_stmt (e, _) ->
-      let _value_of_e, (intermediate_loc, intermediate_stmts) = expr ~exit_loc:exit entry e in
+      let _value_of_e, (intermediate_loc, intermediate_stmts) = expr ~exit_loc:exit ~curr_loc:entry ~exc e in
       if Cfg.Loc.equal intermediate_loc exit then (loc_map, intermediate_stmts)
       else (loc_map, (intermediate_loc, exit, Stmt.Skip) :: intermediate_stmts)
   | `For_stmt ((_, _, _, _, _, _, _, body) as f) ->
@@ -437,7 +440,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       (loc_map, header @ body)
   | `If_stmt (_, (_, cond, _), t_branch, f_branch_opt) ->
       let t_branch_entry = Cfg.Loc.fresh () in
-      let cond, (entry, cond_intermediate_stmts) = expr entry cond in
+      let cond, (entry, cond_intermediate_stmts) = expr ~curr_loc:entry ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, t_branch =
         edge_list_of_stmt method_id loc_map t_branch_entry exit ret exc t_branch
@@ -461,10 +464,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
         function
         | _, None -> (Stmt.Skip, (curr_loc, []))
         | (`Id (_, lhs), _), Some (_, `Exp e) ->
-            let rhs, intermediate_stmts = expr curr_loc e in
+            let rhs, intermediate_stmts = expr ~curr_loc ~exc e in
             (Stmt.Assign { lhs; rhs }, intermediate_stmts)
         | (`Id (_, lhs), _), Some (_, `Array_init lit) ->
-            let rhs, intermediate_stmts = array_lit curr_loc lit in
+            let rhs, intermediate_stmts = array_lit ~curr_loc ~exc lit in
             (Stmt.Assign { lhs; rhs }, intermediate_stmts)
         | (`Choice_open _, _), _ -> failwith "modules not yet implemented"
       in
@@ -484,7 +487,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
         match e with
         | None -> (Stmt.Skip, (entry, []))
         | Some e ->
-            let rhs, (entry, intermediates) = expr entry e in
+            let rhs, (entry, intermediates) = expr ~curr_loc:entry ~exc e in
             (Stmt.Assign { lhs = Cfg.retvar; rhs }, (entry, intermediates))
       in
       (entry, ret, stmt) :: intermediates |> pair loc_map
@@ -492,7 +495,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
   | `Switch_exp _ -> failwith "todo: Switch_exp"
   | `Sync_stmt _ -> failwith "todo: Sync_stmt"
   | `Throw_stmt (_, e, _) ->
-      let thrown_expr, (intermediate_loc, intermediate_stmts) = expr entry e in
+      let thrown_expr, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc e in
       let throw_edge =
         (intermediate_loc, exc, Stmt.Assign { lhs = Cfg.exc_retvar; rhs = thrown_expr })
       in
@@ -529,7 +532,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
   | `Try_with_resous_stmt _ -> failwith "todo: Try_with_resous_stmt"
   | `While_stmt (_, (_, cond, _), body) ->
       let body_entry = Cfg.Loc.fresh () in
-      let cond, (intermediate_loc, cond_intermediates) = expr entry cond in
+      let cond, (intermediate_loc, cond_intermediates) = expr ~curr_loc:entry ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body = edge_list_of_stmt method_id loc_map body_entry entry ret exc body in
       (intermediate_loc, body_entry, Stmt.Assume cond)
@@ -630,13 +633,13 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_
         | `Opt_exp_rep_COMMA_exp_SEMI (None, _) -> (loc_map, (entry, []))
         | `Opt_exp_rep_COMMA_exp_SEMI (Some (e, es), _) ->
             let exprs = e :: List.map ~f:snd es in
-            (loc_map, expr_of_nonempty_list entry exprs |> snd)
+            (loc_map, expr_of_nonempty_list ~curr_loc:entry ~exc exprs |> snd)
         (* discard value of initializer expression, as in Java semantics *)
       in
       let cond, (cond_intermediate_loc, cond_intermediate_stmts) =
         match cond with
         | None -> Ast.(Expr.Lit (Lit.Bool true), (init_intermediate_loc, []))
-        | Some cond -> expr init_intermediate_loc cond
+        | Some cond -> expr ~curr_loc:init_intermediate_loc ~exc cond
       in
       let cond_neg = Ast.(Expr.unop Unop.Not cond) in
       let update_intermediate_loc, update_intermediate_stmts =
@@ -644,7 +647,7 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_
         | None -> (body_exit, [])
         | Some (e, es) ->
             let exprs = e :: List.map ~f:snd es in
-            expr_of_nonempty_list body_exit exprs |> snd
+            expr_of_nonempty_list ~curr_loc:body_exit ~exc exprs |> snd
         (* discard value of update expression, as in Java semantics *)
       in
       let back_edge = (update_intermediate_loc, init_intermediate_loc, Ast.Stmt.Skip) in
@@ -715,7 +718,7 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
               List.fold args
                 ~init:([], (entry, []))
                 ~f:(fun (acc_exprs, (curr_loc, acc_intermediates)) arg ->
-                  let arg_expr, (curr_loc, arg_intermediates) = expr curr_loc arg in
+                  let arg_expr, (curr_loc, arg_intermediates) = expr ~curr_loc ~exc:exc_exit arg in
                   (acc_exprs @ [ arg_expr ], (curr_loc, acc_intermediates @ arg_intermediates)))
             in
             let post_invocation_loc = Cfg.Loc.fresh () in
@@ -728,7 +731,12 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
                 post_invocation_loc,
                 Ast.Stmt.Call { lhs = "this"; rcvr = class_name; meth = "<init>"; actuals } )
             in
-            (loc_map, invocation :: (pre_invocation_edges @ body_edges))
+            let exc_invocation =
+              (pre_invocation_loc,
+               exc_exit,
+               Ast.Stmt.Exceptional_call {rcvr=class_name;meth="<init>"; actuals })
+            in
+            (loc_map, invocation :: exc_invocation :: (pre_invocation_edges @ body_edges))
         | Some _ -> failwith "TODO: unrecognized explicit constructor invocation"
       in
 

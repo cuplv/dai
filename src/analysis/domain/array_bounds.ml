@@ -206,7 +206,7 @@ let interpret stmt phi =
       | itv when Abstract1.is_bottom man itv -> None
       | itv -> Some (am, itv) )
   | Expr _ | Write _ | Skip | Call _ -> Some (am, itv)
-  | Array_write _ -> failwith "todo"
+  | Array_write _ | Exceptional_call _ -> failwith "todo"
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   let rec expr_derefs = function
@@ -225,7 +225,7 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   | Expr e | Assume e -> expr_derefs e
   | Call { actuals; _ } -> List.bind actuals ~f:expr_derefs
   | Skip -> []
-  | Array_write _ -> failwith "todo"
+  | Array_write _ | Exceptional_call _ -> failwith "todo"
 
 (** Some(true/false) indicates [idx] is definitely in/out-side of [addr]'s bounds;
     None indicates it could be either

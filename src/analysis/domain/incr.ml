@@ -92,7 +92,7 @@ end = struct
               | `T | `Either -> Some env
               | `F | `Neither -> None )
           | Expr _ | Skip | Write _ | Call _ -> Some env
-          | Array_write _ -> failwith "todo")
+          | Array_write _ | Exceptional_call _ -> failwith "todo")
     in
     fun stmt -> flip ( >>= ) (fun env -> mfn.mfn_art (stmt, env) |> Art.force)
 
@@ -266,7 +266,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               | `T | `Either -> Some (env, heap)
               | _ -> None )
           | Skip | Expr _ | Call _ -> Some (env, heap)
-          | Array_write _ -> failwith "todo")
+          | Array_write _ | Exceptional_call _ -> failwith "todo")
     in
     fun stmt -> flip ( >>= ) (fun state -> mfn.mfn_art (stmt, state) |> Art.force)
 

@@ -15,8 +15,8 @@ type edit =
     }
   | Modify_header of {
       method_id : Method_id.t;
-      at_loc : Cfg.Loc.t;
-      stmt : CST.statement;
+      prev_loc_ctx : Loc_map.loc_ctx;
+      next_stmt : CST.statement;
       loop_body_exit : Cfg.Loc.t option;
     }
   | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
