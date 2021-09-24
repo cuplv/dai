@@ -1,0 +1,3 @@
+[submodule "WALA-callgraph"]
+	path = WALA-callgraph
+	url = git@github.com:bennostein/WALA-callgraph.git

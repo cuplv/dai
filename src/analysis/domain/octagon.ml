@@ -73,6 +73,8 @@ let implies l r =
   let l, r = combine_envs l r in
   Abstract1.is_leq (get_man ()) l r
 
+let ( <= ) = implies
+
 let pp fs oct = Format.fprintf fs @@ if is_bot oct then "bottom" else "non-bottom octagon"
 
 let sexp_of_t _ = failwith "Unimplemented"
@@ -80,6 +82,8 @@ let sexp_of_t _ = failwith "Unimplemented"
 let t_of_sexp _ = failwith "Unimplemented"
 
 let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
+
+let bottom () = Abstract1.bottom (get_man ()) (Environment.make [||] [||])
 
 (* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
 let mk_tcons env op l r =
@@ -270,7 +274,11 @@ let compare _l _r = failwith "todo"
 
 let hash_fold_t h oct = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 oct)
 
-let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
+let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+
+(*let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
   match callsite with
   | Ast.Stmt.Call { lhs; _ } -> (
       let man = get_man () in
@@ -290,3 +298,4 @@ let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
           None
       with Apron.Manager.Error _ -> caller_state )
   | _ -> failwith "malformed callsite"
+*)

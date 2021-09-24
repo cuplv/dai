@@ -43,8 +43,8 @@ let pp_edit fs = function
         | `For_stmt _ -> "for-loop"
         | _ -> failwith "unrecognized control-flow construct"
       in
-      Format.fprintf fs "(Modify %s header at %a in %a)" control_flow_type Cfg.Loc.pp (prev_loc_ctx.entry)
-        Method_id.pp method_id
+      Format.fprintf fs "(Modify %s header at %a in %a)" control_flow_type Cfg.Loc.pp
+        prev_loc_ctx.entry Method_id.pp method_id
   | Delete_statements { method_id; from_loc; to_loc } ->
       Format.fprintf fs "(Delete statements in range %a->%a in %a)" Cfg.Loc.pp from_loc Cfg.Loc.pp
         to_loc Method_id.pp method_id
@@ -217,10 +217,20 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
     function
     | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, (_, body_decls, _))) ->
         List.fold body_decls ~init:[] ~f:(fun acc -> function
-          | `Meth_decl ((_, (_, _, (`Id (_, method_name), formals, _), _), _) as md) ->
+          | `Meth_decl ((modifiers, (_, _, (`Id (_, method_name), formals, _), _), _) as md) ->
               let arg_types = Cfg_parser.types_of_formals formals in
+              let static =
+                Option.exists modifiers
+                  ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
+              in
               let method_id : Method_id.t =
-                { package; class_name = parent_class_prefix ^ class_name; method_name; arg_types }
+                {
+                  package;
+                  class_name = parent_class_prefix ^ class_name;
+                  method_name;
+                  static;
+                  arg_types;
+                }
               in
               (method_id, md) :: acc
           | `Cons_decl _ -> failwith "todo"
@@ -343,7 +353,10 @@ let apply_edit edit loc_map cfg ~ret ~exc : cfg_edit_result =
         match expr with Expr.Unop { op = Unop.Not; e } -> 1 + count_negations e | _ -> 0
       in
       let rec extract_cond_header at_loc acc =
-        match Cfg.G.Node.outputs at_loc cfg |> Sequence.to_list |> List.filter ~f:(Cfg.G.Edge.label >> Ast.Stmt.is_exc >> not) with
+        match
+          Cfg.G.Node.outputs at_loc cfg |> Sequence.to_list
+          |> List.filter ~f:(Cfg.G.Edge.label >> Ast.Stmt.is_exc >> not)
+        with
         | [ e ] -> extract_cond_header (Cfg.dst e) (e :: acc)
         | [ e1; e2 ] ->
             let e1_cond =
@@ -368,7 +381,9 @@ let apply_edit edit loc_map cfg ~ret ~exc : cfg_edit_result =
               extract_cond_header prev_loc_ctx.entry []
             in
             let deleted_edges = old_assume_pos :: old_assume_neg :: old_cond_intermediates in
-            let cond, (branch_loc, cond_intermediates) = Cfg_parser.expr ~curr_loc:prev_loc_ctx.entry ~exc:prev_loc_ctx.exc cond in
+            let cond, (branch_loc, cond_intermediates) =
+              Cfg_parser.expr ~curr_loc:prev_loc_ctx.entry ~exc:prev_loc_ctx.exc cond
+            in
             let new_assume_pos =
               (branch_loc, Cfg.G.Edge.dst old_assume_pos, Ast.Stmt.Assume cond)
             in
@@ -629,7 +644,8 @@ let%test "modify condition of conditional" =
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] -> true
+  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
+      true
   | _ -> false
 
 let%test "modify header of for-loop" =
@@ -657,7 +673,8 @@ let%test "modify header of for-loop" =
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = Some _ } ] -> true
+  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = Some _ } ] ->
+      true
   | _ -> false
 
 let%test "modify header of while-loop" =
@@ -685,7 +702,8 @@ let%test "modify header of while-loop" =
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] -> true
+  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
+      true
   | _ -> false
 
 let%test "modify body of while-loop" =

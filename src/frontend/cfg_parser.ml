@@ -52,7 +52,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         | `Field_access (rcvr, _, _, field) ->
             let rcvr, aux_info =
               match rcvr with
-              | `Super _ -> "super", (curr_loc, [])
+              | `Super _ -> ("super", (curr_loc, []))
               | `Prim_exp _ as e -> expr_as_var ~curr_loc ~exc e
             in
             let field =
@@ -64,7 +64,9 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             (Expr.Deref { rcvr; field }, aux_info)
         | `Array_access (rcvr, _, idx, _) ->
             let idx, (curr_loc, idx_intermediates) = expr ~curr_loc ~exc idx in
-            let rcvr, (curr_loc, rcvr_intermediates) = expr_as_var ~curr_loc ~exc (`Prim_exp rcvr) in
+            let rcvr, (curr_loc, rcvr_intermediates) =
+              expr_as_var ~curr_loc ~exc (`Prim_exp rcvr)
+            in
             ( Expr.Array_access { rcvr = Expr.Var rcvr; idx },
               (curr_loc, idx_intermediates @ rcvr_intermediates) )
       in
@@ -181,15 +183,15 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let edges =
-        (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "<init>"; actuals }) ::
-        (curr_loc, exc, Stmt.Exceptional_call {rcvr = ctor_name; meth = "<init>"; actuals }) ::
-        arg_intermediates
+        (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "<init>"; actuals })
+        :: (curr_loc, exc, Stmt.Exceptional_call { rcvr = ctor_name; meth = "<init>"; actuals })
+        :: arg_intermediates
       in
-      Expr.Var lhs, (next_loc, edges)
+      (Expr.Var lhs, (next_loc, edges))
   | `Prim_exp (`Field_access (rcvr, _, _, field)) ->
       let rcvr, aux_info =
         match rcvr with
-        | `Super _ -> "super", (curr_loc, [])
+        | `Super _ -> ("super", (curr_loc, []))
         | `Prim_exp _ as e -> expr_as_var ~curr_loc ~exc e
       in
       let field =
@@ -231,8 +233,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals }) in
-      let exc_call = (curr_loc, exc, Stmt.Exceptional_call {rcvr; meth; actuals}) in 
-      (Expr.Var lhs, (next_loc, call :: exc_call :: rcvr_intermediates @ arg_intermediates))
+      let exc_call = (curr_loc, exc, Stmt.Exceptional_call { rcvr; meth; actuals }) in
+      (Expr.Var lhs, (next_loc, (call :: exc_call :: rcvr_intermediates) @ arg_intermediates))
   | `Prim_exp (`Meth_ref _) -> failwith "todo: Prim_exp (Meth_ref)"
   | `Prim_exp (`Array_crea_exp (_new, simple_type, initial_array)) -> (
       match initial_array with
@@ -253,8 +255,12 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let then_branch_head = Cfg.Loc.fresh () in
       let else_branch_head = Cfg.Loc.fresh () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
-      let then_exp, (then_branch_tail, then_intermediates) = expr ~curr_loc:then_branch_head ~exc then_exp in
-      let else_exp, (else_branch_tail, else_intermediates) = expr ~curr_loc:else_branch_head ~exc else_exp in
+      let then_exp, (then_branch_tail, then_intermediates) =
+        expr ~curr_loc:then_branch_head ~exc then_exp
+      in
+      let else_exp, (else_branch_tail, else_intermediates) =
+        expr ~curr_loc:else_branch_head ~exc else_exp
+      in
       let stmts =
         (curr_loc, then_branch_head, Stmt.Assume if_exp)
         :: (curr_loc, else_branch_head, Stmt.Assume (Expr.unop Unop.Not if_exp))
@@ -313,7 +319,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1)), (curr_loc, intermediates))
           else (e, (curr_loc, intermediates)) )
 
-and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) : string * (Cfg.Loc.t * edge list) =
+and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) :
+    string * (Cfg.Loc.t * edge list) =
   let open Ast in
   let e, (curr_loc, intermediates) = expr ~curr_loc ~exc cst in
   match e with
@@ -410,7 +417,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
   | `Assert_stmt assertion ->
       let expr, (entry, intermediate_stmts) =
         match assertion with
-        | `Assert_exp_SEMI (_, e, _) | `Assert_exp_COLON_exp_SEMI (_, e, _, _, _) -> expr ~curr_loc:entry ~exc e
+        | `Assert_exp_SEMI (_, e, _) | `Assert_exp_COLON_exp_SEMI (_, e, _, _, _) ->
+            expr ~curr_loc:entry ~exc e
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
   | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc stmts
@@ -427,7 +435,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       |> pair loc_map
   | `Enha_for_stmt _ -> failwith "todo: Enha_for_stmt"
   | `Exp_stmt (e, _) ->
-      let _value_of_e, (intermediate_loc, intermediate_stmts) = expr ~exit_loc:exit ~curr_loc:entry ~exc e in
+      let _value_of_e, (intermediate_loc, intermediate_stmts) =
+        expr ~exit_loc:exit ~curr_loc:entry ~exc e
+      in
       if Cfg.Loc.equal intermediate_loc exit then (loc_map, intermediate_stmts)
       else (loc_map, (intermediate_loc, exit, Stmt.Skip) :: intermediate_stmts)
   | `For_stmt ((_, _, _, _, _, _, _, body) as f) ->
@@ -679,15 +689,17 @@ let types_of_formals = function
 
 let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declaration) =
   match md with
-  | _modifiers, (_tparams, _type, (`Id (_, method_name), formals, _), _throws), `Blk (_, stmts, _)
-    ->
+  | modifiers, (_tparams, _type, (`Id (_, method_name), formals, _), _throws), `Blk (_, stmts, _) ->
       let entry = Cfg.Loc.fresh () in
       let exit = Cfg.Loc.fresh () in
       let exc_exit = Cfg.Loc.fresh () in
       let arg_types = types_of_formals formals in
       let formals = parse_formals formals in
       let locals = declarations stmts in
-      let method_id : Method_id.t = { package; class_name; method_name; arg_types } in
+      let static =
+        Option.exists modifiers ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
+      in
+      let method_id : Method_id.t = { package; class_name; method_name; static; arg_types } in
       let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit; exc_exit } in
       let loc_map, edges =
         edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit ~exc:exc_exit stmts
@@ -706,7 +718,9 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
       let arg_types = types_of_formals formals in
       let formals = parse_formals formals in
       let locals = declarations stmts in
-      let method_id : Method_id.t = { package; class_name; method_name = "<init>"; arg_types } in
+      let method_id : Method_id.t =
+        { package; class_name; method_name = "<init>"; static = true; arg_types }
+      in
       let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit; exc_exit } in
       let loc_map, edges =
         match explicit_constructor_invo with
@@ -732,9 +746,9 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
                 Ast.Stmt.Call { lhs = "this"; rcvr = class_name; meth = "<init>"; actuals } )
             in
             let exc_invocation =
-              (pre_invocation_loc,
-               exc_exit,
-               Ast.Stmt.Exceptional_call {rcvr=class_name;meth="<init>"; actuals })
+              ( pre_invocation_loc,
+                exc_exit,
+                Ast.Stmt.Exceptional_call { rcvr = class_name; meth = "<init>"; actuals } )
             in
             (loc_map, invocation :: exc_invocation :: (pre_invocation_edges @ body_edges))
         | Some _ -> failwith "TODO: unrecognized explicit constructor invocation"

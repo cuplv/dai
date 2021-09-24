@@ -2,7 +2,34 @@ open Dai.Import
 open Domain
 open Syntax
 
-module Make (Dom : Abstract.DomNoCtx) = struct
+module type Sig = sig
+  type absstate
+
+  type t
+
+  val of_cfg : entry_state:absstate -> cfg:Cfg.t -> fn:Cfg.Fn.t -> t
+
+  val apply_edit :
+    daig:t ->
+    cfg_edit:Frontend.Tree_diff.cfg_edit_result ->
+    fn:Cfg.Fn.t ->
+    Frontend.Tree_diff.edit ->
+    t
+
+  val dump_dot : filename:string -> ?loc_labeller:(Cfg.Loc.t -> string option) -> t -> unit
+
+  type 'a or_summary_query =
+    | Result of 'a
+    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
+
+  type summarizer = Ast.Stmt.t -> absstate -> is_exc:bool -> absstate option
+
+  val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
+
+  val is_solved : Cfg.Loc.t -> t -> bool
+end
+
+module Make (Dom : Abstract.Dom) = struct
   module Comp = struct
     type t = [ `Transfer | `Join | `Widen | `Fix | `Transfer_after_fix of Cfg.Loc.t ]
     [@@deriving compare, equal, hash, sexp_of]
@@ -211,11 +238,15 @@ module Make (Dom : Abstract.DomNoCtx) = struct
 
   module G = Graph.Make (Opaque_ref) (Comp)
 
+  type absstate = Dom.t
+
   type t = G.t
 
   type 'a or_summary_query =
     | Result of 'a
-    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : Dom.t }
+    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
+
+  type summarizer = Ast.Stmt.t -> absstate -> is_exc:bool -> absstate option
 
   module Or_summary_query_with_daig = struct
     (** provide infix monadic operations over ['a or_summary_query * t] *)
@@ -282,17 +313,22 @@ module Make (Dom : Abstract.DomNoCtx) = struct
     | Some r -> r
     | None -> failwith (Format.asprintf "No reference exists with name: %s" (Name.to_string nm))
 
-  let dump_dot ~filename daig =
+  let dump_dot ~filename ?(loc_labeller = fun _ -> None) daig =
     let output_fd = Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null" in
     let grey = 0xdedede in
     let green = 0xaaffaa in
     let blue = 0xaaaaff in
+    let string_of_node = function
+      | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
+          let label_prefix = Option.value_exn (loc_labeller l) in
+          "\"" ^ label_prefix ^ Ref.to_string r ^ "\""
+      | r -> "\"" ^ Ref.to_string r ^ "\""
+    in
     Graph.to_dot
       (module G)
       daig ~filename
       ~channel:(Unix.out_channel_of_descr output_fd)
-      ~string_of_node:(fun r -> "\"" ^ Ref.to_string r ^ "\"")
-      ~string_of_edge:(G.Edge.label >> Comp.to_string)
+      ~string_of_node ~string_of_edge:(G.Edge.label >> Comp.to_string)
       ~node_attrs:(function
         | Ref.AState _ as n
           when Seq.exists (G.Node.outputs n daig) ~f:(G.Edge.label >> Comp.equal `Fix) ->
@@ -495,8 +531,8 @@ module Make (Dom : Abstract.DomNoCtx) = struct
     let edges = join_comps @ loop_comps @ transfer_comps in
     Graph.create (module G) ~nodes:all_refs ~edges ()
 
-  let of_cfg ~(init_state : Dom.t) ~(cfg : Cfg.t) ~(fn : Cfg.Fn.t) : t =
-    let entry_ref = Ref.AState { state = Some init_state; name = Name.Loc fn.entry } in
+  let of_cfg ~(entry_state : absstate) ~(cfg : Cfg.t) ~(fn : Cfg.Fn.t) : t =
+    let entry_ref = Ref.AState { state = Some entry_state; name = Name.Loc fn.entry } in
     of_region_cfg ~entry_ref ~cfg ~entry:fn.entry ~loop_iteration_ctx:None ()
 
   let ref_at_loc_exn ~loc =
@@ -519,6 +555,8 @@ module Make (Dom : Abstract.DomNoCtx) = struct
               (Format.asprintf "error: malformed ref names at loop-head location %a" Cfg.Loc.pp loc)
         )
     | _ -> failwith "error: multiple refs found at given location"
+
+  let is_solved loc daig = not @@ Ref.is_empty @@ ref_at_loc_exn ~loc daig
 
   let increment_iteration loop_head =
     let rec incr_iter_ctx = function
@@ -728,8 +766,9 @@ module Make (Dom : Abstract.DomNoCtx) = struct
 
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a pair, consisting of the query result (either that ref-cell, guaranteed to be nonempty, or a query for a requisite procedure summary), and a new daig [t] reflecting possible changes to the DAIG structure
+   * [summarize] function is provided to this _intraprocedural_ DAIG by the orchestrating _interprocedural_ HODAIG
    *)
-  let rec get (r : Ref.t) (daig : t) : Ref.t or_summary_query * t =
+  let rec get (r : Ref.t) (summarizer : summarizer) (daig : t) : Ref.t or_summary_query * t =
     let open Or_summary_query_with_daig.Monad_infix in
     match r with
     | Stmt _ -> (Result r, daig)
@@ -741,7 +780,7 @@ module Make (Dom : Abstract.DomNoCtx) = struct
         ( Seq.fold (G.Node.preds r daig) ~init:(Result [], daig) ~f:(fun (acc, g) pred ->
               match acc with
               | Result ps -> (
-                  match get pred g with
+                  match get pred summarizer g with
                   | Result p, g -> (Result (p :: ps), g)
                   | (Summ_qry _ as sq), g -> (sq, g) )
               | _ -> (acc, g))
@@ -754,7 +793,19 @@ module Make (Dom : Abstract.DomNoCtx) = struct
               match preds with
               | [ s; phi ] -> (
                   match Ref.stmt_exn s with
-                  | Ast.Stmt.Call _ as callsite -> interpret_call callsite daig phi
+                  | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
+                      let is_exc =
+                        match callsite with
+                        | Ast.Stmt.Call _ -> false
+                        | Ast.Stmt.Exceptional_call _ -> true
+                        | _ -> failwith "unreachable"
+                      in
+                      let res =
+                        match summarizer callsite (Ref.astate_exn phi) ~is_exc with
+                        | Some phi_prime -> Result phi_prime
+                        | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi }
+                      in
+                      (res, daig)
                   | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi)), daig) )
               | _ ->
                   failwith
@@ -769,12 +820,12 @@ module Make (Dom : Abstract.DomNoCtx) = struct
                   let iter2 = Ref.astate_exn p2 in
                   (* If fixpoint reached, return it.  Otherwise, unroll the loop and continue. *)
                   if Dom.equal iter1 iter2 then (Result iter1, daig)
-                  else unroll_loop daig p2 |> get r >>| Ref.astate_exn
+                  else unroll_loop daig p2 |> get r summarizer >>| Ref.astate_exn
               | _ -> failwith "fix always has two inputs (by construction)" )
           | `Transfer_after_fix loop_head -> (
               match preds with
               | [ s; phi ] ->
-                  get_fixedpoint_wrt ~loop_head ~ref_cell:phi daig >>= fun phi_fp daig ->
+                  get_fixedpoint_wrt ~loop_head ~ref_cell:phi summarizer daig >>= fun phi_fp daig ->
                   let phi_edge =
                     G.Node.inputs r daig |> Sequence.find_exn ~f:(G.Edge.src >> Ref.is_astate)
                   in
@@ -792,21 +843,21 @@ module Make (Dom : Abstract.DomNoCtx) = struct
         r
 
   (** get the fixed-point of some [ref_cell] in the body of [loop_head]'s natural loop *)
-  and get_fixedpoint_wrt ~(ref_cell : Ref.t) ~(loop_head : Cfg.Loc.t) daig =
+  and get_fixedpoint_wrt ~(ref_cell : Ref.t) ~(loop_head : Cfg.Loc.t) summarize daig =
     let open Or_summary_query_with_daig.Monad_infix in
     match Ref.name ref_cell with
     | Name.(Iterate (ic, l)) -> (
         let loop_head_fp =
           ref_by_name_exn Name.(Iterate (ic, Loc loop_head) |> unset_iterate loop_head) daig
         in
-        get loop_head_fp daig >>= fun lh_fp daig ->
+        get loop_head_fp summarize daig >>= fun lh_fp daig ->
         match G.Node.preds lh_fp daig |> Sequence.to_list |> List.map ~f:Ref.name with
         | [ Name.Iterate (ic1, _); Name.Iterate (ic2, _) ] ->
             let ic1_wrt_lh = List.find_exn ic1 ~f:(snd >> Cfg.Loc.equal loop_head) |> fst in
             let ic2_wrt_lh = List.find_exn ic2 ~f:(snd >> Cfg.Loc.equal loop_head) |> fst in
             let ic = if ic1_wrt_lh < ic2_wrt_lh then ic1 else ic2 in
             let ref_cell_fp = ref_by_name_exn Name.(Iterate (ic, l)) daig in
-            get ref_cell_fp daig
+            get ref_cell_fp summarize daig
         | _ -> failwith (Format.asprintf "malformed DAIG for loop head %a" Cfg.Loc.pp loop_head) )
     | n -> failwith (Format.asprintf "can't get fixedpoint of non-loop-body ref_cell %a" Name.pp n)
 
@@ -822,98 +873,11 @@ module Make (Dom : Abstract.DomNoCtx) = struct
             Dom.interpret binding astate)
     | _ -> failwith "malformed callsite"
 
-  and interpret_call _callsite _daig _phi = failwith "todo"
-
-  (* match (phi, callsite) with
-     | AState { state = Some caller_state; _ }, Ast.Stmt.Call { meth; _ } ->
-         let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal meth) in
-         let callee_ctx = Dom.Ctx.callee_ctx ~caller_state ~callsite ~ctx in
-         let callee_entry_state =
-           bind_formals caller_state callsite callee
-           (* TODO: decide: project down to minimal environment for summarization? *)
-           (*|> Dom.project ~vars:(Cfg.Fn.formals callee)*)
-         in
-         (* find or create DAIG for callee, join [callee_entry_state] into callee entry *)
-         let callee_entry_ref =
-           let loc_name = Name.(Loc (Cfg.Fn.entry callee, callee_ctx)) in
-           match ref_by_name (Name.Iterate (0, loc_name)) daig with
-           | Some r -> Some r
-           | None -> ref_by_name loc_name daig
-         in
-         let daig =
-           match callee_entry_ref with
-           | Some (AState phi as callee_entry_ref) when Option.is_some phi.state ->
-               if Dom.implies callee_entry_state (Option.value_exn phi.state) then daig
-               else
-                 let entry_state = Option.fold phi.state ~init:callee_entry_state ~f:Dom.join in
-                 if Option.exists ~f:(Dom.equal entry_state) phi.state then daig
-                 else (
-                   phi.state <- Some entry_state;
-                   dirty_from ~interproc:false callee_entry_ref daig )
-           | Some (AState phi) ->
-               phi.state <- Some callee_entry_state;
-               daig
-           | _ ->
-               add_region_to_daig ~init_state:callee_entry_state ~from_loc:(Cfg.Fn.entry callee)
-                 ~ctx:callee_ctx daig
-         in
-         (* [get] callee exit *)
-         let callee_exit, daig =
-           ref_by_name_exn Name.(Loc (Cfg.Fn.exit callee, callee_ctx)) daig |> flip get daig
-         in
-         let return_state = Ref.astate_exn callee_exit in
-         let callee_defs = Cfg.Fn.defs callee in
-         (Dom.handle_return ~caller_state ~return_state ~callsite ~callee_defs, daig)
-     | _ -> failwith "Malformed callsite"
-  *)
-  (*
-  and analyze_to_fn_entry r daig =
-       let loc, ctx =
-         match Ref.name r with
-         | Name.Loc (l, c) -> (l, c)
-         | Name.(Iterate (0, Loc (l, c))) -> (l, c)
-         | _ -> failwith "malformed name; not a function entry"
-       in
-       (* Given a location/context pair at a function entry and a daig, analyze all data flow into that function entry. *)
-       Cfg.call_chains_to ~loc ~cfg:(snd daig)
-       |> List.filter ~f:(List.map ~f:Cfg.G.Edge.label >> Dom.Ctx.is_feasible_callchain ctx)
-       |> List.fold ~init:daig ~f:(fun daig -> function
-            | [] -> failwith "invalid empty call chain"
-            | immediate_caller :: chain -> (
-                List.rev chain
-                |> List.fold ~init:(daig, Dom.Ctx.init) ~f:(fun (daig, curr_ctx) callsite ->
-                       let precall_loc, callsite, postcall_loc =
-                         Cfg.G.Edge.(src callsite, label callsite, dst callsite)
-                       in
-                       let _, daig = get_by_loc postcall_loc curr_ctx daig in
-                       let prestate, _ = get_by_loc precall_loc curr_ctx daig in
-                       ( daig,
-                         Dom.Ctx.callee_ctx ~caller_state:(Ref.astate_exn prestate) ~callsite
-                           ~ctx:curr_ctx ))
-                |> fun (daig, immediate_caller_ctx) ->
-                match Cfg.G.Edge.label immediate_caller with
-                | Ast.Stmt.Call { meth; _ } as callsite ->
-                    let callee = Set.find_exn (snd (snd daig)) ~f:(Cfg.Fn.name >> String.equal meth) in
-                    let caller_state, daig =
-                      get_by_loc (Cfg.G.Edge.src immediate_caller) immediate_caller_ctx daig
-                    in
-                    let caller_state = Ref.astate_exn caller_state in
-                    ( if
-                      Dom.Ctx.(
-                        equal (callee_ctx ~caller_state ~callsite ~ctx:immediate_caller_ctx) ctx)
-                    then
-                      match ref_by_name_exn (Ref.name r) daig with
-                      | AState phi ->
-                          let new_flow_to_entry = Some (bind_formals caller_state callsite callee) in
-                          phi.state <- Option.merge phi.state new_flow_to_entry Dom.join
-                      | _ -> failwith "malformed DAIG" );
-                    daig
-                | _ -> failwith "malformed callsite" ))*)
-  and get_by_loc loc daig =
+  and get_by_loc ?(summarizer = fun _ _ ~is_exc:_ -> None) loc daig =
     ref_at_loc_exn ~loc daig |> function
     | Ref.AState { state = Some phi; name = _ } -> (Result phi, daig)
     | Ref.AState _ as r -> (
-        match get r daig with
+        match get r summarizer daig with
         | Result r, daig -> (Result (Ref.astate_exn r), daig)
         | (Summ_qry _ as sq), daig -> (sq, daig) )
     | _ -> failwith "malformed daig: ref-cell at a program loc must be of type Ref.AState"
@@ -924,9 +888,8 @@ module Make (Dom : Abstract.DomNoCtx) = struct
     | Add_function _ | Delete_function _ | Modify_function _ ->
         failwith "Can't apply interprocedural edit to intraprocedural DAIG"
     | Add_statements { method_id = _; at_loc; stmts = _ } ->
-        let { added_edges; added_loc; _ } = cfg_edit in
         let added_loc =
-          match added_loc with
+          match cfg_edit.added_loc with
           | Some l -> l
           | None -> failwith "error: Add_statements edit should always produce a fresh location"
         in
@@ -971,7 +934,7 @@ module Make (Dom : Abstract.DomNoCtx) = struct
           G.Node.remove (G.Edge.src stmt_edge) daig
           |> G.Edge.(insert (create new_stmt_node (dst stmt_edge) (label stmt_edge)))
         in
-        let cfg = Graph.create (module Cfg.G) ~edges:added_edges () in
+        let cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
         (* (1) construct a DAIG segment for the added region
            (2) union it with the existing DAIG
            (3) rebase old DAIG edges with src [at_loc], now with src [added_loc]
@@ -1003,8 +966,8 @@ module Make (Dom : Abstract.DomNoCtx) = struct
             ~extra_back_edges:[] ()
         in
         Graph.union (module G) new_daig_segment removed_region_daig
-    | Modify_header { method_id = _; at_loc; stmt = _; loop_body_exit = _ } ->
-        let at_loc_ref = ref_at_loc_exn ~loc:at_loc daig in
+    | Modify_header { method_id = _; prev_loc_ctx; next_stmt = _; loop_body_exit = _ } ->
+        let at_loc_ref = ref_at_loc_exn ~loc:prev_loc_ctx.entry daig in
         let _daig = dirty_from at_loc_ref in
         let _extra_back_edges = Option.to_list cfg_edit.added_for_loop_backedge in
         let _cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
@@ -1065,12 +1028,13 @@ module Dom = Domain.Unit_dom
 module Daig = Make (Dom)
 
 let%test "build daig, edit, and dump dot: HelloWorld.java" =
+  Cfg.Loc.reset ();
   let lm, cfgs =
     Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/HelloWorld.java")
   in
   match Map.to_alist cfgs with
   | [ (fn, cfg) ] ->
-      let daig = Daig.of_cfg ~init_state:(Dom.init ()) ~cfg ~fn in
+      let daig = Daig.of_cfg ~entry_state:(Dom.init ()) ~cfg ~fn in
       Daig.dump_dot ~filename:(abs_of_rel_path "helloworld_daig.dot") daig;
       let edit =
         Frontend.Tree_diff.Delete_statements
@@ -1080,8 +1044,7 @@ let%test "build daig, edit, and dump dot: HelloWorld.java" =
             to_loc = Cfg.Loc.of_int_unsafe 2;
           }
       in
-      let ret = Cfg.Loc.of_int_unsafe 2 in
-      let cfg_edit = Frontend.Tree_diff.apply_edit edit lm cfg ~ret in
+      let cfg_edit = Frontend.Tree_diff.apply_edit edit lm cfg ~ret:fn.exit ~exc:fn.exc_exit in
       let edited_daig = Daig.apply_edit ~daig edit ~fn ~cfg_edit in
       Daig.dump_dot ~filename:(abs_of_rel_path "edited_helloworld_daig.dot") edited_daig;
       true
@@ -1093,7 +1056,7 @@ let%test "analyze nested loops" =
   in
   Map.to_alist cfgs
   |> List.iter ~f:(fun (fn, cfg) ->
-         let daig = Daig.of_cfg ~init_state:(Dom.init ()) ~cfg ~fn in
+         let daig = Daig.of_cfg ~entry_state:(Dom.init ()) ~cfg ~fn in
          Daig.dump_dot ~filename:(abs_of_rel_path (fn.method_id.method_name ^ ".dot")) daig;
          let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
          Daig.dump_dot

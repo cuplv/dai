@@ -71,6 +71,8 @@ let implies l r =
   let l, r = combine_envs l r in
   Abstract1.is_leq (get_man ()) l r
 
+let ( <= ) = implies
+
 let bindings (itv : t) =
   let man = get_man () in
   let itv = Abstract1.minimize_environment man itv in
@@ -122,6 +124,8 @@ let t_of_sexp = function
   | _ -> failwith "malformed interval sexp"
 
 let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
+
+let bottom () = Abstract1.bottom (get_man ()) (Environment.make [||] [||])
 
 (* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
 let mk_tcons env op l r =
@@ -273,7 +277,7 @@ let interpret stmt itv =
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
-  | Array_write _ | Exceptional_call _ -> failwith "todo"
+  | Array_write _ | Exceptional_call _ -> failwith "todo: call semantics in interval domain"
   | Write _ | Skip | Expr _ | Call _ -> itv
   | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
   | Assume e -> meet_with_constraint itv e
@@ -301,30 +305,49 @@ let show itv =
 
 let hash seed itv = seeded_hash seed @@ Abstract1.hash (get_man ()) itv
 
-let compare _l _r = failwith "todo"
+let compare (l : t) (r : t) =
+  let open Abstract1 in
+  let man = get_man () in
+  try if is_eq man l r then 0 else if is_leq man l r then -1 else 1
+  with Apron.Manager.Error _ -> failwith "Apron.Manager.Error in Itv#compare"
 
 let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
 
-let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
+let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) =
+  match callsite with
+  | Ast.Stmt.Call { lhs = _; rcvr = _; meth = _; actuals }
+  | Ast.Stmt.Exceptional_call { rcvr = _; meth = _; actuals } -> (
+      try
+        let formal_bindings =
+          List.filter_map (List.zip_exn callee.formals actuals) ~f:(fun (f, a) ->
+              texpr_of_expr caller_state a >>| eval_texpr caller_state >>| pair (Var.of_string f))
+        in
+        let formals = List.map ~f:fst formal_bindings |> Array.of_list in
+        let bounds = List.map ~f:snd formal_bindings |> Array.of_list in
+        let env = Environment.make [||] formals in
+        Abstract1.of_box (get_man ()) env formals bounds
+      with Apron.Manager.Error _ -> failwith "Apron.Manager.Error in Itv#call" )
+  | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
+
+let return ~callee:_ ~callsite ~caller_state ~return_state =
   match callsite with
   | Ast.Stmt.Call { lhs; _ } -> (
       let man = get_man () in
       let lhs = Var.of_string lhs in
-      let env = Abstract1.env caller_state in
-      let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
+      let return_val = Abstract1.bound_variable man return_state (Var.of_string Cfg.retvar) in
+      let caller_env =
+        Abstract1.env caller_state |> fun env ->
+        Environment.(if mem_var env lhs then env else add env [||] [| lhs |])
       in
-      let caller_state = Abstract1.change_environment man caller_state new_env false in
-      let return_val =
-        try Abstract1.bound_variable man return_state (Var.of_string Cfg.retvar)
-        with Apron.Manager.Error _ -> Apron.Interval.top
-      in
+      let caller_state = Abstract1.change_environment man caller_state caller_env true in
       try
         Abstract1.assign_texpr man caller_state lhs
-          Texpr1.(of_expr new_env (Cst (Coeff.Interval return_val)))
+          Texpr1.(of_expr caller_env (Cst (Coeff.Interval return_val)))
           None
-      with Apron.Manager.Error _ -> caller_state )
-  | _ -> failwith "malformed callsite"
+      with Apron.Manager.Error { exn = _; funid = _; msg = _ } ->
+        failwith "Apron.Manager.Error in Itv#return" )
+  | Ast.Stmt.Exceptional_call _ -> failwith "exceptional return"
+  | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 (*let project ~vars itv =
   let env = Environment.make [||] (List.map ~f:Var.of_string vars |> Array.of_list) in

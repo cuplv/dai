@@ -28,6 +28,8 @@ let is_bot = Option.fold ~init:true ~f:(fun _ (_, itv) -> Itv.is_bot itv)
 
 let init () = pair (Map.empty (module String)) (Itv.init ()) |> Option.some
 
+let bottom () = None
+
 let mk_binary_op a_op i_op l r =
   match (l, r) with
   | Some (al, il), Some (ar, ir) -> Some (a_op al ar, i_op il ir)
@@ -262,7 +264,7 @@ let is_safe var idx state =
         |> List.reduce_exn ~f:(fun x y ->
                match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
 
-let handle_return ~(caller_state : t) ~(return_state : t) ~callsite ~callee_defs =
+(*let handle_return ~(caller_state : t) ~(return_state : t) ~callsite ~callee_defs =
   return_state >>= fun (return_addrs, return_itv) ->
   caller_state >>| fun (caller_addrs, caller_itv) ->
   match callsite with
@@ -276,4 +278,11 @@ let handle_return ~(caller_state : t) ~(return_state : t) ~callsite ~callee_defs
         | None -> caller_addrs
       in
       (addrs, itv)
-  | _ -> failwith "malformed callsite"
+  | _ -> failwith "malformed callsite"*)
+let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+
+let ( <= ) = implies
+
+(* deferred to end of this file to avoid colliding with Dai.Import.(<=) *)

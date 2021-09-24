@@ -145,7 +145,7 @@ module Stmt = struct
     | Assign of { lhs : string; rhs : Expr.t }
     | Assume of Expr.t
     | Call of { lhs : string; rcvr : string; meth : string; actuals : Expr.t list }
-    | Exceptional_call of {rcvr : string; meth : string; actuals : Expr.t list }
+    | Exceptional_call of { rcvr : string; meth : string; actuals : Expr.t list }
     | Expr of Expr.t
     | Skip
     | Throw of { exn : Expr.t }
@@ -171,9 +171,9 @@ module Stmt = struct
     | Array_write { rcvr = _; idx; rhs } -> Set.union (Expr.uses idx) (Expr.uses rhs)
     | Assign { lhs = _; rhs } -> Expr.uses rhs
     | Assume e -> Expr.uses e
-    | Call { lhs = _; rcvr; meth = _; actuals }
-    | Exceptional_call { rcvr; meth = _; actuals } ->
-        List.fold actuals ~init:(String.Set.singleton rcvr) ~f:(fun a c -> Set.union a (Expr.uses c))
+    | Call { lhs = _; rcvr; meth = _; actuals } | Exceptional_call { rcvr; meth = _; actuals } ->
+        List.fold actuals ~init:(String.Set.singleton rcvr) ~f:(fun a c ->
+            Set.union a (Expr.uses c))
     | Expr e -> Expr.uses e
     | Skip -> String.Set.empty
     | Throw { exn } -> Expr.uses exn
@@ -195,5 +195,5 @@ module Stmt = struct
 
   let skip = Skip
 
-  let is_exc = function | Exceptional_call _ -> true | _ -> false
+  let is_exc = function Exceptional_call _ -> true | _ -> false
 end

@@ -5,13 +5,15 @@ module T = struct
     package : string list;
     class_name : string;
     method_name : string;
+    static : bool;
     arg_types : string list;
   }
   [@@deriving compare, equal, hash, sexp_of]
 
-  let pp fs { package; class_name; method_name; arg_types } =
-    Format.fprintf fs "%a.%s#%s(%a)" (List.pp "." String.pp) package class_name method_name
-      (List.pp "," String.pp) arg_types
+  let pp fs { package; class_name; method_name; static; arg_types } =
+    Format.fprintf fs "%a.%s%s%s(%a)" (List.pp "." String.pp) package class_name
+      (if static then "." else "#")
+      method_name (List.pp "," String.pp) arg_types
 end
 
 module T_comparator : sig

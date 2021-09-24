@@ -3,7 +3,12 @@ open Syntax
 
 type edge = Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t
 
-val expr : ?exit_loc:Cfg.Loc.t -> curr_loc:Cfg.Loc.t -> exc:Cfg.Loc.t -> CST.expression -> Ast.Expr.t * (Cfg.Loc.t * edge list)
+val expr :
+  ?exit_loc:Cfg.Loc.t ->
+  curr_loc:Cfg.Loc.t ->
+  exc:Cfg.Loc.t ->
+  CST.expression ->
+  Ast.Expr.t * (Cfg.Loc.t * edge list)
 (** Convert an expression concrete syntax tree to an expression in our IR, along with potentially some preceding statements for any function invocations and assignments therein, and a shifted current program location to accomodate those intermediate statements.
     That is, 
       * if `cst` represents a simple expression with no function invocations or assignments, return value is (<that expression in our IR>, (curr_loc,[]))

@@ -62,6 +62,8 @@ end = struct
 
   let init () = Some (Env.of_list [])
 
+  let bottom () = None
+
   let is_bot = Option.is_none
 
   (* TODO: adapton-ify? *)
@@ -98,6 +100,8 @@ end = struct
 
   let implies _x _y = failwith "todo"
 
+  let ( <= ) = implies
+
   (* let rename =
        let mfn =
          Art.mk_mfn (Name.of_string "Dom#rename")
@@ -124,7 +128,9 @@ end = struct
        in
        fun ~vars -> flip ( >>= ) (fun env -> mfn.mfn_art (vars, env) |> Art.force) *)
 
-  let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
+  let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+  let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
 
   let make_memoized_pointwise_binary_op op nm =
     let mfn =
@@ -185,6 +191,8 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
   let hash_fold_t seed = hash 0 >> Ppx_hash_lib.Std.Hash.fold_int seed
 
   let init () = Some (Env.of_list [], Heap.of_list [])
+
+  let bottom () = None
 
   let is_bot = Option.is_none
 
@@ -307,7 +315,11 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
 
   let implies _ _ = failwith "todo"
 
-  let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
+  let ( <= ) = implies
+
+  let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+  let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
 
   let sexp_of_t =
     let open Sexp in

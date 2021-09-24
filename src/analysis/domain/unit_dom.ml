@@ -14,9 +14,13 @@ let join () () = ()
 
 let implies () () = true
 
+let ( <= ) = implies
+
 let interpret _ () = ()
 
 let init () = ()
+
+let bottom () = ()
 
 let pp fs () = Format.fprintf fs "()"
 
@@ -36,4 +40,6 @@ let t_of_sexp _ = ()
 
 let hash_fold_t seed () = seed
 
-let handle_return ~caller_state:_ ~return_state:_ ~callsite:_ ~callee_defs:_ = failwith "todo"
+let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"

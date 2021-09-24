@@ -386,7 +386,11 @@ module T = struct
 
   let is_bot (_, p, _) = Pure.is_bot p
 
-  let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
+  let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+
+  let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+
+  (*let handle_return ~caller_state ~return_state ~callsite:_ ~callee_defs:_ =
     let _return_graph, _return_pures, return_env = return_state in
     let _caller_graph, _caller_pures, _caller_env = caller_state in
     match Env.find return_env Syntax.Cfg.retvar with
@@ -394,7 +398,7 @@ module T = struct
     | Some _retval_memloc ->
         (* bind lhs of callsite to retval_memloc *)
         (* handle shadowing: keep caller_env bindings that were shadowed?  need that list of defs for the callee for that though*)
-        failwith "todo"
+        failwith "todo"*)
 
   (*let process_pures (g,p,e) = build equivalence classes, collapse addresses known to be equal, go to bottom if contradiction; apply after each [interpret]?*)
 
@@ -525,6 +529,8 @@ module T = struct
             failwith "ask evan -- is implementing implies even necessary here? I suspect not."
         | `List_seg, `Next_ptr -> failwith "ask evan")
     |> fun _ -> failwith "todo"
+
+  let ( <= ) = implies
 end
 
 include T

@@ -100,7 +100,7 @@ module Fn = struct
     }
     [@@deriving compare, equal, hash, sexp_of]
 
-    let name { method_id; _ } = method_id
+    let method_id { method_id; _ } = method_id
 
     let formals { formals; _ } = formals
 
@@ -157,7 +157,13 @@ module Fn = struct
 
     let empty = Map.empty (module T_comparator)
 
-    let fn_by_method_id method_id = keys >> List.find ~f:(name >> Method_id.equal method_id)
+    let fn_by_method_id m_id = keys >> List.find ~f:(fun f -> Method_id.equal m_id f.method_id)
+
+    let fn_by_method_id_exn m_id map =
+      match fn_by_method_id m_id map with
+      | Some fn -> fn
+      | None ->
+          failwith (Format.asprintf "no function available for method_id: %a" Method_id.pp m_id)
   end
 end
 
@@ -177,7 +183,9 @@ let add_fn fn ~edges prgm =
   set_fn_cfg fn ~cfg prgm
 
 let remove_fn method_id prgm =
-  match List.find (Fn.Map.keys prgm) ~f:(Fn.name >> Method_id.equal method_id) with
+  match
+    List.find (Fn.Map.keys prgm) ~f:(fun (f : Fn.t) -> Method_id.equal method_id f.method_id)
+  with
   | Some fn -> Fn.Map.remove prgm fn
   | None ->
       failwith
