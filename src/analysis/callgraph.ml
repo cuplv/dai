@@ -24,9 +24,7 @@ let resolve_by_name ~callsite candidates =
 
 let resolve_with_callgraph ~callsite ~caller_method ~callgraph =
   let candidates =
-    match Method_id.Map.find callgraph caller_method with
-    | Some cs -> cs
-    | None -> Cfg.Fn.Set.empty
+    match Method_id.Map.find callgraph caller_method with Some cs -> cs | None -> Cfg.Fn.Set.empty
   in
   resolve_by_name ~callsite candidates
 
@@ -56,7 +54,7 @@ let deserialize_method m : Method_id.t =
     match split rest_of_m ~on:'(' with
     | [ meth; args_and_close_paren ] ->
         let args = sub args_and_close_paren ~pos:0 ~len:(length args_and_close_paren - 1) in
-        (meth, split args ~on:',')
+        (meth, split args ~on:',' |> List.filter ~f:(String.length >> Int.is_positive))
     | _ -> failwith ("malformed serialized method: " ^ m)
   in
   { package; class_name; method_name; static; arg_types }
@@ -66,7 +64,7 @@ let deserialize_method m : Method_id.t =
    * a callee_line is "\tCALLEE: <method_id>\n"
    * <method_id>'s can be deserialized by [deserialized_method]
    * there exists a call edge to each CALLEE from the preceding CALLER
- *)
+*)
 let deserialize ~fns =
   Frontend.Src_file.lines
   >> Array.fold
@@ -77,25 +75,30 @@ let deserialize ~fns =
            (acc_cg, Some caller)
          else
            let caller = Option.value_exn curr_caller in
-           let callee_method = String.chop_prefix_exn ~prefix:"\tCALLEE: " line |> deserialize_method in
-           let callee = List.find fns ~f:(fun (f:Cfg.Fn.t) -> Method_id.equal f.method_id callee_method) in
+           let callee_method =
+             String.chop_prefix_exn ~prefix:"\tCALLEE: " line |> deserialize_method
+           in
+           let callee =
+             List.find fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id callee_method)
+           in
            match callee with
-           | None -> (acc_cg,curr_caller)
+           | None -> (acc_cg, curr_caller)
            | Some callee ->
-             let cg =
-               Method_id.Map.set acc_cg ~key:caller
-                 ~data:
-                   ( match Method_id.Map.find acc_cg caller with
+               let cg =
+                 Method_id.Map.set acc_cg ~key:caller
+                   ~data:
+                     ( match Method_id.Map.find acc_cg caller with
                      | Some callees -> Set.add callees callee
                      | None -> Cfg.Fn.Set.singleton callee )
-             in
-             (cg, curr_caller))
+               in
+               (cg, curr_caller))
   >> fst
 
 let%test "procedures example" =
-
   let src_file = Frontend.Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
-  let fns = Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/Procedures.java") |> snd |> Map.keys in
+  let fns =
+    Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/Procedures.java")
+    |> snd |> Map.keys
+  in
   let cg : t = deserialize ~fns src_file in
-  Map.pp Method_id.pp (Set.pp Cfg.Fn.pp) Format.std_formatter cg;
-  true
+  List.length (Map.keys cg) |> Int.equal 3

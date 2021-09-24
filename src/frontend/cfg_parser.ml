@@ -719,7 +719,7 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
       let formals = parse_formals formals in
       let locals = declarations stmts in
       let method_id : Method_id.t =
-        { package; class_name; method_name = "<init>"; static = true; arg_types }
+        { package; class_name; method_name = "<init>"; static = false; arg_types }
       in
       let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit; exc_exit } in
       let loc_map, edges =
@@ -760,7 +760,7 @@ let rec parse_class_decl ?(package = []) ?(parent_class_name = None) loc_map :
     CST.class_declaration -> Loc_map.t * (edge list * Cfg.Fn.t) list = function
   | _modifiers, _, (_, class_name), _type_params, _superclass, _superinterfaces, (_, decls, _) ->
       let class_name =
-        match parent_class_name with Some n -> n ^ "#" ^ class_name | None -> class_name
+        match parent_class_name with Some n -> n ^ "$" ^ class_name | None -> class_name
       in
       List.fold decls ~init:(loc_map, []) ~f:(fun (loc_map, acc) -> function
         | `Meth_decl md -> (

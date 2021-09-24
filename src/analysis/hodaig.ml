@@ -41,11 +41,11 @@ module Make (Dom : Abstract.Dom) = struct
   let materialize_daig ~(fn : Cfg.Fn.t) ~(entry_state : Dom.t) (hodaig : t) =
     let cfg, daigs = Map.find_exn hodaig fn in
     match Map.find daigs entry_state with
-    | Some daig -> (hodaig, daig)
+    | Some daig -> (daig, hodaig)
     | None ->
         let daig = D.of_cfg ~entry_state ~cfg ~fn in
         let daigs = Map.add_exn daigs ~key:entry_state ~data:daig in
-        (Map.set hodaig ~key:fn ~data:(cfg, daigs), daig)
+        (daig, Map.set hodaig ~key:fn ~data:(cfg, daigs))
 
   let summarize_with_callgraph hodaig callgraph caller_method callsite caller_state ~is_exc =
     let open Option.Monad_infix in
@@ -101,7 +101,7 @@ module Make (Dom : Abstract.Dom) = struct
           failwith (Format.asprintf "No source available for method_id %a" Method_id.pp method_id)
       | Some fn -> fn
     in
-    let hodaig, daig = materialize_daig ~fn ~entry_state hodaig in
+    let daig, hodaig = materialize_daig ~fn ~entry_state hodaig in
     let summarizer = summarize_with_callgraph hodaig callgraph in
     (* try getting state at loc directly from sub-DAIG; return if success; process generated summary queries otherwise *)
     let daig_qry_result, hodaig =
@@ -116,7 +116,7 @@ module Make (Dom : Abstract.Dom) = struct
         let rec solve_subqueries hodaig : Q.t list -> t = function
           | [] -> hodaig
           | qry :: qrys -> (
-              let hodaig, callee_daig =
+              let callee_daig, hodaig =
                 materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state hodaig
               in
               let daig_qry_result, hodaig =
@@ -205,16 +205,17 @@ let%test "single-file interprocedurality with a public-static-void-main" =
   Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "procedures.dot") cfgs;
   let h : H.t = H.init ~cfgs in
   let fns = Cfg.Fn.Map.keys h in
-  let main_fn = List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
+  let main_fn =
+    List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
-  let h, _ = H.materialize_daig ~fn:main_fn ~entry_state:(H.Dom.init ()) h in
+  let _, h = H.materialize_daig ~fn:main_fn ~entry_state:(H.Dom.init ()) h in
   let _ = H.dump_dot ~filename:(abs_of_rel_path "procedures.hodaig.dot") h in
   let callgraph =
-    Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/procedures.callgraph")
+    Callgraph.deserialize ~fns
+      (Src_file.of_file @@ abs_of_rel_path "test_cases/procedures.callgraph")
   in
-  let _ =
-    try H.query ~method_id:main_fn.method_id ~entry_state:(H.Dom.init ()) ~loc:main_fn.exit ~callgraph h
-    with Apron.Manager.Error _ -> failwith "got an APRON Manager Error!"
+  let _, h =
+    H.query ~method_id:main_fn.method_id ~entry_state:(H.Dom.init ()) ~loc:main_fn.exit ~callgraph h
   in
-
+  let _ = H.dump_dot ~filename:(abs_of_rel_path "solved_procedures.hodaig.dot") h in
   true

@@ -112,8 +112,7 @@ module Fn = struct
 
     let exc_exit { exc_exit; _ } = exc_exit
 
-    let pp fs { method_id; formals; _ } =
-      Format.fprintf fs "%a(%a)" Method_id.pp method_id (List.pp ", " String.pp) formals
+    let pp fs { method_id; _ } = Format.fprintf fs "FN[%a]" Method_id.pp method_id
 
     let make ~method_id ~formals ~entry ~exit ~exc_exit ~body =
       let locals =
