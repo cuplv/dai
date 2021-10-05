@@ -40,6 +40,8 @@ let t_of_sexp _ = ()
 
 let hash_fold_t seed () = seed
 
-let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+let call ~callee:_ ~callsite:_ ~caller_state:_ ~fields:_ = ()
 
-let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ ~fields:_ = ()
+
+let approximate_missing_callee ~caller_state:_ ~callsite:_ = ()

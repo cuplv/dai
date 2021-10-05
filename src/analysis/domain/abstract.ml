@@ -56,9 +56,18 @@ module type Dom = sig
 
   val is_bot : t -> bool
 
-  val call : callee:Cfg.Fn.t -> callsite:Ast.Stmt.t -> caller_state:t -> t
+  val call :
+    callee:Cfg.Fn.t -> callsite:Ast.Stmt.t -> caller_state:t -> fields:Declared_fields.t -> t
 
-  val return : callee:Cfg.Fn.t -> callsite:Ast.Stmt.t -> caller_state:t -> return_state:t -> t
+  val return :
+    callee:Cfg.Fn.t ->
+    callsite:Ast.Stmt.t ->
+    caller_state:t ->
+    return_state:t ->
+    fields:Declared_fields.t ->
+    t
+
+  val approximate_missing_callee : caller_state:t -> callsite:Ast.Stmt.t -> t
 end
 
 module type CtxSensitiveDom = sig

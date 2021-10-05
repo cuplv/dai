@@ -51,6 +51,11 @@ let join l r =
   let l, r = combine_envs l r in
   Abstract1.join (get_man ()) l r
 
+(* Do not eta-reduce!  Will break lazy manager allocation *)
+let meet l r =
+  let l, r = combine_envs l r in
+  Abstract1.meet (get_man ()) l r
+
 (* Do not eta-reduce! Will break lazy manager allocation *)
 let widen l r =
   let l, r = combine_envs l r in
@@ -89,7 +94,11 @@ let pp_interval fs (interval : Interval.t) =
 
 let pp fs itv =
   if is_bot itv then Format.fprintf fs "bottom"
-  else bindings itv |> Array.pp "@," (pp_pair Var.print pp_interval) fs
+  else
+    bindings itv
+    |>
+    let pp_binding fs (v, i) = Format.fprintf fs "%a -> %a" Var.print v pp_interval i in
+    Format.fprintf fs "{%a}" (Array.pp "; " pp_binding)
 
 let sexp_of_t (itv : t) =
   let sexps =
@@ -260,8 +269,11 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
   | _ -> itv
 
 let eval_texpr itv =
-  let env = Abstract1.env itv in
-  Texpr1.of_expr env >> Abstract1.bound_texpr (get_man ()) itv
+  (fun e ->
+    try Texpr1.of_expr (Abstract1.env itv) e
+    with _ ->
+      failwith (Format.asprintf "error in Texpr1.of_expr; expr = [%a]\n" Texpr1.print_expr e))
+  >> Abstract1.bound_texpr (get_man ()) itv
 
 let extend_env_by_uses stmt itv =
   let env = Abstract1.env itv in
@@ -270,29 +282,47 @@ let extend_env_by_uses stmt itv =
   |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   |> Set.to_array |> Array.map ~f:Var.of_string
   |> Environment.add env [||]
-  |> fun new_env -> Abstract1.change_environment man itv new_env true
+  |> fun new_env -> Abstract1.change_environment man itv new_env false
+
+let filter_env (itv : t) ~(f : string -> bool) =
+  let env = Abstract1.env itv in
+  let _, fp_vars = Environment.vars env in
+  let removed_vars = Array.filter fp_vars ~f:(Var.to_string >> f >> not) in
+  let new_env = Environment.remove env removed_vars in
+  Abstract1.change_environment (get_man ()) itv new_env false
+
+let forget vars itv =
+  let new_env = Environment.remove (Abstract1.env itv) vars in
+  Abstract1.change_environment (get_man ()) itv new_env false
+
+let assign itv var texpr =
+  let man = get_man () in
+  let env =
+    Abstract1.env itv |> fun env ->
+    Environment.(if mem_var env var then env else add env [||] [| var |])
+  in
+  let itv = Abstract1.change_environment man itv env false in
+  Abstract1.assign_texpr man itv var Texpr1.(of_expr env texpr) None
+
+let lookup itv var =
+  let man = get_man () in
+  if Environment.mem_var (Abstract1.env itv) var then Abstract1.bound_variable man itv var
+  else Interval.top
 
 let interpret stmt itv =
   let open Ast.Stmt in
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
-  | Array_write _ | Exceptional_call _ -> failwith "todo: call semantics in interval domain"
+  | Array_write _ | Exceptional_call _ -> failwith "todo: Itv#interpret"
   | Write _ | Skip | Expr _ | Call _ -> itv
-  | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env itv)
   | Assume e -> meet_with_constraint itv e
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
-      let env = Abstract1.env itv in
-      let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
-      in
-      let itv_new_env = Abstract1.change_environment man itv new_env true in
       match texpr_of_expr itv rhs with
-      | Some rhs_texpr ->
-          Abstract1.assign_texpr man itv_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None
+      | Some rhs_texpr -> assign itv lhs rhs_texpr
       | None ->
-          if Environment.mem_var env lhs then
+          if Environment.mem_var (Abstract1.env itv) lhs then
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man itv [| lhs |] false
           else (* lhs was unconstrained, treat as a `skip`*) itv )
@@ -313,42 +343,36 @@ let compare (l : t) (r : t) =
 
 let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
 
-let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) =
+let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
   match callsite with
-  | Ast.Stmt.Call { lhs = _; rcvr = _; meth = _; actuals }
-  | Ast.Stmt.Exceptional_call { rcvr = _; meth = _; actuals } -> (
-      try
+  | Ast.Stmt.Call { actuals; _ } | Ast.Stmt.Exceptional_call { actuals; _ } ->
+      if is_bot caller_state then caller_state
+      else
+        let caller_state = extend_env_by_uses callsite caller_state in
         let formal_bindings =
           List.filter_map (List.zip_exn callee.formals actuals) ~f:(fun (f, a) ->
               texpr_of_expr caller_state a >>| eval_texpr caller_state >>| pair (Var.of_string f))
         in
-        let formals = List.map ~f:fst formal_bindings |> Array.of_list in
-        let bounds = List.map ~f:snd formal_bindings |> Array.of_list in
-        let env = Environment.make [||] formals in
-        Abstract1.of_box (get_man ()) env formals bounds
-      with Apron.Manager.Error _ -> failwith "Apron.Manager.Error in Itv#call" )
+        if List.is_empty formal_bindings then
+          Abstract1.top (get_man ()) (Environment.make [||] [||])
+        else
+          let formals = List.map ~f:fst formal_bindings |> Array.of_list in
+          let bounds = List.map ~f:snd formal_bindings |> Array.of_list in
+          Abstract1.of_box (get_man ()) (Environment.make [||] formals) formals bounds
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-let return ~callee:_ ~callsite ~caller_state ~return_state =
+let return ~callee:_ ~callsite ~caller_state ~return_state ~fields:_ =
   match callsite with
-  | Ast.Stmt.Call { lhs; _ } -> (
+  | Ast.Stmt.Call { lhs; _ } ->
       let man = get_man () in
-      let lhs = Var.of_string lhs in
-      let return_val = Abstract1.bound_variable man return_state (Var.of_string Cfg.retvar) in
-      let caller_env =
-        Abstract1.env caller_state |> fun env ->
-        Environment.(if mem_var env lhs then env else add env [||] [| lhs |])
+      let return_val =
+        let retvar = Var.of_string Cfg.retvar in
+        if Environment.mem_var (Abstract1.env return_state) retvar then
+          Abstract1.bound_variable man return_state retvar
+        else Interval.top
       in
-      let caller_state = Abstract1.change_environment man caller_state caller_env true in
-      try
-        Abstract1.assign_texpr man caller_state lhs
-          Texpr1.(of_expr caller_env (Cst (Coeff.Interval return_val)))
-          None
-      with Apron.Manager.Error { exn = _; funid = _; msg = _ } ->
-        failwith "Apron.Manager.Error in Itv#return" )
-  | Ast.Stmt.Exceptional_call _ -> failwith "exceptional return"
+      assign caller_state (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+  | Ast.Stmt.Exceptional_call _ -> failwith "todo: exceptional Itv#return"
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-(*let project ~vars itv =
-  let env = Environment.make [||] (List.map ~f:Var.of_string vars |> Array.of_list) in
-  Abstract1.change_environment (get_man ()) itv env false*)
+let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"

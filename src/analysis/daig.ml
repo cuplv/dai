@@ -22,7 +22,7 @@ module type Sig = sig
     | Result of 'a
     | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
 
-  type summarizer = Ast.Stmt.t -> absstate -> is_exc:bool -> absstate option
+  type summarizer = Ast.Stmt.t -> absstate -> absstate option
 
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
@@ -246,7 +246,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Result of 'a
     | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
 
-  type summarizer = Ast.Stmt.t -> absstate -> is_exc:bool -> absstate option
+  type summarizer = Ast.Stmt.t -> absstate -> absstate option
 
   module Or_summary_query_with_daig = struct
     (** provide infix monadic operations over ['a or_summary_query * t] *)
@@ -794,14 +794,8 @@ module Make (Dom : Abstract.Dom) = struct
               | [ s; phi ] -> (
                   match Ref.stmt_exn s with
                   | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
-                      let is_exc =
-                        match callsite with
-                        | Ast.Stmt.Call _ -> false
-                        | Ast.Stmt.Exceptional_call _ -> true
-                        | _ -> failwith "unreachable"
-                      in
                       let res =
-                        match summarizer callsite (Ref.astate_exn phi) ~is_exc with
+                        match summarizer callsite (Ref.astate_exn phi) with
                         | Some phi_prime -> Result phi_prime
                         | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi }
                       in
@@ -873,7 +867,7 @@ module Make (Dom : Abstract.Dom) = struct
             Dom.interpret binding astate)
     | _ -> failwith "malformed callsite"
 
-  and get_by_loc ?(summarizer = fun _ _ ~is_exc:_ -> None) loc daig =
+  and get_by_loc ?(summarizer = fun _ _ -> None) loc daig =
     ref_at_loc_exn ~loc daig |> function
     | Ref.AState { state = Some phi; name = _ } -> (Result phi, daig)
     | Ref.AState _ as r -> (
@@ -971,7 +965,7 @@ module Make (Dom : Abstract.Dom) = struct
         let _daig = dirty_from at_loc_ref in
         let _extra_back_edges = Option.to_list cfg_edit.added_for_loop_backedge in
         let _cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
-        failwith "todo"
+        failwith "todo: Modify_header edit"
     | Delete_statements { method_id = _; from_loc; to_loc } ->
         let from_ref = ref_at_loc_exn ~loc:from_loc daig in
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
@@ -1026,11 +1020,12 @@ end
 
 module Dom = Domain.Unit_dom
 module Daig = Make (Dom)
+open Frontend
 
 let%test "build daig, edit, and dump dot: HelloWorld.java" =
   Cfg.Loc.reset ();
-  let lm, cfgs =
-    Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/HelloWorld.java")
+  let ({ loc_map; cfgs; _ } : Cfg_parser.prgm_parse_result) =
+    Frontend.Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/HelloWorld.java")
   in
   match Map.to_alist cfgs with
   | [ (fn, cfg) ] ->
@@ -1044,15 +1039,15 @@ let%test "build daig, edit, and dump dot: HelloWorld.java" =
             to_loc = Cfg.Loc.of_int_unsafe 2;
           }
       in
-      let cfg_edit = Frontend.Tree_diff.apply_edit edit lm cfg ~ret:fn.exit ~exc:fn.exc_exit in
+      let cfg_edit = Frontend.Tree_diff.apply_edit edit loc_map cfg ~ret:fn.exit ~exc:fn.exc_exit in
       let edited_daig = Daig.apply_edit ~daig edit ~fn ~cfg_edit in
       Daig.dump_dot ~filename:(abs_of_rel_path "edited_helloworld_daig.dot") edited_daig;
       true
   | _ -> failwith "malformed cfg -- only one procedure in HelloWorld.java"
 
 let%test "analyze nested loops" =
-  let _, cfgs =
-    Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/NestedLoops.java")
+  let ({ cfgs; _ } : Cfg_parser.prgm_parse_result) =
+    Frontend.Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/NestedLoops.java")
   in
   Map.to_alist cfgs
   |> List.iter ~f:(fun (fn, cfg) ->

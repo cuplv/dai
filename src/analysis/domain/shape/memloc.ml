@@ -69,5 +69,5 @@ end
 module Labelled_pair = struct
   type t = T.t * T.t * string [@@deriving equal, compare, hash, sexp]
 
-  let pp = pp_triple T.pp T.pp String.pp
+  let pp fs (x, y, lbl) = Format.fprintf fs "%s(%a,%a)" lbl T.pp x T.pp y
 end

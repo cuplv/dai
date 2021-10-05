@@ -29,6 +29,7 @@ module Make (Dom : Abstract.Dom) : sig
     entry_state:Dom.t ->
     loc:Cfg.Loc.t ->
     callgraph:Callgraph.t ->
+    fields:Declared_fields.t ->
     t ->
     Dom.t * t
 end

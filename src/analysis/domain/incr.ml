@@ -88,7 +88,6 @@ end = struct
           | Assign { lhs; rhs } ->
               let rhs = eval_expr env rhs in
               Some (Env.add env lhs rhs)
-          | Throw { exn = _ } -> None
           | Assume e -> (
               match Val.truthiness (eval_expr env e) with
               | `T | `Either -> Some env
@@ -131,6 +130,8 @@ end = struct
   let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
 
   let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+
+  let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
 
   let make_memoized_pointwise_binary_op op nm =
     let mfn =
@@ -268,7 +269,6 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               Env.find env rcvr >>= AAddr_or_val.addr >>= fun rcvr ->
               eval_expr env heap field >>= AAddr_or_val.value >>= fun field ->
               eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr field rhs)*)
-          | Throw _ -> None
           | Assume e -> (
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function
               | `T | `Either -> Some (env, heap)
@@ -317,9 +317,11 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
 
   let ( <= ) = implies
 
-  let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+  let call ~callee:_ ~callsite:_ ~caller_state:_ ~fields:_ = failwith "todo"
 
-  let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+  let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ ~fields:_ = failwith "todo"
+
+  let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
 
   let sexp_of_t =
     let open Sexp in

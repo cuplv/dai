@@ -3,7 +3,8 @@ open Dai.Import
 type t = Memloc.t String.Map.t [@@deriving compare, equal]
 
 let pp fs (env : t) =
-  String.Map.to_alist env |> List.pp ~pre:"{" ~suf:"}" ", " (pp_pair String.pp Memloc.pp) fs
+  let pp_assoc fs (k, v) = Format.fprintf fs "%s -> %a" k Memloc.pp v in
+  String.Map.to_alist env |> List.pp ~pre:"{" ~suf:"}" ", " pp_assoc fs
 
 (* I'm sure there's a better way to expose String.Map functionality -- this is quick and dirty *)
 

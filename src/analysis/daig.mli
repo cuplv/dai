@@ -25,7 +25,7 @@ module type Sig = sig
         (case 2: Summ_qry) additional method summaries are needed to evaluate some [callsite] in [caller_state]
         *)
 
-  type summarizer = Ast.Stmt.t -> absstate -> is_exc:bool -> absstate option
+  type summarizer = Ast.Stmt.t -> absstate -> absstate option
 
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
   (** Get the fixed-point abstract state at some program location in some DAIG (or query for requisite new method summaries)*)

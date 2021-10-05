@@ -241,7 +241,6 @@ let interpret stmt oct =
   let oct = extend_env_by_uses stmt oct in
   match stmt with
   | Write _ | Skip | Expr _ | Call _ -> oct
-  | Throw { exn = _ } -> Abstract1.bottom man (Abstract1.env oct)
   | Assume e -> meet_with_constraint oct e
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
@@ -277,6 +276,8 @@ let hash_fold_t h oct = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 oct)
 let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
 
 let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+
+let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
 
 (*let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
   match callsite with
