@@ -144,11 +144,16 @@ module Stmt = struct
     | Array_write of { rcvr : string; idx : Expr.t; rhs : Expr.t }
     | Assign of { lhs : string; rhs : Expr.t }
     | Assume of Expr.t
-    | Call of { lhs : string; rcvr : string; meth : string; actuals : Expr.t list }
+    | Call of {
+        lhs : string;
+        rcvr : string;
+        meth : string;
+        actuals : Expr.t list;
+        alloc_site : Alloc_site.t option;
+      }
     | Exceptional_call of { rcvr : string; meth : string; actuals : Expr.t list }
     | Expr of Expr.t
     | Skip
-    | Throw of { exn : Expr.t }
     | Write of { rcvr : string; field : string; rhs : Expr.t }
   [@@deriving compare, equal, hash, sexp_of]
 
@@ -158,25 +163,24 @@ module Stmt = struct
         Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp idx Expr.pp rhs
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
-    | Call { lhs; rcvr; meth; actuals } ->
+    | Call { lhs; rcvr; meth; actuals; alloc_site = _ } ->
         Format.fprintf fs "%s := %s.%s(%a)" lhs rcvr meth (List.pp ", " Expr.pp) actuals
     | Exceptional_call { rcvr; meth; actuals } ->
         Format.fprintf fs "exc-return %s.%s(%a)" rcvr meth (List.pp ", " Expr.pp) actuals
     | Expr e -> Expr.pp fs e
     | Skip -> Format.pp_print_string fs "skip"
-    | Throw { exn } -> Format.fprintf fs "throw %a" Expr.pp exn
     | Write { rcvr; field; rhs } -> Format.fprintf fs "%s.%s := %a" rcvr field Expr.pp rhs
 
   let uses = function
     | Array_write { rcvr = _; idx; rhs } -> Set.union (Expr.uses idx) (Expr.uses rhs)
     | Assign { lhs = _; rhs } -> Expr.uses rhs
     | Assume e -> Expr.uses e
-    | Call { lhs = _; rcvr; meth = _; actuals } | Exceptional_call { rcvr; meth = _; actuals } ->
+    | Call { lhs = _; rcvr; meth = _; actuals; alloc_site = _ }
+    | Exceptional_call { rcvr; meth = _; actuals } ->
         List.fold actuals ~init:(String.Set.singleton rcvr) ~f:(fun a c ->
             Set.union a (Expr.uses c))
     | Expr e -> Expr.uses e
     | Skip -> String.Set.empty
-    | Throw { exn } -> Expr.uses exn
     | Write { rcvr; field = _; rhs } -> String.Set.add (Expr.uses rhs) rcvr
 
   let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None

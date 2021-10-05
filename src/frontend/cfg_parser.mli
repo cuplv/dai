@@ -3,6 +3,22 @@ open Syntax
 
 type edge = Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t
 
+type prgm_parse_result = {
+  loc_map : Loc_map.t;
+  cfgs : Cfg.t Cfg.Fn.Map.t;
+  fields : Declared_fields.t;
+  cha : Class_hierarchy.t;
+}
+
+val of_java_cst : ?acc:prgm_parse_result -> CST.program -> prgm_parse_result
+(** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided *)
+
+val of_file_exn : ?acc:prgm_parse_result -> string -> prgm_parse_result
+(** Parse each method in a (java) source file to a CFG, adding to an [acc]umulator parse result if provided *)
+
+val of_files : files:string list -> prgm_parse_result
+(** Parse each method in some (java) source [files] to a CFG *)
+
 val expr :
   ?exit_loc:Cfg.Loc.t ->
   curr_loc:Cfg.Loc.t ->
@@ -19,12 +35,6 @@ val expr :
     Optional [exit_loc] param is used to special-case the common statement syntax of [Exp_stmt (`Assign_exp _)] and avoid generating extraneous locations and [Skip] edges
 
 *)
-
-val of_java_cst : CST.program -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
-(** Construct a CFG for each method in a (java) tree-sitter concrete syntax tree *)
-
-val of_file_exn : filename:string -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
-(** Construct a CFG for each method in a (java) source file *)
 
 val of_method_decl :
   Loc_map.t ->

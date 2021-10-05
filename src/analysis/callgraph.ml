@@ -7,13 +7,13 @@ type t = Cfg.Fn.Set.t Method_id.Map.t
 
 let resolve_by_name ~callsite candidates =
   match callsite with
-  | Ast.Stmt.Call { lhs = _; rcvr; meth = "<init>"; actuals }
+  | Ast.Stmt.Call { lhs = _; rcvr; meth = "<init>"; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr; meth = "<init>"; actuals } ->
       Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
-          String.equal rcvr candidate.method_id.class_name
+          String.equal rcvr (String.split candidate.method_id.class_name ~on:'$' |> List.last_exn)
           && String.equal "<init>" candidate.method_id.method_name
           && Int.equal (List.length candidate.formals) (List.length actuals))
-  | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals }
+  | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr = _; meth; actuals } ->
       Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
           String.equal meth candidate.method_id.method_name
@@ -53,8 +53,19 @@ let deserialize_method m : Method_id.t =
   let method_name, arg_types =
     match split rest_of_m ~on:'(' with
     | [ meth; args_and_close_paren ] ->
-        let args = sub args_and_close_paren ~pos:0 ~len:(length args_and_close_paren - 1) in
-        (meth, split args ~on:',' |> List.filter ~f:(String.length >> Int.is_positive))
+        let args =
+          sub args_and_close_paren ~pos:0 ~len:(length args_and_close_paren - 1)
+          |> split ~on:','
+          |> List.filter ~f:(String.is_empty >> not)
+        in
+        let arg_types =
+          List.map args ~f:(fun arg_type ->
+              let last_dot_idx = rindex arg_type '.' in
+              match last_dot_idx with
+              | Some idx -> drop_prefix arg_type (idx + 1)
+              | None -> arg_type)
+        in
+        (meth, arg_types)
     | _ -> failwith ("malformed serialized method: " ^ m)
   in
   { package; class_name; method_name; static; arg_types }
@@ -95,10 +106,11 @@ let deserialize ~fns =
   >> fst
 
 let%test "procedures example" =
-  let src_file = Frontend.Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
+  let open Frontend in
+  let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
   let fns =
-    Frontend.Cfg_parser.of_file_exn ~filename:(abs_of_rel_path "test_cases/java/Procedures.java")
-    |> snd |> Map.keys
+    Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Procedures.java") |> fun { cfgs; _ } ->
+    Map.keys cfgs
   in
   let cg : t = deserialize ~fns src_file in
   List.length (Map.keys cg) |> Int.equal 3

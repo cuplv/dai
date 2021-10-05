@@ -30,10 +30,6 @@ let curry3 f x y z = f (x, y, z)
 
 let pair x y = (x, y)
 
-let pp_pair a_pp b_pp fs (a, b) = Format.fprintf fs "@[(%a,%a)@]" a_pp a b_pp b
-
-let pp_triple a_pp b_pp c_pp fs (a, b, c) = Format.fprintf fs "@[(%a,%a,%a)@]" a_pp a b_pp b c_pp c
-
 let range i j =
   let rec aux n acc = if n < i then acc else aux (n - 1) (n :: acc) in
   aux j []
@@ -94,7 +90,7 @@ module Set = struct
 
   let equal_m__t (module Elt : Compare_m) = equal
 
-  let pp pp_elt fs x = List.pp ~pre:"{" ~suf:"}" ",@ " pp_elt fs (to_list x)
+  let pp pp_elt fs x = Format.fprintf fs "{%a}" (List.pp ~pre:"" ~suf:"" ",@ " pp_elt) (to_list x)
 
   let disjoint x y = is_empty (inter x y)
 

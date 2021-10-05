@@ -4,10 +4,25 @@ open Syntax
 
 type edge = Cfg.Loc.t * Cfg.Loc.t * Ast.Stmt.t
 
+type prgm_parse_result = {
+  loc_map : Loc_map.t;
+  cfgs : Cfg.t Cfg.Fn.Map.t;
+  fields : Declared_fields.t;
+  cha : Class_hierarchy.t;
+}
+
+let empty_parse_result =
+  {
+    loc_map = Loc_map.empty;
+    cfgs = Cfg.Fn.Map.empty;
+    fields = Declared_fields.empty;
+    cha = Class_hierarchy.empty;
+  }
+
 let tmp_var_counter = ref 0
 
 let fresh_tmp_var () =
-  let v = "_dai_tmp" ^ Int.to_string !tmp_var_counter in
+  let v = "__dai_tmp" ^ Int.to_string !tmp_var_counter in
   tmp_var_counter := !tmp_var_counter + 1;
   v
 
@@ -183,7 +198,16 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
       let edges =
-        (curr_loc, next_loc, Stmt.Call { lhs; rcvr = ctor_name; meth = "<init>"; actuals })
+        ( curr_loc,
+          next_loc,
+          Stmt.Call
+            {
+              lhs;
+              rcvr = ctor_name;
+              meth = "<init>";
+              actuals;
+              alloc_site = Some (Alloc_site.fresh ());
+            } )
         :: (curr_loc, exc, Stmt.Exceptional_call { rcvr = ctor_name; meth = "<init>"; actuals })
         :: arg_intermediates
       in
@@ -232,7 +256,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       in
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
-      let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals }) in
+      let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals; alloc_site = None }) in
       let exc_call = (curr_loc, exc, Stmt.Exceptional_call { rcvr; meth; actuals }) in
       (Expr.Var lhs, (next_loc, (call :: exc_call :: rcvr_intermediates) @ arg_intermediates))
   | `Prim_exp (`Meth_ref _) -> failwith "todo: Prim_exp (Meth_ref)"
@@ -359,11 +383,11 @@ let rec expr_of_nonempty_list ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) :
       expr_of_nonempty_list ~curr_loc:intermediate_loc ~exc es |> fun (e, (l, stmts)) ->
       (e, (l, intermediate_stmts @ stmts))
 
+let ident_of_var_declarator : CST.variable_declarator -> string = function
+  | (`Id (_, ident), _), _initializer -> ident
+  | _ -> failwith "todo: ident_of_var_declarator"
+
 let rec declarations stmts : string list =
-  let ident_of_var_declarator : CST.variable_declarator -> string = function
-    | (`Id (_, ident), _), _initializer -> ident
-    | _ -> failwith "todo: ident_of_var_declarator"
-  in
   let rec local_decls_of_stmt : CST.statement -> string list = function
     | `Assert_stmt _ -> []
     | `Blk (_, stmts, _) -> declarations stmts
@@ -743,7 +767,14 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
             let invocation =
               ( pre_invocation_loc,
                 post_invocation_loc,
-                Ast.Stmt.Call { lhs = "this"; rcvr = class_name; meth = "<init>"; actuals } )
+                Ast.Stmt.Call
+                  {
+                    lhs = "this";
+                    rcvr = class_name;
+                    meth = "<init>";
+                    actuals;
+                    alloc_site = Some (Alloc_site.fresh ());
+                  } )
             in
             let exc_invocation =
               ( pre_invocation_loc,
@@ -756,33 +787,68 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
 
       Some (loc_map, edges, fn)
 
-let rec parse_class_decl ?(package = []) ?(parent_class_name = None) loc_map :
-    CST.class_declaration -> Loc_map.t * (edge list * Cfg.Fn.t) list = function
-  | _modifiers, _, (_, class_name), _type_params, _superclass, _superinterfaces, (_, decls, _) ->
+let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~imports
+    ~(acc : prgm_parse_result) : CST.class_declaration -> prgm_parse_result = function
+  | _modifiers, _, (_, class_name), _type_params, superclass, _superinterfaces, (_, decls, _) ->
       let class_name =
-        match parent_class_name with Some n -> n ^ "$" ^ class_name | None -> class_name
+        match containing_class_name with Some n -> n ^ "$" ^ class_name | None -> class_name
       in
-      List.fold decls ~init:(loc_map, []) ~f:(fun (loc_map, acc) -> function
+      let cha =
+        match superclass with
+        | None -> acc.cha
+        | Some (_, `Unan_type ut) | Some (_, `Anno_type (_, ut)) -> (
+            let superclass_name = string_of_unannotated_type ut in
+            match Map.find imports superclass_name with
+            | Some super_package ->
+                Class_hierarchy.add ~package ~class_name ~super_package ~superclass_name acc.cha
+            | None -> acc.cha )
+      in
+      let fields =
+        let declared_fields =
+          List.(
+            decls >>= function
+            | `Field_decl (mods, _, (v, vs), _) ->
+                let is_static =
+                  Option.exists mods ~f:(exists ~f:(function `Static _ -> true | _ -> false))
+                in
+                if is_static then [] else v :: map ~f:snd vs |> map ~f:ident_of_var_declarator
+            | _ -> [])
+          |> String.Set.of_list
+        in
+        Declared_fields.add ~package ~class_name ~fields:declared_fields acc.fields
+      in
+      List.fold decls ~init:{ cfgs = acc.cfgs; fields; cha; loc_map = acc.loc_map } ~f:(fun acc ->
+        function
         | `Meth_decl md -> (
-            match of_method_decl loc_map ~package ~class_name md with
-            | Some (lm, es, fn) -> (lm, (es, fn) :: acc)
-            | None -> (loc_map, acc) )
+            match of_method_decl acc.loc_map ~package ~class_name md with
+            | Some (loc_map, edges, fn) ->
+                {
+                  cfgs = Cfg.add_fn fn ~edges acc.cfgs;
+                  loc_map;
+                  fields = acc.fields;
+                  cha = acc.cha;
+                }
+            | None -> acc )
         | `Class_decl cd ->
-            let loc_map, decls =
-              parse_class_decl ~package ~parent_class_name:(Some class_name) loc_map cd
-            in
-            (loc_map, decls @ acc)
+            parse_class_decl cd ~package ~containing_class_name:(Some class_name) ~imports ~acc
         | `Cons_decl (_, cd, _, body) -> (
-            match of_constructor_decl loc_map ~package ~class_name cd body with
-            | Some (lm, es, fn) -> (lm, (es, fn) :: acc)
-            | None -> (loc_map, acc) )
-        | `Field_decl (_, _, _, _) -> (loc_map, acc)
+            match of_constructor_decl acc.loc_map ~package ~class_name cd body with
+            | Some (loc_map, edges, fn) ->
+                {
+                  cfgs = Cfg.add_fn fn ~edges acc.cfgs;
+                  loc_map;
+                  fields = acc.fields;
+                  cha = acc.cha;
+                }
+            | None -> acc )
+        | `Field_decl _ ->
+            acc (* skip over field declarations, as they are handled outside of this List.fold *)
         | d ->
             failwith
               (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
                  (CST.sexp_of_class_body_declaration d)))
 
-let of_java_cst (cst : Tree.java_cst) =
+let of_java_cst ?(acc = empty_parse_result) cst : prgm_parse_result =
   let package =
     List.find_map cst ~f:(function `Decl (`Pack_decl (_, _, name, _)) -> Some name | _ -> None)
     |> function
@@ -795,11 +861,29 @@ let of_java_cst (cst : Tree.java_cst) =
         in
         list_of_name n
   in
-  let loc_map = Loc_map.empty in
-  List.fold cst ~init:(loc_map, []) ~f:(fun (loc_map, acc) -> function
-    | `Decl (`Class_decl cd) ->
-        parse_class_decl loc_map cd ~package |> fun (loc_map, cfgs) -> (loc_map, cfgs @ acc)
-    | `Decl (`Import_decl _) | `Decl (`Pack_decl _) -> (loc_map, acc)
+  (* best-effort local name resolution:
+   * For each "import foo.bar.Baz;", [imports] maps "Baz" to ["foo" ; "bar"]
+   * For each "class Foo { ... }"  in this file, also map "Foo" to its [package] declaration
+   *)
+  let imports : string list String.Map.t =
+    String.Map.of_alist_exn
+    @@ List.filter_map cst ~f:(function
+         | `Decl (`Import_decl (_, _, nm, None, _)) -> (
+             let rec quals = function
+               | `Id (_, ident) -> [ ident ]
+               | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
+               | `Choice_open _ -> failwith "TODO: choice_open in imports"
+             in
+             match nm with
+             | `Id (_, ident) -> Some (ident, [])
+             | `Scoped_id (q, _, (_, ident)) -> Some (ident, List.rev (quals q))
+             | `Choice_open _ -> failwith "TODO: choice_open in imports" )
+         | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) -> Some (class_name, package)
+         | _ -> None)
+  in
+  List.fold cst ~init:acc ~f:(fun acc -> function
+    | `Decl (`Class_decl cd) -> parse_class_decl cd ~package ~acc ~imports
+    | `Decl (`Import_decl _) | `Decl (`Pack_decl _) -> acc
     | stmt ->
         let rec first_atom = function
           | Sexp.Atom a -> a
@@ -809,17 +893,18 @@ let of_java_cst (cst : Tree.java_cst) =
         failwith
           (Format.asprintf "unrecognized top-level statement: %s"
              (first_atom (CST.sexp_of_statement stmt))))
-  |> fun (loc_map, cfgs) ->
-  (loc_map, List.fold cfgs ~init:(Cfg.empty ()) ~f:(fun cfg (edges, fn) -> Cfg.add_fn fn ~edges cfg))
 
 open Result.Monad_infix
 
-let of_file_exn ~filename =
+let of_file_exn ?(acc = empty_parse_result) filename =
   let file = Src_file.of_file filename in
   let tree = Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file in
   match tree with
-  | Ok tree -> of_java_cst tree
+  | Ok tree -> of_java_cst ~acc tree
   | Error _e -> failwith @@ "parse error in " ^ filename
+
+let of_files ~files =
+  List.fold files ~init:empty_parse_result ~f:(fun acc file -> of_file_exn ~acc file)
 
 let%test "hello world program" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in
@@ -835,7 +920,7 @@ let%test "nested loops" =
   $> (fun res ->
        match res with
        | Error _ -> ()
-       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfg)
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfgs)
   |> Result.is_ok
 
 let%test "constructors" =
@@ -844,7 +929,8 @@ let%test "constructors" =
   $> (fun res ->
        match res with
        | Error _ -> ()
-       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfg)
+       | Ok { cfgs; _ } ->
+           Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfgs)
   |> Result.is_ok
 
 let%test "Cibai example" =
@@ -853,7 +939,8 @@ let%test "Cibai example" =
   $> (fun res ->
        match res with
        | Error _ -> ()
-       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfg)
+       | Ok { cfgs; _ } ->
+           Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfgs)
   |> Result.is_ok
 
 let%test "exceptions, try, catch, finally" =
@@ -862,5 +949,5 @@ let%test "exceptions, try, catch, finally" =
   $> (fun res ->
        match res with
        | Error _ -> ()
-       | Ok (_, cfg) -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfg)
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfgs)
   |> Result.is_ok

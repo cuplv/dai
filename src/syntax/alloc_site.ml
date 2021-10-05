@@ -14,6 +14,8 @@ module T : sig
   val sanitize : t -> t
 
   val pp : t pp
+
+  val of_int : int -> t
 end = struct
   type t = int [@@deriving equal, compare, hash, sexp]
 
@@ -36,6 +38,8 @@ end = struct
     Format.(
       pp str_formatter x;
       flush_str_formatter ())
+
+  let of_int = Fn.id
 end
 
 module T_comparator = struct
@@ -48,7 +52,7 @@ include T_comparator
 module Set = struct
   include (Set : module type of Set with type ('a, 'cmp) t := ('a, 'cmp) Set.t)
 
-  type t = Set.M(T_comparator).t [@@deriving compare, sexp]
+  type t = Set.M(T_comparator).t [@@deriving compare, equal, hash, sexp]
 
   let empty = Set.empty (module T_comparator)
 

@@ -528,7 +528,7 @@ let%test "statement additions" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; _ } : Cfg_parser.prgm_parse_result) = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
   | [ Add_statements { stmts = [ _ ]; _ }; Add_statements { stmts = [ _ ]; _ } ] -> true
@@ -555,7 +555,7 @@ let%test "statement deletions" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; _ } : Cfg_parser.prgm_parse_result) = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
   | [
@@ -586,7 +586,7 @@ let%test "statement modification in conditional" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; _ } : Cfg_parser.prgm_parse_result) = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
   | [ Modify_statements { method_id = _; from_loc = _; to_loc = _; new_stmts = _ } ] -> true
@@ -613,7 +613,7 @@ let%test "conditional branch deletion" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, _prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; _ } : Cfg_parser.prgm_parse_result) = Cfg_parser.of_java_cst prev_cst in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   match diff with
   | [ Delete_statements { method_id = _; from_loc = _; to_loc = _ } ] -> true
@@ -640,7 +640,9 @@ let%test "modify condition of conditional" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.of_java_cst prev_cst
+  in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
@@ -669,7 +671,9 @@ let%test "modify header of for-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.of_java_cst prev_cst
+  in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
@@ -698,7 +702,9 @@ let%test "modify header of while-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.of_java_cst prev_cst
+  in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
@@ -727,7 +733,9 @@ let%test "modify body of while-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let loc_map, prev_cfg = Cfg_parser.of_java_cst prev_cst in
+  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.of_java_cst prev_cst
+  in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
   let _next_cfg = apply diff loc_map prev_cfg in
   match diff with
