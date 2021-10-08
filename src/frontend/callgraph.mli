@@ -2,7 +2,7 @@ open Syntax
 
 type t
 
-val deserialize : fns:Cfg.Fn.t list -> Frontend.Src_file.t -> t
+val deserialize : fns:Cfg.Fn.t list -> Src_file.t -> t
 
 val resolve_with_callgraph :
   callsite:Ast.Stmt.t -> caller_method:Method_id.t -> callgraph:t -> Cfg.Fn.Set.t

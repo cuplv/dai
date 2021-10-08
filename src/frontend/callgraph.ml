@@ -77,7 +77,7 @@ let deserialize_method m : Method_id.t =
    * there exists a call edge to each CALLEE from the preceding CALLER
 *)
 let deserialize ~fns =
-  Frontend.Src_file.lines
+  Src_file.lines
   >> Array.fold
        ~init:(Map.empty (module Method_id), None)
        ~f:(fun (acc_cg, curr_caller) line ->
@@ -106,7 +106,6 @@ let deserialize ~fns =
   >> fst
 
 let%test "procedures example" =
-  let open Frontend in
   let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
   let fns =
     Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Procedures.java") |> fun { cfgs; _ } ->
