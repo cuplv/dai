@@ -5,7 +5,13 @@ type ident = string [@@deriving equal, hash, compare, sexp_of]
 
 module Lit = struct
   module T = struct
-    type t = Bool of bool | Int of int | Float of float | Null | String of string | Char of char
+    type t =
+      | Bool of bool
+      | Int of int
+      | Float of float
+      | Null
+      | String of string
+      | Char of Uchar.t
     [@@deriving equal, compare, sexp, hash]
   end
 
@@ -13,12 +19,12 @@ module Lit = struct
   include Comparable.Make (T)
 
   let pp fs = function
-    | Bool b -> Format.pp_print_bool fs b
-    | Int i -> Format.pp_print_int fs i
-    | Float f -> Format.pp_print_float fs f
+    | Bool b -> Bool.pp fs b
+    | Int i -> Int.pp fs i
+    | Float f -> Float.pp fs f
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\\\"" ^ s ^ "\\\"")
-    | Char c -> Format.pp_print_char fs c
+    | Char c -> Uchar.pp fs c
 end
 
 module Binop = struct

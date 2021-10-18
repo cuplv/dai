@@ -178,19 +178,46 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let e =
         Expr.Lit
           ( match l with
-          | `Deci_int_lit (_, raw)
-          | `Hex_int_lit (_, raw)
-          | `Octal_int_lit (_, raw)
-          | `Bin_int_lit (_, raw) ->
-              Lit.Int (Int.of_string raw)
+          | `Deci_int_lit (_, raw) | `Hex_int_lit (_, raw) | `Bin_int_lit (_, raw) ->
+              raw
+              |> String.chop_suffix_if_exists ~suffix:"l"
+              |> String.chop_suffix_if_exists ~suffix:"L"
+              |> fun v -> Lit.Int (Int.of_string v)
+          | `Octal_int_lit (_, raw) ->
+              (* add an "0o" prefix to force octal decoding *)
+              raw
+              |> String.chop_suffix_if_exists ~suffix:"l"
+              |> String.chop_suffix_if_exists ~suffix:"L"
+              |> fun v -> Lit.Int (Int.of_string ("0o" ^ v))
           | `Deci_floa_point_lit (_, raw) | `Hex_floa_point_lit (_, raw) ->
-              Lit.Float (Float.of_string raw)
+              raw
+              |> String.chop_suffix_if_exists ~suffix:"f"
+              |> String.chop_suffix_if_exists ~suffix:"F"
+              |> String.chop_suffix_if_exists ~suffix:"d"
+              |> String.chop_suffix_if_exists ~suffix:"D"
+              |> fun v -> Lit.Float (Float.of_string v)
           | `True _ -> Lit.Bool true
           | `False _ -> Lit.Bool false
-          | `Char_lit (_, raw) -> Lit.Char (Char.of_string raw)
+          | `Char_lit (_, raw) -> (
+              try Lit.Char (Stdlib.Uchar.of_int (Int.of_string raw))
+              with _ -> (
+                raw
+                |> String.chop_prefix_if_exists ~prefix:"\'"
+                |> String.chop_suffix_if_exists ~suffix:"\'"
+                |> fun contents ->
+                match String.length contents with
+                | 1 -> Lit.Char (contents.[0] |> Uchar.of_char)
+                | 2 ->
+                    let first_byte = contents.[0] |> Char.to_int in
+                    let second_byte = contents.[1] |> Char.to_int in
+                    let c = Lit.Char (Stdlib.Uchar.of_int @@ (Int.shift_left first_byte 8 + second_byte)) in
+                    c
+                | _ -> failwith ("unrecognized character literal: '" ^ contents ^ "'") ) )
           | `Str_lit (_, raw) ->
-              let contents = String.slice raw 1 (String.length raw - 1) in
-              Lit.String contents
+              raw
+              |> String.chop_prefix_if_exists ~prefix:"\""
+              |> String.chop_suffix_if_exists ~suffix:"\""
+              |> fun contents -> Lit.String contents
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))
@@ -956,17 +983,14 @@ let%test "nested classes" =
 let%test "nested loops" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-  $> (fun res ->
-       match res with
-       | Error _ -> ()
-       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfgs)
+  $> (function
+       | Error _ -> () | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:"nested_loops.dot" cfgs)
   |> Result.is_ok
 
 let%test "constructors" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Constructors.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-  $> (fun res ->
-       match res with
+  $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } ->
            Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfgs)
@@ -975,8 +999,7 @@ let%test "constructors" =
 let%test "Cibai example" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/CibaiExample/MiniBag.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-  $> (fun res ->
-       match res with
+  $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } ->
            Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfgs)
@@ -985,8 +1008,15 @@ let%test "Cibai example" =
 let%test "exceptions, try, catch, finally" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Exceptions.java" in
   Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-  $> (fun res ->
-       match res with
+  $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfgs)
+  |> Result.is_ok
+
+let%test "Literals: various syntactic forms / types" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Literals.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "literals.dot") cfgs)
   |> Result.is_ok
