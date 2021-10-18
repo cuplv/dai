@@ -21,6 +21,29 @@ let empty_parse_result =
 
 let tmp_var_counter = ref 0
 
+let diagnostic_mode = ref false
+
+let unimplemented_syntax : int String.Map.t ref = ref String.Map.empty
+
+(* when in [diagnostic_mode], accumulate a count of appearances of unimplemented syntactic forms *)
+
+let unimplemented syntax default_val =
+  if !diagnostic_mode then (
+    let old_count = Map.find !unimplemented_syntax syntax |> Option.value ~default:0 in
+    unimplemented_syntax := Map.set !unimplemented_syntax ~key:syntax ~data:(old_count + 1);
+    default_val )
+  else failwith ("TODO: unimplemented syntactic form " ^ syntax)
+
+let print_diagnostic_results () =
+  Format.(fprintf std_formatter) "DIAGNOSTIC MODE\n";
+  Format.(fprintf std_formatter)
+    "NB: sub-trees of unimplemented syntax are not explored, so some things may be missed if they \
+     are nested within some other unimplemented syntax.\n";
+  Format.(fprintf std_formatter) "Unimplemented syntax encountered by Cfg_parser:\n";
+  Map.to_alist !unimplemented_syntax
+  |> List.sort ~compare:(fun (_, count1) (_, count2) -> Int.compare count2 count1)
+  |> List.iter ~f:(uncurry @@ Format.(fprintf std_formatter) "%s (%i occurrences)\n")
+
 let fresh_tmp_var () =
   let v = "__dai_tmp" ^ Int.to_string !tmp_var_counter in
   tmp_var_counter := !tmp_var_counter + 1;
@@ -37,8 +60,8 @@ let string_of_simple_type = function
   | `Floa_point_type (`Double _) -> "double"
   | `Bool_type _ -> "boolean"
   | `Id (_, ident) -> ident
-  | `Scoped_type_id _ -> failwith "todo: scoped type identifiers"
-  | `Gene_type _ -> failwith "todo: generic types"
+  | `Scoped_type_id _ -> unimplemented "`Scoped_type_id" "scoped_type_id"
+  | `Gene_type _ -> unimplemented "`Gene_type" "gene_type"
 
 let rec string_of_unannotated_type = function
   | `Choice_void_type st -> string_of_simple_type st
@@ -57,13 +80,14 @@ let rec string_of_unannotated_type = function
 let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) :
     Ast.Expr.t * (Cfg.Loc.t * edge list) =
   let open Ast in
+  let placeholder_expr = (Expr.Lit (Lit.String "DIAGNOSTIC MODE PLACEHOLDER"), (curr_loc, [])) in
   match cst with
   | `Assign_exp (lhs, op, rhs) ->
       let rhs_expr, (curr_loc, rhs_intermediates) = expr ~curr_loc ~exc rhs in
       let lhs_expr, (curr_loc, lhs_intermediates) =
         match lhs with
         | `Id (_, ident) -> (Expr.Var ident, (curr_loc, []))
-        | `Choice_open _ -> failwith "todo: Choice_open"
+        | `Choice_open _ -> unimplemented "`Choice_open" placeholder_expr
         | `Field_access (rcvr, _, _, field) ->
             let rcvr, aux_info =
               match rcvr with
@@ -73,7 +97,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             let field =
               match field with
               | `Id (_, fld) -> fld
-              | `Choice_open _ -> failwith "todo: Choice_open"
+              | `Choice_open _ -> unimplemented "`Choice_open" "DIAGNOSTIC MODE PLACEHOLDER"
               | `This _ -> "this"
             in
             (Expr.Deref { rcvr; field }, aux_info)
@@ -92,18 +116,18 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         | `DASHEQ _ -> Expr.binop lhs_expr Binop.Minus rhs_expr
         | `STAREQ _ -> Expr.binop lhs_expr Binop.Times rhs_expr
         | `SLASHEQ _ -> Expr.binop lhs_expr Binop.Divided_by rhs_expr
-        | `AMPEQ _ -> failwith "todo: AMPEQ"
-        | `BAREQ _ -> failwith "todo: BAREQ"
-        | `HATEQ _ -> failwith "todo: HATEQ"
-        | `PERCEQ _ -> failwith "todo: PERCEQ"
-        | `LTLTEQ _ -> failwith "todo: LTLTEQ"
-        | `GTGTEQ _ -> failwith "todo: GTGTEQ"
-        | `GTGTGTEQ _ -> failwith "todo: GTGTGTEQ"
+        | `AMPEQ _ -> unimplemented "`AMPEQ" (fst placeholder_expr)
+        | `BAREQ _ -> unimplemented "`BAREQ" (fst placeholder_expr)
+        | `HATEQ _ -> unimplemented "`HATEQ" (fst placeholder_expr)
+        | `PERCEQ _ -> unimplemented "`PERCEQ" (fst placeholder_expr)
+        | `LTLTEQ _ -> unimplemented "`LTLTEQ" (fst placeholder_expr)
+        | `GTGTEQ _ -> unimplemented "`GTGTEQ" (fst placeholder_expr)
+        | `GTGTGTEQ _ -> unimplemented "`GTGTGTEQ" (fst placeholder_expr)
       in
       let stmt =
         match lhs with
         | `Id (_, lhs) -> Stmt.Assign { lhs; rhs = rhs_expr_with_op }
-        | `Choice_open _ -> failwith "todo: Choice_open"
+        | `Choice_open _ -> unimplemented "`Choice_open" Stmt.Skip
         | `Field_access _ ->
             let rcvr, field =
               match lhs_expr with
@@ -136,20 +160,20 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         | `Exp_DASH_exp (e1, _, e2) -> (e1, Binop.Minus, e2)
         | `Exp_STAR_exp (e1, _, e2) -> (e1, Binop.Times, e2)
         | `Exp_SLASH_exp (e1, _, e2) -> (e1, Binop.Divided_by, e2)
-        | `Exp_AMP_exp (_, _, _) -> failwith "todo: Exp_AMP_exp"
-        | `Exp_BAR_exp (_, _, _) -> failwith "todo: Exp_BAR_exp"
-        | `Exp_HAT_exp (_, _, _) -> failwith "todo: Exp_HAT_exp"
+        | `Exp_AMP_exp (e1, _, e2) -> unimplemented "`Exp_AMP_exp" (e1, Binop.Eq, e2)
+        | `Exp_BAR_exp (e1, _, e2) -> unimplemented "`Exp_BAR_exp" (e1, Binop.Eq, e2)
+        | `Exp_HAT_exp (e1, _, e2) -> unimplemented "`Exp_HAT_exp" (e1, Binop.Eq, e2)
         | `Exp_PERC_exp (e1, _, e2) -> (e1, Binop.Mod, e2)
-        | `Exp_LTLT_exp (_, _, _) -> failwith "todo: Exp_LTLT_exp"
-        | `Exp_GTGT_exp (_, _, _) -> failwith "todo: Exp_GTGT_exp"
-        | `Exp_GTGTGT_exp (_, _, _) -> failwith "todo: Exp_GTGTGT_exp"
+        | `Exp_LTLT_exp (e1, _, e2) -> unimplemented "`Exp_LTLT_exp" (e1, Binop.Eq, e2)
+        | `Exp_GTGT_exp (e1, _, e2) -> unimplemented "`Exp_GTGT_exp" (e1, Binop.Eq, e2)
+        | `Exp_GTGTGT_exp (e1, _, e2) -> unimplemented "`Exp_GTGTGT_exp" (e1, Binop.Eq, e2)
       in
       let l, (curr_loc, l_intermediates) = expr ~curr_loc ~exc l in
       let r, (curr_loc, r_intermediates) = expr ~curr_loc ~exc r in
       (Expr.Binop { l; op; r }, (curr_loc, l_intermediates @ r_intermediates))
   | `Cast_exp (_, _type, _, _, e) -> expr ~curr_loc ~exc e
-  | `Inst_exp _ -> failwith "todo: Inst_exp"
-  | `Lambda_exp _ -> failwith "todo: Lambda_exp"
+  | `Inst_exp _ -> unimplemented "`Inst_exp" placeholder_expr
+  | `Lambda_exp _ -> unimplemented "`Lambda_exp" placeholder_expr
   | `Prim_exp (`Lit l) ->
       let e =
         Expr.Lit
@@ -170,10 +194,10 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))
-  | `Prim_exp (`Class_lit _) -> failwith "todo: Class_lit"
+  | `Prim_exp (`Class_lit _) -> unimplemented "`Class_lit" placeholder_expr
   | `Prim_exp (`This _) -> (Expr.Var "this", (curr_loc, []))
   | `Prim_exp (`Id (_, ident)) -> (Expr.Var ident, (curr_loc, []))
-  | `Prim_exp (`Choice_open _) -> failwith "todo: Prim_exp (Choice_open) "
+  | `Prim_exp (`Choice_open _) -> unimplemented "`Choice_open" placeholder_expr
   | `Prim_exp (`Paren_exp (_, e, _)) -> expr ?exit_loc ~curr_loc ~exc e
   | `Prim_exp (`Obj_crea_exp (`Unqu_obj_crea_exp unqualified))
   | `Prim_exp (`Obj_crea_exp (`Prim_exp_DOT_unqu_obj_crea_exp (_, _, unqualified))) ->
@@ -221,7 +245,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let field =
         match field with
         | `Id (_, fld) -> fld
-        | `Choice_open _ -> failwith "todo: Choice_open"
+        | `Choice_open _ -> unimplemented "`Choice_open" "DIAGNOSTIC MODE PLACEHOLDER"
         | `This _ -> "this"
       in
       (Expr.Deref { rcvr; field }, aux_info)
@@ -234,17 +258,19 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let rcvr, meth, (curr_loc, rcvr_intermediates) =
         match rcvr_and_meth with
         | `Choice_id (`Id (_, meth)) -> ("this", meth, (curr_loc, []))
-        | `Choice_id (`Choice_open _) -> failwith "todo: Choice_id(Choice_open)"
+        | `Choice_id (`Choice_open _) ->
+            unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, []))
         | `Choice_prim_exp_DOT_opt_super_DOT_opt_type_args_choice_id
             (rcvr, _dot, super, _typeargs, meth) -> (
             let rcvr, aux_info =
               match rcvr with
               | `Prim_exp _ as e when Option.is_none super -> expr_as_var ~curr_loc ~exc e
-              | _ -> failwith "todo: handle \"super\" in method invocations"
+              | _ -> unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
             in
             match meth with
             | `Id (_, meth_name) -> (rcvr, meth_name, aux_info)
-            | `Choice_open _ -> failwith "todo: Choice_open in Meth_invo" )
+            | `Choice_open _ ->
+                unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, [])) )
       in
       let args = match args with Some (e, es) -> e :: List.map ~f:snd es | None -> [] in
       let actuals, (curr_loc, arg_intermediates) =
@@ -259,7 +285,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals; alloc_site = None }) in
       let exc_call = (curr_loc, exc, Stmt.Exceptional_call { rcvr; meth; actuals }) in
       (Expr.Var lhs, (next_loc, (call :: exc_call :: rcvr_intermediates) @ arg_intermediates))
-  | `Prim_exp (`Meth_ref _) -> failwith "todo: Prim_exp (Meth_ref)"
+  | `Prim_exp (`Meth_ref _) -> unimplemented "`Meth_ref" placeholder_expr
   | `Prim_exp (`Array_crea_exp (_new, simple_type, initial_array)) -> (
       match initial_array with
       | `Dimens_array_init (_, ai) -> array_lit ~curr_loc ~exc ai
@@ -272,7 +298,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           in
           let e = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
           (e, (curr_loc, intermediate_stmts)) )
-  | `Switch_exp _ -> failwith "todo: Switch_exp"
+  | `Switch_exp _ -> unimplemented "`Switch_exp" placeholder_expr
   | `Tern_exp (if_exp, _, then_exp, _, else_exp) ->
       let tmp = fresh_tmp_var () in
       let if_exp, (curr_loc, cond_intermediates) = expr ~curr_loc ~exc if_exp in
@@ -338,7 +364,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             ( Expr.binop var inverse_op (Expr.Lit (Lit.Int 1)),
               (next_loc, update_edge :: intermediates) )
       | Expr.Deref _ | Expr.Array_access _ ->
-          failwith "TODO: handle unary (pre/post)-(increment/decrement) on fields/array elements"
+          unimplemented "`Unary_increment_or_decrement_on_heap" placeholder_expr
       | _ ->
           if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1)), (curr_loc, intermediates))
           else (e, (curr_loc, intermediates)) )
@@ -385,7 +411,7 @@ let rec expr_of_nonempty_list ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) :
 
 let ident_of_var_declarator : CST.variable_declarator -> string = function
   | (`Id (_, ident), _), _initializer -> ident
-  | _ -> failwith "todo: ident_of_var_declarator"
+  | _ -> unimplemented "variable_declarator" "DIAGNOSTIC MODE PLACEHOLDER"
 
 let rec declarations stmts : string list =
   let rec local_decls_of_stmt : CST.statement -> string list = function
@@ -429,12 +455,11 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
     match Loc_map.add method_id stmt { entry; exit; ret; exc } loc_map with
     | `Ok lm -> lm
     | `Collision ->
+        (* handle this case if it comes up in evaluation.  Perhaps by enumerating the occurrences topologically to disambiguate, storing a sequence of loc_ctx's for the statement and scanning parse trees for the order as needed?*)
         Format.(fprintf std_formatter)
-          "WARNING: todo: two syntactically-identical statements in method %a. handle this case if \
-           it comes up in evaluation.  Perhaps by enumerating the occurrences topologically to \
-           disambiguate, storing a sequence of loc_ctx's for the statement and scanning parse \
-           trees for the order as needed?\n"
-          Method_id.pp method_id;
+          "WARNING: two syntactically-identical statements in method %s.%s; this is problematic \
+           only if there's an edit there.\n"
+          method_id.class_name method_id.method_name;
         loc_map
   in
   match stmt with
@@ -446,9 +471,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
   | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc stmts
-  | `Brk_stmt _ -> failwith "todo: Brk_stmt"
-  | `Cont_stmt _ -> failwith "todo: Cont_stmt"
-  | `Decl _ -> failwith "todo: Decl"
+  | `Brk_stmt _ -> unimplemented "`Brk_stmt" (loc_map, [])
+  | `Cont_stmt _ -> unimplemented "`Cont_stmt" (loc_map, [])
+  | `Decl _ -> unimplemented "`Decl" (loc_map, [])
   | `Do_stmt (_, body, _, (_, cond, _), _) ->
       let body_exit = Cfg.Loc.fresh () in
       let cond, (cond_exit, cond_intermediate_stmts) = expr ~curr_loc:body_exit ~exc cond in
@@ -457,7 +482,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
       |> pair loc_map
-  | `Enha_for_stmt _ -> failwith "todo: Enha_for_stmt"
+  | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
         expr ~exit_loc:exit ~curr_loc:entry ~exc e
@@ -526,8 +551,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       in
       (entry, ret, stmt) :: intermediates |> pair loc_map
   | `SEMI _ -> (loc_map, [ (entry, exit, Stmt.skip) ])
-  | `Switch_exp _ -> failwith "todo: Switch_exp"
-  | `Sync_stmt _ -> failwith "todo: Sync_stmt"
+  | `Switch_exp _ -> unimplemented "`Switch_exp" (loc_map, [])
+  | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
   | `Throw_stmt (_, e, _) ->
       let thrown_expr, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc e in
       let throw_edge =
@@ -563,7 +588,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
         (* control flow can go to either normal or exceptional exit from finally block*)
         ((finally_exit_loc, exit, Stmt.Skip) :: (finally_exit_loc, exc, Stmt.Skip) :: try_edges)
         @ catch_edges @ finally_edges )
-  | `Try_with_resous_stmt _ -> failwith "todo: Try_with_resous_stmt"
+  | `Try_with_resous_stmt _ -> unimplemented "`Try_with_resous_stmt" (loc_map, [])
   | `While_stmt (_, (_, cond, _), body) ->
       let body_entry = Cfg.Loc.fresh () in
       let cond, (intermediate_loc, cond_intermediates) = expr ~curr_loc:entry ~exc cond in
@@ -573,7 +598,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       :: (intermediate_loc, exit, Stmt.Assume cond_neg)
       :: body
       |> List.append cond_intermediates |> pair loc_map
-  | `Yield_stmt _ -> failwith "todo: Yield_stmt"
+  | `Yield_stmt _ -> unimplemented "`Yield_stmt" (loc_map, [])
 
 and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc :
     Loc_map.t * Cfg.Loc.t * edge list =
@@ -782,7 +807,10 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
                 Ast.Stmt.Exceptional_call { rcvr = class_name; meth = "<init>"; actuals } )
             in
             (loc_map, invocation :: exc_invocation :: (pre_invocation_edges @ body_edges))
-        | Some _ -> failwith "TODO: unrecognized explicit constructor invocation"
+        | Some (`Choice_prim_exp_DOT_opt_type_args_super _, _, _) ->
+            unimplemented "`Choice_prim_exp_DOT_opt_type_args_super" (loc_map, [])
+        | Some (`Opt_type_args_choice_this _, _, _) ->
+            unimplemented "`Opt_type_args_choice_this" (loc_map, [])
       in
 
       Some (loc_map, edges, fn)
@@ -843,12 +871,22 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             | None -> acc )
         | `Field_decl _ ->
             acc (* skip over field declarations, as they are handled outside of this List.fold *)
-        | d ->
+        | `Inte_decl _ -> acc (* skip over interface declarations -- no code to analyze! *)
+        | `Anno_type_decl _ -> unimplemented "`Anno_type_decl" acc
+        | `SEMI _ -> unimplemented "`SEMI" acc
+        | `Blk _ -> unimplemented "`Blk" acc
+        | `Enum_decl _ -> unimplemented "`Enum_decl" acc
+        | `Static_init _ -> unimplemented "`Static_init" acc
+        | `Record_decl _ -> unimplemented "`Record_decl" acc)
+
+(*        | d ->
             failwith
               (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
-                 (CST.sexp_of_class_body_declaration d)))
+                 (CST.sexp_of_class_body_declaration d)))*)
 
-let of_java_cst ?(acc = empty_parse_result) cst : prgm_parse_result =
+let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.program) :
+    prgm_parse_result =
+  diagnostic_mode := diagnostic;
   let package =
     List.find_map cst ~f:(function `Decl (`Pack_decl (_, _, name, _)) -> Some name | _ -> None)
     |> function
@@ -856,7 +894,7 @@ let of_java_cst ?(acc = empty_parse_result) cst : prgm_parse_result =
     | Some n ->
         let rec list_of_name = function
           | `Id (_, ident) -> [ ident ]
-          | `Choice_open _ -> failwith "todo: handle reserved identifiers"
+          | `Choice_open _ -> unimplemented "`Choice_open" []
           | `Scoped_id (nm, _dot, (_, ident)) -> list_of_name nm @ [ ident ]
         in
         list_of_name n
@@ -872,27 +910,28 @@ let of_java_cst ?(acc = empty_parse_result) cst : prgm_parse_result =
              let rec quals = function
                | `Id (_, ident) -> [ ident ]
                | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
-               | `Choice_open _ -> failwith "TODO: choice_open in imports"
+               | `Choice_open _ -> unimplemented "`Choice_open" []
              in
              match nm with
              | `Id (_, ident) -> Some (ident, [])
              | `Scoped_id (q, _, (_, ident)) -> Some (ident, List.rev (quals q))
-             | `Choice_open _ -> failwith "TODO: choice_open in imports" )
+             | `Choice_open _ -> unimplemented "`Choice_open" None )
          | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) -> Some (class_name, package)
          | _ -> None)
   in
   List.fold cst ~init:acc ~f:(fun acc -> function
     | `Decl (`Class_decl cd) -> parse_class_decl cd ~package ~acc ~imports
-    | `Decl (`Import_decl _) | `Decl (`Pack_decl _) -> acc
+    | `Decl (`Enum_decl _) | `Decl (`Import_decl _) | `Decl (`Inte_decl _) | `Decl (`Pack_decl _) ->
+        acc
+    | `Decl (`Module_decl _) -> unimplemented "`Module_decl" acc
+    | `Decl (`Anno_type_decl _) -> unimplemented "`Anno_type_decl" acc
     | stmt ->
         let rec first_atom = function
           | Sexp.Atom a -> a
           | List [] -> "empty-sexp-list"
           | Sexp.List (l :: _) -> first_atom l
         in
-        failwith
-          (Format.asprintf "unrecognized top-level statement: %s"
-             (first_atom (CST.sexp_of_statement stmt))))
+        unimplemented (first_atom (CST.sexp_of_statement stmt) ^ "-at-top-level") acc)
 
 open Result.Monad_infix
 

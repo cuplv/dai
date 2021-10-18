@@ -10,8 +10,13 @@ type prgm_parse_result = {
   cha : Class_hierarchy.t;
 }
 
-val of_java_cst : ?acc:prgm_parse_result -> CST.program -> prgm_parse_result
-(** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided *)
+val empty_parse_result : prgm_parse_result
+
+val print_diagnostic_results : unit -> unit
+
+val of_java_cst : ?diagnostic:bool -> ?acc:prgm_parse_result -> CST.program -> prgm_parse_result
+(** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided;
+    run in [diagnostic] mode if that flag is set, printing information about our compatibility with the syntax of the given CST rather than failing fast on incompatible syntactic form*)
 
 val of_file_exn : ?acc:prgm_parse_result -> string -> prgm_parse_result
 (** Parse each method in a (java) source file to a CFG, adding to an [acc]umulator parse result if provided *)
