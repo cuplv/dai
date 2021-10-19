@@ -458,7 +458,12 @@ let rec declarations stmts : string list =
         ident_of_var_declarator v :: List.map vs ~f:(snd >> ident_of_var_declarator)
     | `Ret_stmt _ -> []
     | `SEMI _ -> []
-    | `Switch_exp _ -> []
+    | `Switch_exp (_, _, (_, cases_block, _)) -> (
+        match cases_block with
+        | `Rep_switch_blk_stmt_group cases -> List.bind cases ~f:(snd >> declarations)
+        | `Rep_switch_rule cases -> List.bind cases ~f:(function
+              (_, _, (`Exp_stmt _ | `Throw_stmt _)) -> []
+            | (_, _, `Blk (_, block_stmts, _)) -> declarations block_stmts) )
     | `Sync_stmt (_, _, (_, stmts, _)) -> declarations stmts
     | `Throw_stmt _ -> []
     | `Try_stmt (_, (_, stmts, _), _) -> declarations stmts
