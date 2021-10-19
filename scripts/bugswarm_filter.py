@@ -14,15 +14,20 @@ from bugswarm.common.rest_api.database_api import DatabaseAPI
 
 bugswarmapi = DatabaseAPI(token=sys.argv[1])
 
-api_filter =\
-'{"lang":{"$in":["Java"]},' +\ # JAVA source language
-'"stability":"5/5",' +\ # non-flaky
-'"classification.exceptions":["NullPointerException"],' +\ # NPE error type
+api_filter = (
+'{"lang":{"$in":["Java"]},' + # JAVA source language
+'"stability":"5/5",' + # non-flaky
+'"classification.exceptions":["NullPointerException"],' + # NPE error type
 '"metrics.changes":{"$lt":1000}}' # diff touches at most 1000 lines of code
+)
 
 artifacts = bugswarmapi.filter_artifacts(api_filter)
 
 print("found artifacts: " + str(len(artifacts)))
+
+if not os.path.isdir("_bugswarm/"):
+    print("_bugswarm directory does not exist, attempting to create")
+    os.mkdir("_bugswarm")
 
 for a in artifacts:
     print("IMAGE TAG: " + a["image_tag"])
@@ -36,10 +41,10 @@ for a in artifacts:
         # Copy that to the `fail` directory
         os.system("cp -r {}/pass {}/fail".format(image_dir, image_dir))
         # Fetch a shallow copy of the commit at which the `pass` occurred in the `pass` directory
-        os.system("pushd {}/pass && git fetch --depth 1 origin {} 2> /dev/null && popd".format(image_dir, a["passed_job"]["base_sha"]))
+        os.system("cd {}/pass && git fetch --depth 1 origin {} 2> /dev/null && cd -".format(image_dir, a["passed_job"]["base_sha"]))
         # Fetch a shallow copy of the commit at which the `fail` occurred in the `fail` directory
-        os.system("pushd {}/fail && git fetch --depth 1 origin {} 2> /dev/null && popd".format(image_dir, a["failed_job"]["base_sha"]))
-except FileExistsError:
+        os.system("cd {}/fail && git fetch --depth 1 origin {} 2> /dev/null && cd -".format(image_dir, a["failed_job"]["base_sha"]))
+    except FileExistsError:
         print("SKIPPING IMAGE: sources already pulled")
 
 
