@@ -87,8 +87,20 @@ let bindings (itv : t) =
 
 let pp_interval fs (interval : Interval.t) =
   let truncate scalar =
-    let s = Scalar.to_string scalar in
-    if String.length s > 5 then String.prefix s 5 ^ "..." else s
+    (* Mpqf.to_float/Mpfrf.to_float segfault on +/- infinity;
+       use default [Scalar.to_string] in that case, yielding "-1/0" or "1/0"
+       otherwise, convert to float and use [Float.to_string_hum] (i.e. to-human-readable-string)
+    *)
+    let is_infty = not @@ Int.equal 0 @@ Scalar.is_infty scalar in
+    if is_infty
+    then Scalar.to_string scalar
+    else
+      let as_float = match scalar with
+        | Scalar.Float f -> f
+        | Scalar.Mpqf m -> Mpqf.to_float m
+        | Scalar.Mpfrf m -> Mpfrf.to_float m
+      in
+      Float.to_string_hum ~decimals:3 ~strip_zero:true as_float
   in
   Format.fprintf fs "[%s, %s]" (truncate interval.inf) (truncate interval.sup)
 
@@ -142,7 +154,7 @@ let mk_tcons env op l r =
   let r =
     if op = Tcons0.SUP then
       Texpr1.Binop
-        (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Zero)
+        (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 1e-10), Texpr1.Double, Texpr1.Zero)
     else r
   in
   let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Zero) in
@@ -310,7 +322,6 @@ let lookup itv var =
   else Interval.top
 
 let interpret stmt itv =
-  let open Ast.Stmt in
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
