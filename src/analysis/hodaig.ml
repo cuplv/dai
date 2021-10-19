@@ -261,3 +261,24 @@ let%test "single-file interprocedurality with a public-static-void-main" =
   let _ = H.dump_dot ~filename:(abs_of_rel_path "solved_procedures.hodaig.dot") h in
   (* hacky check that the computed exit state contains the string of the correct analysis result for the made-up numerical program [Procedures.java] *)
   String.substr_index (Array_bounds.show exit_state) ~pattern:"14245" |> Option.is_some
+
+let%test "motivating example from SRH'96" =
+  let ({ cfgs; fields; cha; loc_map = _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Srh.java")
+  in
+  let fields = Class_hierarchy.compute_closure ~cha ~fields in
+  let h : H.t = H.init ~cfgs in
+  let fns = Cfg.Fn.Map.keys h in
+  let main_fn =
+    List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
+  in
+  let _, h = H.materialize_daig ~fn:main_fn ~entry_state:(H.Dom.init ()) h in
+  let callgraph =
+    Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/srh.callgraph")
+  in
+  let _exit_state, h =
+    H.query ~method_id:main_fn.method_id ~entry_state:(H.Dom.init ()) ~loc:main_fn.exit ~callgraph
+      ~fields h
+  in
+  let _ = H.dump_dot ~filename:(abs_of_rel_path "solved_srh.hodaig.dot") h in
+  true
