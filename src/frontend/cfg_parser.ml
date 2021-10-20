@@ -317,7 +317,11 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           in
           let e = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
           (e, (curr_loc, intermediate_stmts)) )
-  | `Switch_exp _ -> unimplemented "`Switch_exp" placeholder_expr
+  | `Switch_exp (_, (_, _matching_exp, _), (_, cases_block, _)) -> (
+      match cases_block with
+      | `Rep_switch_blk_stmt_group _cases  -> unimplemented "`Rep_switch_blk_stmt_group`" placeholder_expr
+      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" placeholder_expr
+    )
   | `Tern_exp (if_exp, _, then_exp, _, else_exp) ->
       let tmp = fresh_tmp_var () in
       let if_exp, (curr_loc, cond_intermediates) = expr ~curr_loc ~exc if_exp in
@@ -575,7 +579,11 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
       in
       (entry, ret, stmt) :: intermediates |> pair loc_map
   | `SEMI _ -> (loc_map, [ (entry, exit, Stmt.skip) ])
-  | `Switch_exp _ -> unimplemented "`Switch_exp" (loc_map, [])
+  | `Switch_exp (_, (_, _matching_exp, _), (_, cases_block, _)) -> (
+      match cases_block with
+      | `Rep_switch_blk_stmt_group _cases  -> unimplemented "`Rep_switch_blk_stmt_group`" (loc_map, [])
+      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, [])
+    )
   | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
   | `Throw_stmt (_, e, _) ->
       let thrown_expr, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc e in
