@@ -61,6 +61,7 @@ module type Dom = sig
 
   val return :
     callee:Cfg.Fn.t ->
+    caller:Cfg.Fn.t ->
     callsite:Ast.Stmt.t ->
     caller_state:t ->
     return_state:t ->
@@ -117,6 +118,8 @@ end) : sig
     type 'v t = (absstate, 'v, comparator_witness) Map.t
 
     val empty : 'v t
+
+    val singleton : absstate -> 'v -> 'v t
   end
 end = struct
   module T_comparator = struct
@@ -140,5 +143,7 @@ end = struct
     type 'v t = 'v Map.M(T_comparator).t
 
     let empty = Map.empty (module T_comparator)
+
+    let singleton k v = Base.Map.of_alist_exn (module T_comparator) [ (k, v) ]
   end
 end

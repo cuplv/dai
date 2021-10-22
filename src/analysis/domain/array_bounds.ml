@@ -309,12 +309,12 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
         let rcvr_field_bindings =
           if String.equal rcvr "this" then
             let ({ package; class_name; _ } : Method_id.t) = callee.method_id in
-            Declared_fields.lookup ~package ~class_name fields
-            |> Set.fold ~init:[] ~f:(fun acc var_str ->
-                   let var = Var.of_string var_str in
-                   if Environment.mem_var (Abstract1.env caller_itv) var then
-                     (var, Itv.lookup caller_itv var) :: acc
-                   else acc)
+            Declared_fields.lookup ~package ~class_name fields |> fun { instance; _ } ->
+            Set.fold instance ~init:[] ~f:(fun acc var_str ->
+                let var = Var.of_string var_str in
+                if Environment.mem_var (Abstract1.env caller_itv) var then
+                  (var, Itv.lookup caller_itv var) :: acc
+                else acc)
           else
             let rcvr_aaddr = Map.find caller_am rcvr |> Option.value ~default:Addr.Abstract.empty in
             Abstract1.env caller_itv |> Environment.vars |> snd
@@ -335,8 +335,8 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
       (callee_am, callee_itv)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-let return ~(callee : Cfg.Fn.t) ~callsite ~caller_state:(caller_amap, caller_itv)
-    ~return_state:(return_amap, return_itv) ~fields =
+let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
+    ~caller_state:(caller_amap, caller_itv) ~return_state:(return_amap, return_itv) ~fields =
   forget_used_tmp_vars callsite
   @@
   match callsite with
@@ -365,7 +365,7 @@ let return ~(callee : Cfg.Fn.t) ~callsite ~caller_state:(caller_amap, caller_itv
       let callee_instance_fields =
         if callee.method_id.static then String.Set.empty
         else
-          Declared_fields.lookup fields ~package:callee.method_id.package
+          Declared_fields.lookup_instance fields ~package:callee.method_id.package
             ~class_name:callee.method_id.class_name
       in
       let retvar = Var.of_string Cfg.retvar in
@@ -375,7 +375,9 @@ let return ~(callee : Cfg.Fn.t) ~callsite ~caller_state:(caller_amap, caller_itv
         else Interval.top
       in
       (* (1) transfer constraints on the return value (and its fields) to the lhs of the callsite, then
-         (2) transfer constraints on instance fields at the callee return to equivalent constraints on the receiver's fields *)
+         (2) transfer constraints on instance fields at the callee return to equivalent constraints on the receiver's fields
+         (3) transfer constraints on static fields at the callee return to equivalents on the receiver, if they share a class
+      *)
       let itv =
         (* (1) *)
         ( Itv.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
@@ -386,8 +388,8 @@ let return ~(callee : Cfg.Fn.t) ~callsite ~caller_state:(caller_amap, caller_itv
             let retval_fields_itv = project_fields return_itv retval_aaddr in
             Itv.meet retval_fields_itv )
         (* (2) *)
-        |> fun init ->
-        Set.fold callee_instance_fields ~init ~f:(fun itv fld ->
+        |> fun itv ->
+        Set.fold callee_instance_fields ~init:itv ~f:(fun itv fld ->
             let fld_var = Var.of_string fld in
             if Environment.mem_var (Abstract1.env return_itv) fld_var then
               let fld_val = Itv.lookup return_itv fld_var in
@@ -399,6 +401,19 @@ let return ~(callee : Cfg.Fn.t) ~callsite ~caller_state:(caller_amap, caller_itv
                         Texpr1.(Cst (Coeff.Interval fld_val)))
               | `Static -> itv
             else itv)
+        (* (3) *)
+        |>
+        if Cfg.Fn.is_same_class callee caller then fun itv ->
+          let static_fields =
+            Declared_fields.lookup_static fields ~package:callee.method_id.package
+              ~class_name:callee.method_id.class_name
+          in
+          Set.fold static_fields ~init:itv ~f:(fun itv fld ->
+              let fld_var = Var.of_string fld in
+              let fld_val = Itv.lookup itv fld_var in
+              if Interval.is_top fld_val then itv
+              else Itv.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
+        else Fn.id
       in
       (* (1) bind the receiver's abstract address if needed, then
          (2) transfer any return-value address binding to the callsite's lhs *)

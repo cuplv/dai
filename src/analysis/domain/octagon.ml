@@ -33,8 +33,6 @@ open Syntax
 
 type t = Oct.t Abstract1.t
 
-module Stmt = Ast.Stmt
-
 let man = lazy (Oct.manager_alloc ())
 
 let get_man () = Lazy.force man
@@ -275,7 +273,7 @@ let hash_fold_t h oct = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 oct)
 
 let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
 
-let return ~callee:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+let return ~callee:_ ~caller:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
 
 let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
 

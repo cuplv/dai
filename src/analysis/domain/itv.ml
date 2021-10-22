@@ -92,10 +92,10 @@ let pp_interval fs (interval : Interval.t) =
        otherwise, convert to float and use [Float.to_string_hum] (i.e. to-human-readable-string)
     *)
     let is_infty = not @@ Int.equal 0 @@ Scalar.is_infty scalar in
-    if is_infty
-    then Scalar.to_string scalar
+    if is_infty then Scalar.to_string scalar
     else
-      let as_float = match scalar with
+      let as_float =
+        match scalar with
         | Scalar.Float f -> f
         | Scalar.Mpqf m -> Mpqf.to_float m
         | Scalar.Mpfrf m -> Mpfrf.to_float m
@@ -153,8 +153,7 @@ let mk_tcons env op l r =
   (* add tiny constant to right hand side to avoid float comparison wonkiness*)
   let r =
     if op = Tcons0.SUP then
-      Texpr1.Binop
-        (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 1e-10), Texpr1.Double, Texpr1.Zero)
+      Texpr1.Binop (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 1e-10), Texpr1.Double, Texpr1.Zero)
     else r
   in
   let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Zero) in
@@ -372,7 +371,7 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
           Abstract1.of_box (get_man ()) (Environment.make [||] formals) formals bounds
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-let return ~callee:_ ~callsite ~caller_state ~return_state ~fields:_ =
+let return ~callee:_ ~caller:_ ~callsite ~caller_state ~return_state ~fields:_ =
   match callsite with
   | Ast.Stmt.Call { lhs; _ } ->
       let man = get_man () in
