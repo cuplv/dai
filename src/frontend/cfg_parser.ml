@@ -212,6 +212,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
                   | '\\' -> Lit.Char "\\"
                   | '"' -> Lit.Char "\""
                   | '\'' -> Lit.Char "'"
+                  | '0' -> Lit.Char "\o000"
                   | _ ->
                       failwith (Format.asprintf "unrecognized escape sequence: \\%c" contents.[1]) )
               | _ -> Lit.Char contents )
