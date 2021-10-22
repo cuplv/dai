@@ -7,6 +7,12 @@ module type Sig = sig
 
   type t
 
+  module Name : sig
+    type t [@@deriving compare, hash, sexp_of]
+
+    val pp : t pp
+  end
+
   val of_cfg : entry_state:absstate -> cfg:Cfg.t -> fn:Cfg.Fn.t -> t
 
   val apply_edit :
@@ -18,15 +24,25 @@ module type Sig = sig
 
   val dump_dot : filename:string -> ?loc_labeller:(Cfg.Loc.t -> string option) -> t -> unit
 
+  val is_solved : Cfg.Loc.t -> t -> bool
+
   type 'a or_summary_query =
     | Result of 'a
     | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
 
-  type summarizer = Ast.Stmt.t -> absstate -> absstate option
+  type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
-  val is_solved : Cfg.Loc.t -> t -> bool
+  val get_by_name : ?summarizer:summarizer -> Name.t -> t -> absstate or_summary_query * t
+
+  val read_by_loc : Cfg.Loc.t -> t -> absstate option
+
+  val read_by_name : Name.t -> t -> absstate option
+
+  val write_by_name : Name.t -> absstate -> t -> t
+
+  val pred_state_exn : Name.t -> t -> absstate
 end
 
 module Make (Dom : Abstract.Dom) = struct
@@ -56,7 +72,7 @@ module Make (Dom : Abstract.Dom) = struct
         (* Iteration context is a list of loop-head / iteration-count pairs, tracking the abstract iteration count of each nested loop *)
         | Iterate of (int * Cfg.Loc.t) list * t
         | Prod of t * t
-      [@@deriving compare, equal, sexp_of]
+      [@@deriving compare, equal, hash, sexp_of]
 
       let rec hash : t -> int = function
         | Loc l -> Cfg.Loc.hash l
@@ -246,7 +262,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Result of 'a
     | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
 
-  type summarizer = Ast.Stmt.t -> absstate -> absstate option
+  type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
   module Or_summary_query_with_daig = struct
     (** provide infix monadic operations over ['a or_summary_query * t] *)
@@ -651,15 +667,12 @@ module Make (Dom : Abstract.Dom) = struct
     in
     List.fold all_new_edges ~init:daig_without_fix_edges ~f:(flip G.Edge.insert)
 
-  let dirty_from (r : Ref.t) (daig : t) (fn : Cfg.Fn.t) =
+  let dirty_from (r : Ref.t) (daig : t) =
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n daig in
       if Seq.is_empty outgoing_edges then (
         match Ref.name n with
-        | Name.Loc loc ->
-            (* TODO(benno): might need to account for do-while loop-heads with no outgoing control flow here, in addition to function exits *)
-            assert (Cfg.Loc.equal loc fn.exit);
-            acc
+        | Name.Loc _ -> (* procedure exit, all done*) acc
         | Name.Iterate (_, l) ->
             (* this is a hack -- graphlib doesn't seem to actually remove edges/nodes sometimes,
                so just jump to the loop head if we somehow end up in a dangling unrolling *)
@@ -759,7 +772,6 @@ module Make (Dom : Abstract.Dom) = struct
           | Name.Iterate _ as n -> Name.set_iterate 0 loop_head n
           | _ -> failwith "malformed short-ciruiting edge"
         in
-
         match ref_by_name new_src_name daig with
         | Some src_ref -> G.Edge.(insert (create src_ref (dst edge) (label edge))) daig
         | None -> daig)
@@ -795,7 +807,7 @@ module Make (Dom : Abstract.Dom) = struct
                   match Ref.stmt_exn s with
                   | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
                       let res =
-                        match summarizer callsite (Ref.astate_exn phi) with
+                        match summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi) with
                         | Some phi_prime -> Result phi_prime
                         | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi }
                       in
@@ -867,16 +879,41 @@ module Make (Dom : Abstract.Dom) = struct
             Dom.interpret binding astate)
     | _ -> failwith "malformed callsite"
 
-  and get_by_loc ?(summarizer = fun _ _ -> None) loc daig =
-    ref_at_loc_exn ~loc daig |> function
+  let get_by_ref_impl summarizer daig = function
     | Ref.AState { state = Some phi; name = _ } -> (Result phi, daig)
     | Ref.AState _ as r -> (
         match get r summarizer daig with
         | Result r, daig -> (Result (Ref.astate_exn r), daig)
         | (Summ_qry _ as sq), daig -> (sq, daig) )
-    | _ -> failwith "malformed daig: ref-cell at a program loc must be of type Ref.AState"
+    | _ -> failwith "malformed daig: get_by_ref_impl is only used for abstract state queries"
 
-  let apply_edit ~daig ~cfg_edit ~fn =
+  let get_by_loc ?(summarizer = fun ~callsite:_ _ -> None) loc daig =
+    ref_at_loc_exn ~loc daig |> get_by_ref_impl summarizer daig
+
+  let get_by_name ?(summarizer = fun ~callsite:_ _ -> None) nm daig =
+    ref_by_name_exn nm daig |> get_by_ref_impl summarizer daig
+
+  let read_by_loc loc daig =
+    match ref_at_loc_exn ~loc daig with Ref.AState { state; name = _ } -> state | _ -> None
+
+  let read_by_name nm daig =
+    match ref_by_name_exn nm daig with Ref.AState { state; name = _ } -> state | _ -> None
+
+  let write_by_name nm absstate daig =
+    match ref_by_name_exn nm daig with
+    | Ref.AState phi as r ->
+        let daig = dirty_from r daig in
+        phi.state <- Some absstate;
+        daig
+    | _ -> failwith (Format.asprintf "can't write to non-absstate ref-cell %a" Name.pp nm)
+
+  let pred_state_exn nm daig =
+    let r = ref_by_name_exn nm daig in
+    G.Node.preds r daig |> Seq.filter ~f:Ref.is_astate |> Seq.to_list |> function
+    | [ Ref.AState { state = Some phi; _ } ] -> phi
+    | _ -> failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
+
+  let apply_edit ~daig ~cfg_edit ~(fn : Cfg.Fn.t) =
     let open Frontend.Tree_diff in
     function
     | Add_function _ | Delete_function _ | Modify_function _ ->
@@ -888,7 +925,7 @@ module Make (Dom : Abstract.Dom) = struct
           | None -> failwith "error: Add_statements edit should always produce a fresh location"
         in
         let ref_at_loc = ref_at_loc_exn ~loc:at_loc daig in
-        let daig = dirty_from ref_at_loc daig fn in
+        let daig = dirty_from ref_at_loc daig in
         let added_loc_ref =
           match Ref.name ref_at_loc with
           | Name.Loc _ -> Ref.AState { state = None; name = Name.Loc added_loc }
@@ -948,7 +985,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Modify_statements { method_id = _; from_loc; to_loc; new_stmts = _ } ->
         let from_ref = ref_at_loc_exn ~loc:from_loc daig in
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
-        let dirtied_daig = dirty_from to_ref daig fn in
+        let dirtied_daig = dirty_from to_ref daig in
         let removed_region_daig = remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref in
         let cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
         (* (1) remove DAIG region between [from_loc] and [to_loc]
@@ -962,7 +999,7 @@ module Make (Dom : Abstract.Dom) = struct
         Graph.union (module G) new_daig_segment removed_region_daig
     | Modify_header { method_id = _; prev_loc_ctx; next_stmt = _; loop_body_exit = _ } ->
         let at_loc_ref = ref_at_loc_exn ~loc:prev_loc_ctx.entry daig in
-        let _daig = dirty_from at_loc_ref in
+        let _daig = dirty_from at_loc_ref daig in
         let _extra_back_edges = Option.to_list cfg_edit.added_for_loop_backedge in
         let _cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
         failwith "todo: Modify_header edit"
@@ -1001,7 +1038,7 @@ module Make (Dom : Abstract.Dom) = struct
            (3) rename corresponding statement refs, replacing [to_loc] by [from_loc]
            NB: Special case when [to_loc] == [fn.exit], to preserve function-exit location: just replace the region by Skip instead of collapsing the two locations into one
         *)
-        let dirtied_daig = dirty_from to_ref daig fn in
+        let dirtied_daig = dirty_from to_ref daig in
         let removed_daig =
           remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref
           |>
