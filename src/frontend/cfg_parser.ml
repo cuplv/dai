@@ -212,14 +212,14 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
                   | '\\' -> Lit.Char "\\"
                   | '"' -> Lit.Char "\""
                   | '\'' -> Lit.Char "'"
-                  | _ -> failwith (Format.asprintf "unrecognized escape sequence: \\%c" contents.[1])
-                )
-              | _ -> Lit.Char contents)
+                  | _ ->
+                      failwith (Format.asprintf "unrecognized escape sequence: \\%c" contents.[1]) )
+              | _ -> Lit.Char contents )
           | `Str_lit (_, raw) ->
-            raw
-            |> String.chop_prefix_if_exists ~prefix:"\""
-            |> String.chop_suffix_if_exists ~suffix:"\""
-            |> fun contents -> Lit.String contents
+              raw
+              |> String.chop_prefix_if_exists ~prefix:"\""
+              |> String.chop_suffix_if_exists ~suffix:"\""
+              |> fun contents -> Lit.String contents
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))
@@ -235,6 +235,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let ctor_name =
         match typ with
         | `Id (_, typ) | `Gene_type (`Id (_, typ), _) -> typ
+        | `Scoped_type_id _ -> unimplemented "`Scoped_type_id" "PLACEHOLDER"
         | _ ->
             failwith
               (Format.asprintf "unrecognized constructor simple-type: %a" Sexp.pp
@@ -557,7 +558,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc stmt : Loc_map.t 
         | (`Id (_, lhs), _), Some (_, `Array_init lit) ->
             let rhs, intermediate_stmts = array_lit ~curr_loc ~exc lit in
             (Stmt.Assign { lhs; rhs }, intermediate_stmts)
-        | (`Choice_open _, _), _ -> failwith "modules not yet implemented"
+        | (`Choice_open _, _), _ -> unimplemented "`Choice_open" (Stmt.Skip, (curr_loc, []))
       in
       let rec edges_of_decls curr_loc = function
         | [] -> failwith "unreachable"
@@ -648,7 +649,7 @@ and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc :
   let exn_binding_of_catch_clause : CST.catch_clause -> Stmt.t = function
     | _, _, (_, _, (`Id (_, ident), _)), _, _ ->
         Stmt.Assign { lhs = ident; rhs = Expr.Var Cfg.exc_retvar }
-    | _ -> failwith "unimplemented case: catch_clause with non-identifier formal parameter"
+    | _ -> unimplemented "catch-clause-with-non-ident-formal-param" Stmt.Skip
   in
   let body_of_catch_clause : CST.catch_clause -> CST.program = function
     | _, _, _, _, (_lcurly, body, _rcurly) -> body
@@ -749,20 +750,19 @@ let parse_formals = function
   | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
       let formal_name = function
         | `Formal_param (_mods, _type, (`Id (_, id), _dims)) -> id
-        | _ -> failwith "spread params not yet handled"
+        | `Formal_param _ -> unimplemented "`Formal_param" "PLACEHOLDER"
+        | `Spread_param _ -> unimplemented "`Spread_param" "PLACEHOLDER"
       in
-      List.fold rest ~init:[ formal_name first ] ~f:(fun acc curr ->
-          (snd curr |> formal_name) :: acc)
+      formal_name first :: List.map rest ~f:(snd >> formal_name)
   | _, _, None, _ -> []
 
 let types_of_formals = function
   | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
       let type_of_formal = function
-        | `Spread_param _ -> failwith "spread params not yet handled"
+        | `Spread_param _ -> unimplemented "`Spread_param" "PLACEHOLDER"
         | `Formal_param (_mods, t, _) -> string_of_unannotated_type t
       in
-      List.fold rest ~init:[ type_of_formal first ] ~f:(fun acc curr ->
-          (snd curr |> type_of_formal) :: acc)
+      type_of_formal first :: List.map rest ~f:(snd >> type_of_formal)
   | _, _, None, _ -> []
 
 let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declaration) =
