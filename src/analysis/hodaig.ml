@@ -17,7 +17,7 @@ module Make (Dom : Abstract.Dom) = struct
       type t = { callsite : Ast.Stmt.t; ctx : Dom.t; fn : Cfg.Fn.t; nm : D.Name.t }
       [@@deriving compare, hash, sexp_of]
 
-      let pp fs dep =
+      let _pp fs dep =
         Format.fprintf fs "(%a in %a with ctx %a summarizing %a)" D.Name.pp dep.nm Cfg.Fn.pp dep.fn
           Dom.pp dep.ctx Ast.Stmt.pp dep.callsite
 
@@ -42,45 +42,27 @@ module Make (Dom : Abstract.Dom) = struct
       let singleton = Set.singleton (module T_comparator)
     end
 
-    let interproc_deps : Set.t Dom.Map.t Cfg.Fn.Map.t ref = ref Cfg.Fn.Map.empty
+    let interproc_deps : Set.t Cfg.Fn.Map.t ref = ref Cfg.Fn.Map.empty
 
-    let add ~summary:(summary_fn, summary_ctx) ~callsite:(nm, fn, ctx, callsite) =
-      let key, data =
-        match Map.find !interproc_deps summary_fn with
-        | None ->
-            let summary_deps =
-              Dom.Map.singleton summary_ctx (Set.singleton { nm; fn; ctx; callsite })
-            in
-            (summary_fn, summary_deps)
-        | Some deps ->
-            let summary_deps =
-              Map.find deps summary_ctx |> Option.value ~default:Set.empty
-              |> flip Set.add { nm; fn; ctx; callsite }
-            in
-            (summary_fn, Map.set deps ~key:summary_ctx ~data:summary_deps)
+    let add ~callee ~caller:(nm, fn, ctx, callsite) =
+      let data =
+        { nm; fn; ctx; callsite }
+        |>
+        match Map.find !interproc_deps fn with None -> Set.singleton | Some deps -> Set.add deps
       in
-      interproc_deps := Map.set !interproc_deps ~key ~data
+      interproc_deps := Map.set !interproc_deps ~key:callee ~data
 
-    let _pop ~summary:(summary_fn, summary_ctx) =
-      match Map.find !interproc_deps summary_fn with
-      | None -> Set.empty
-      | Some fn_deps -> (
-          match Map.find fn_deps summary_ctx with
-          | None -> Set.empty
-          | Some deps when Set.is_empty deps -> Set.empty
-          | Some deps ->
-              let new_fn_deps = Map.set fn_deps ~key:summary_ctx ~data:Set.empty in
-              interproc_deps := Map.set !interproc_deps ~key:summary_fn ~data:new_fn_deps;
-              deps )
-
-    let self_loops fn ctx =
+    let pop ~fn =
       match Map.find !interproc_deps fn with
       | None -> Set.empty
-      | Some fn_deps -> (
-          match Map.find fn_deps ctx with
-          | None -> Set.empty
-          | Some deps ->
-              Set.filter deps ~f:(fun dep -> Cfg.Fn.equal fn dep.fn && Dom.equal ctx dep.ctx) )
+      | Some deps ->
+          interproc_deps := Map.set !interproc_deps ~key:fn ~data:Set.empty;
+          deps
+
+    let self_loops fn =
+      match Map.find !interproc_deps fn with
+      | None -> Set.empty
+      | Some deps -> Set.filter deps ~f:(fun dep -> Cfg.Fn.equal fn dep.fn)
   end
 
   type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
@@ -93,6 +75,9 @@ module Make (Dom : Abstract.Dom) = struct
   let set_daig hodaig daig fn entry_state =
     let cfg, daigs = Map.find_exn hodaig fn in
     Map.set hodaig ~key:fn ~data:(cfg, Map.set daigs ~key:entry_state ~data:daig)
+
+  let get_daig_exn hodaig fn entry_state =
+    Map.find_exn hodaig fn |> snd |> flip Map.find_exn entry_state
 
   let dump_dot ~filename (hodaig : t) =
     let daigs : (Cfg.Fn.t * D.t) list =
@@ -121,6 +106,11 @@ module Make (Dom : Abstract.Dom) = struct
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
         (daig, Map.set hodaig ~key:fn ~data:(cfg, daigs))
 
+  let dirty_interproc_deps hodaig fn =
+    Set.fold (Dep.pop ~fn) ~init:hodaig ~f:(fun hodaig dep ->
+        let daig = D.dirty dep.nm (get_daig_exn hodaig dep.fn dep.ctx) in
+        set_daig hodaig daig dep.fn dep.ctx)
+
   let summarize_with_callgraph (hodaig : t) fields callgraph (caller : Cfg.Fn.t) caller_entry_state
       ~callsite:(callsite, nm) caller_state =
     let open Option.Monad_infix in
@@ -143,7 +133,7 @@ module Make (Dom : Abstract.Dom) = struct
           let callee_entry_state = Dom.call ~callee ~callsite ~caller_state ~fields in
           (* four cases:
              (1) callee entry state is bottom, so no effect on return state
-             (2) we already have an exactly-matching summary, so no widening needed
+             (2) this is a recusrive call and we already have an exactly-matching summary, so no widening needed
              (3) this is a recursive call and widening has converged on the entry state, so we add a self-dependency and continue
              (4) this is a non-recursive call or recursive call yet to converge on its entry state, so attempt to summarize
           *)
@@ -152,33 +142,33 @@ module Make (Dom : Abstract.Dom) = struct
             (* case (1); do this before widening to avoid needless work *)
           then acc_result
           else
+            let is_recursive = Method_id.equal caller.method_id callee.method_id in
+            let exit_loc = if is_exc then callee.exc_exit else callee.exit in
             let exactly_matching_daig =
               Map.find_exn hodaig callee |> snd |> flip Map.find callee_entry_state
             in
-            if Option.exists exactly_matching_daig ~f:(D.is_solved callee.exit) then
-              exactly_matching_daig >>= D.read_by_loc callee.exit >>| Dom.join acc_poststate
+            if
+              is_recursive && Option.exists exactly_matching_daig ~f:(D.is_solved callee.exit)
+              (* case (2) *)
+            then
+              exactly_matching_daig >>= D.read_by_loc callee.exit
+              >>| (fun return_state ->
+                    Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields)
+              >>| Dom.join acc_poststate
             else
-              let is_recursive = Method_id.equal caller.method_id callee.method_id in
-              let exit_loc = if is_exc then callee.exc_exit else callee.exit in
               let callee_entry_state =
                 if is_recursive then Dom.widen caller_entry_state callee_entry_state
                 else callee_entry_state
               in
               Map.find (snd @@ Map.find_exn hodaig callee) callee_entry_state >>= fun daig ->
               if is_recursive && Dom.equal callee_entry_state caller_entry_state (* case (3) *) then
-                let _ =
-                  Dep.add ~summary:(caller, caller_entry_state)
-                    ~callsite:(nm, caller, caller_entry_state, callsite)
-                in
+                let _ = Dep.add ~callee ~caller:(nm, caller, caller_entry_state, callsite) in
                 match D.read_by_loc exit_loc daig with
                 | Some phi -> Some (Dom.join acc_poststate phi)
                 | None -> acc_result
               else if (* case (4) *)
                       D.is_solved exit_loc daig then
-                let _ =
-                  Dep.add ~summary:(callee, callee_entry_state)
-                    ~callsite:(nm, caller, caller_entry_state, callsite)
-                in
+                let _ = Dep.add ~callee ~caller:(nm, caller, caller_entry_state, callsite) in
                 let new_poststate =
                   match D.get_by_loc exit_loc daig with
                   | D.Result return_state, _daig ->
@@ -236,89 +226,70 @@ module Make (Dom : Abstract.Dom) = struct
     | D.Summ_qry { callsite; caller_state } -> (
         (* one or more additional summary is needed to analyze [callsite] in [caller_state] *)
         (* next, while (query stack is nonempty) pop, solve, add new queries as needed to analyze transitive callees *)
-        let rec solve_subqueries hodaig qrys ~gas : t =
-          if gas <= 0 then (
-            dump_dot ~filename:(abs_of_rel_path "hodaig_outta_gas.dot") hodaig;
-            failwith "outta gas" )
-          else
-            match qrys with
-            | [] -> (
-                let daig_qry_result, hodaig = issue_root_query hodaig in
-                match daig_qry_result with
-                | D.Result _ -> hodaig
-                | D.Summ_qry { callsite; caller_state } ->
-                    let new_qrys =
-                      callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
-                        method_id ~caller_entry_state:entry_state
-                    in
-                    if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
-                      failwith "got bottom new_qry"
-                    else ();
-                    if List.is_empty new_qrys then hodaig
-                    else solve_subqueries hodaig new_qrys ~gas:(gas - 1) )
-            | qry :: qrys when Dom.is_bot qry.entry_state ->
-                solve_subqueries hodaig qrys ~gas:(gas - 1)
-            | qry :: qrys -> (
-                let callee_daig, hodaig =
-                  materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state hodaig
-                in
-                Format.(fprintf std_formatter) "HANDLING QRY: %a\n" Q.pp qry;
-                Format.print_flush ();
-                let daig_qry_result, hodaig, new_callee_daig =
-                  let res, new_callee_daig =
-                    D.get_by_loc
-                      ~summarizer:
-                        (summarize_with_callgraph hodaig fields callgraph qry.fn qry.entry_state)
-                      (Q.exit_loc qry) callee_daig
+        let rec solve_subqueries hodaig = function
+          | [] -> (
+              let daig_qry_result, hodaig = issue_root_query hodaig in
+              match daig_qry_result with
+              | D.Result _ -> hodaig
+              | D.Summ_qry { callsite; caller_state } ->
+                  let new_qrys =
+                    callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
+                      method_id ~caller_entry_state:entry_state
                   in
-                  (res, set_daig hodaig new_callee_daig qry.fn qry.entry_state, new_callee_daig)
+                  if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
+                    failwith "got bottom new_qry"
+                  else ();
+                  if List.is_empty new_qrys then hodaig else solve_subqueries hodaig new_qrys )
+          | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries hodaig qrys
+          | qry :: qrys -> (
+              let callee_daig, hodaig =
+                materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state hodaig
+              in
+              let daig_qry_result, hodaig, new_callee_daig =
+                let res, new_callee_daig =
+                  D.get_by_loc
+                    ~summarizer:
+                      (summarize_with_callgraph hodaig fields callgraph qry.fn qry.entry_state)
+                    (Q.exit_loc qry) callee_daig
                 in
-                match daig_qry_result with
-                | D.Result res ->
-                    let recursively_dirtied_daig, needs_requery =
-                      Dep.self_loops qry.fn qry.entry_state
-                      |> Set.fold ~init:(new_callee_daig, false)
-                           ~f:(fun (daig, needs_requery) (recursive_dep : Dep.t) ->
-                             Format.(fprintf std_formatter)
-                               "\tPROCESSING RECURSIVE DEP: %a\n" Dep.pp recursive_dep;
-                             match D.read_by_name recursive_dep.nm daig with
-                             | None -> (daig, needs_requery)
-                             | Some return_state ->
-                                 let new_return_state =
-                                   Dom.return ~return_state:res ~fields ~callee:qry.fn
-                                     ~caller:qry.fn ~callsite:recursive_dep.callsite
-                                     ~caller_state:(D.pred_state_exn recursive_dep.nm daig)
-                                   |> Dom.widen return_state
+                (res, set_daig hodaig new_callee_daig qry.fn qry.entry_state, new_callee_daig)
+              in
+              match daig_qry_result with
+              | D.Result res ->
+                  let recursively_dirtied_daig, needs_requery =
+                    Dep.self_loops qry.fn
+                    |> Set.fold ~init:(new_callee_daig, false)
+                         ~f:(fun (daig, needs_requery) (recursive_dep : Dep.t) ->
+                           match D.read_by_name recursive_dep.nm daig with
+                           | None -> (daig, needs_requery)
+                           | Some return_state ->
+                               let new_return_state =
+                                 Dom.return ~return_state:res ~fields ~callee:qry.fn ~caller:qry.fn
+                                   ~callsite:recursive_dep.callsite
+                                   ~caller_state:(D.pred_state_exn recursive_dep.nm daig)
+                                 |> Dom.widen return_state
+                               in
+                               if Dom.equal return_state new_return_state then (daig, needs_requery)
+                               else
+                                 let daig =
+                                   D.write_by_name recursive_dep.nm new_return_state daig
                                  in
-                                 Format.(fprintf std_formatter)
-                                   "\t\tNEW RETURN STATE: %a\n\
-                                    \t\tQUERY RESULT: %a\n\
-                                    \t\tWIDEN RESULT: %a\n"
-                                   Dom.pp new_return_state Dom.pp res Dom.pp
-                                   (Dom.widen return_state new_return_state);
-                                 if Dom.equal return_state new_return_state then
-                                   (daig, needs_requery)
-                                 else
-                                   let daig =
-                                     D.write_by_name recursive_dep.nm new_return_state daig
-                                   in
-                                   (daig, true))
-                    in
-                    let hodaig = set_daig hodaig recursively_dirtied_daig qry.fn qry.entry_state in
-                    let qrys = if needs_requery then qry :: qrys else qrys in
-                    solve_subqueries hodaig qrys ~gas:(gas - 1)
-                | D.Summ_qry { callsite; caller_state } ->
-                    let new_qrys =
-                      callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
-                        qry.fn.method_id ~caller_entry_state:qry.entry_state
-                    in
-                    solve_subqueries hodaig (new_qrys @ qrys) ~gas:(gas - 1) )
+                                 (daig, true))
+                  in
+                  let hodaig = set_daig hodaig recursively_dirtied_daig qry.fn qry.entry_state in
+                  let qrys = if needs_requery then qry :: qrys else qrys in
+                  solve_subqueries hodaig qrys
+              | D.Summ_qry { callsite; caller_state } ->
+                  let new_qrys =
+                    callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
+                      qry.fn.method_id ~caller_entry_state:qry.entry_state
+                  in
+                  solve_subqueries hodaig (new_qrys @ qrys) )
         in
         let hodaig =
           solve_subqueries hodaig
             (callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
                method_id ~caller_entry_state:entry_state)
-            ~gas:100
         in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)
         let _, hodaig = materialize_daig ~fn ~entry_state hodaig in
@@ -377,19 +348,19 @@ module Make (Dom : Abstract.Dom) = struct
                      method_id)
             | Some fn ->
                 let cfg, daigs = Map.find_exn hodaig fn in
+                let hodaig = dirty_interproc_deps hodaig fn in
                 let cfg_edit =
                   Tree_diff.apply_edit edit loc_map cfg ~ret:fn.exit ~exc:fn.exc_exit
                 in
                 let new_daigs =
                   Map.map daigs ~f:(fun daig -> D.apply_edit ~daig ~cfg_edit ~fn edit)
                 in
-                (cfg_edit.new_loc_map, Map.set hodaig ~key:fn ~data:(cfg, new_daigs)) ))
+                (cfg_edit.new_loc_map, Map.set hodaig ~key:fn ~data:(cfg_edit.cfg, new_daigs)) ))
 end
 
 module H = Make (Array_bounds)
 open Frontend
 
-(*
 let%test "single-file interprocedurality with a public-static-void-main" =
   let ({ cfgs; fields; cha; loc_map = _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Procedures.java")
@@ -412,8 +383,8 @@ let%test "single-file interprocedurality with a public-static-void-main" =
   in
   let _ = H.dump_dot ~filename:(abs_of_rel_path "solved_procedures.hodaig.dot") h in
   (* hacky check that the computed exit state contains the string of the correct analysis result for the made-up numerical program [Procedures.java] *)
-  String.substr_index (Array_bounds.show exit_state) ~pattern:"14245" |> Option.is_some
-*)
+  String.substr_index (Array_bounds.show exit_state) ~pattern:"14_245" |> Option.is_some
+
 let%test "motivating example from SRH'96" =
   let ({ cfgs; fields; cha; loc_map = _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Srh.java")
