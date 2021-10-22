@@ -45,33 +45,36 @@ let%test "closure operation" =
     |> add ~package:[ "foo"; "bar" ] ~class_name:"Eight" ~super_package:[ "com"; "example" ]
          ~superclass_name:"Seven"
   in
+  let singleton_field name : Declared_fields.fields =
+    { static = String.Set.empty; instance = String.Set.singleton name }
+  in
   let fields =
     Declared_fields.(
       empty
-      |> add ~package:[ "foo"; "bar" ] ~class_name:"One" ~fields:(String.Set.singleton "A")
-      |> add ~package:[ "com"; "example" ] ~class_name:"Two" ~fields:(String.Set.singleton "B")
-      |> add ~package:[ "foo"; "bar" ] ~class_name:"Three" ~fields:(String.Set.singleton "C")
-      |> add ~package:[ "com"; "example" ] ~class_name:"Four" ~fields:(String.Set.singleton "D")
-      |> add ~package:[ "com"; "example" ] ~class_name:"Five" ~fields:(String.Set.singleton "E")
-      |> add ~package:[ "foo"; "bar" ] ~class_name:"Six" ~fields:(String.Set.singleton "F")
-      |> add ~package:[ "com"; "example" ] ~class_name:"Seven" ~fields:(String.Set.singleton "G")
-      |> add ~package:[ "foo"; "bar" ] ~class_name:"Eight" ~fields:(String.Set.singleton "H"))
+      |> add ~package:[ "foo"; "bar" ] ~class_name:"One" ~fields:(singleton_field "A")
+      |> add ~package:[ "com"; "example" ] ~class_name:"Two" ~fields:(singleton_field "B")
+      |> add ~package:[ "foo"; "bar" ] ~class_name:"Three" ~fields:(singleton_field "C")
+      |> add ~package:[ "com"; "example" ] ~class_name:"Four" ~fields:(singleton_field "D")
+      |> add ~package:[ "com"; "example" ] ~class_name:"Five" ~fields:(singleton_field "E")
+      |> add ~package:[ "foo"; "bar" ] ~class_name:"Six" ~fields:(singleton_field "F")
+      |> add ~package:[ "com"; "example" ] ~class_name:"Seven" ~fields:(singleton_field "G")
+      |> add ~package:[ "foo"; "bar" ] ~class_name:"Eight" ~fields:(singleton_field "H"))
   in
   let transitive_fields = compute_closure ~cha ~fields in
   Declared_fields.(
-    ( lookup transitive_fields ~package:[ "foo"; "bar" ] ~class_name:"One"
-    |> String.Set.(equal @@ of_list [ "A"; "B"; "C" ]) )
+    ( lookup transitive_fields ~package:[ "foo"; "bar" ] ~class_name:"One" |> fun { instance; _ } ->
+      String.Set.(equal instance @@ of_list [ "A"; "B"; "C" ]) )
     && ( lookup transitive_fields ~package:[ "com"; "example" ] ~class_name:"Two"
-       |> String.Set.(equal @@ of_list [ "B"; "C" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "B"; "C" ]) )
     && ( lookup transitive_fields ~package:[ "foo"; "bar" ] ~class_name:"Three"
-       |> String.Set.(equal @@ of_list [ "C" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "C" ]) )
     && ( lookup transitive_fields ~package:[ "com"; "example" ] ~class_name:"Four"
-       |> String.Set.(equal @@ of_list [ "C"; "D" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "C"; "D" ]) )
     && ( lookup transitive_fields ~package:[ "com"; "example" ] ~class_name:"Five"
-       |> String.Set.(equal @@ of_list [ "E"; "F" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "E"; "F" ]) )
     && ( lookup transitive_fields ~package:[ "foo"; "bar" ] ~class_name:"Six"
-       |> String.Set.(equal @@ of_list [ "F" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "F" ]) )
     && ( lookup transitive_fields ~package:[ "com"; "example" ] ~class_name:"Seven"
-       |> String.Set.(equal @@ of_list [ "F"; "G" ]) )
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "F"; "G" ]) )
     && lookup transitive_fields ~package:[ "foo"; "bar" ] ~class_name:"Eight"
-       |> String.Set.(equal @@ of_list [ "F"; "G"; "H" ]))
+       |> fun { instance; _ } -> String.Set.(equal instance @@ of_list [ "F"; "G"; "H" ]))

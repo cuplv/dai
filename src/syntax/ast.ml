@@ -11,7 +11,7 @@ module Lit = struct
       | Float of float
       | Null
       | String of string
-      | Char of Uchar.t
+      | Char of string (* store chars as strings to support multi-byte UTF8-encoded java chars *)
     [@@deriving equal, compare, sexp, hash]
   end
 
@@ -24,7 +24,7 @@ module Lit = struct
     | Float f -> Float.pp fs f
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\\\"" ^ s ^ "\\\"")
-    | Char c -> Uchar.pp fs c
+    | Char c -> Format.pp_print_string fs ("\\'" ^ c ^ "\\'")
 end
 
 module Binop = struct

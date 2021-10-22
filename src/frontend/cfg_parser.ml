@@ -199,25 +199,27 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           | `True _ -> Lit.Bool true
           | `False _ -> Lit.Bool false
           | `Char_lit (_, raw) -> (
-              try Lit.Char (Stdlib.Uchar.of_int (Int.of_string raw))
-              with _ -> (
-                raw
-                |> String.chop_prefix_if_exists ~prefix:"\'"
-                |> String.chop_suffix_if_exists ~suffix:"\'"
-                |> fun contents ->
-                match String.length contents with
-                | 1 -> Lit.Char (contents.[0] |> Uchar.of_char)
-                | 2 ->
-                    let first_byte = contents.[0] |> Char.to_int in
-                    let second_byte = contents.[1] |> Char.to_int in
-                    let c = Lit.Char (Stdlib.Uchar.of_int @@ (Int.shift_left first_byte 8 + second_byte)) in
-                    c
-                | _ -> failwith ("unrecognized character literal: '" ^ contents ^ "'") ) )
-          | `Str_lit (_, raw) ->
               raw
-              |> String.chop_prefix_if_exists ~prefix:"\""
-              |> String.chop_suffix_if_exists ~suffix:"\""
-              |> fun contents -> Lit.String contents
+              |> String.chop_prefix_if_exists ~prefix:"\'"
+              |> String.chop_suffix_if_exists ~suffix:"\'"
+              |> fun contents ->
+              match String.length contents with
+              | 2 when Char.equal '\\' contents.[0] -> (
+                  match contents.[1] with
+                  | 'n' -> Lit.Char "\n"
+                  | 't' -> Lit.Char "\t"
+                  | 'r' -> Lit.Char "\r"
+                  | '\\' -> Lit.Char "\\"
+                  | '"' -> Lit.Char "\""
+                  | '\'' -> Lit.Char "'"
+                  | _ -> failwith (Format.asprintf "unrecognized escape sequence: \\%c" contents.[1])
+                )
+              | _ -> Lit.Char contents)
+          | `Str_lit (_, raw) ->
+            raw
+            |> String.chop_prefix_if_exists ~prefix:"\""
+            |> String.chop_suffix_if_exists ~suffix:"\""
+            |> fun contents -> Lit.String contents
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))
@@ -859,18 +861,18 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             | None -> acc.cha )
       in
       let fields =
-        let declared_fields =
-          List.(
-            decls >>= function
+        let static, instance =
+          List.fold decls ~init:([], []) ~f:(fun (static, instance) -> function
             | `Field_decl (mods, _, (v, vs), _) ->
+                let decls = List.(map ~f:ident_of_var_declarator (v :: map ~f:snd vs)) in
                 let is_static =
-                  Option.exists mods ~f:(exists ~f:(function `Static _ -> true | _ -> false))
+                  Option.exists mods ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
                 in
-                if is_static then [] else v :: map ~f:snd vs |> map ~f:ident_of_var_declarator
-            | _ -> [])
-          |> String.Set.of_list
+                if is_static then (decls @ static, instance) else (static, decls @ instance)
+            | _ -> (static, instance))
+          |> fun (s, i) -> String.Set.(of_list s, of_list i)
         in
-        Declared_fields.add ~package ~class_name ~fields:declared_fields acc.fields
+        Declared_fields.add ~package ~class_name ~fields:{ static; instance } acc.fields
       in
       List.fold decls ~init:{ cfgs = acc.cfgs; fields; cha; loc_map = acc.loc_map } ~f:(fun acc ->
         function

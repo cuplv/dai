@@ -122,6 +122,10 @@ module Fn = struct
       { method_id; formals; locals; entry; exit; exc_exit }
 
     let defs { formals; locals; _ } = List.append formals locals
+
+    let is_same_class fn1 fn2 =
+      String.equal fn1.method_id.class_name fn2.method_id.class_name
+      && List.equal String.equal fn1.method_id.package fn2.method_id.package
   end
 
   include T
@@ -214,7 +218,6 @@ let natural_loop backedge cfg =
       in
       nat_loop_impl (Set.fold wl ~init:(Loc.Set.empty, loop) ~f:process_node)
   in
-
   let loop_tail_singleton = Loc.Set.singleton (src backedge) in
   nat_loop_impl @@ pair loop_tail_singleton loop_tail_singleton
 
