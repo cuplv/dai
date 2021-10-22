@@ -22,6 +22,8 @@ module type Sig = sig
     Frontend.Tree_diff.edit ->
     t
 
+  val dirty : Name.t -> t -> t
+
   val dump_dot : filename:string -> ?loc_labeller:(Cfg.Loc.t -> string option) -> t -> unit
 
   val is_solved : Cfg.Loc.t -> t -> bool
@@ -775,6 +777,8 @@ module Make (Dom : Abstract.Dom) = struct
         match ref_by_name new_src_name daig with
         | Some src_ref -> G.Edge.(insert (create src_ref (dst edge) (label edge))) daig
         | None -> daig)
+
+  let dirty (nm : Name.t) (daig : t) = dirty_from (ref_by_name_exn nm daig) daig
 
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a pair, consisting of the query result (either that ref-cell, guaranteed to be nonempty, or a query for a requisite procedure summary), and a new daig [t] reflecting possible changes to the DAIG structure

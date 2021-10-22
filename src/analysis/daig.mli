@@ -22,6 +22,9 @@ module type Sig = sig
     daig:t -> cfg_edit:Tree_diff.cfg_edit_result -> fn:Cfg.Fn.t -> Tree_diff.edit -> t
   (** apply the specified [Tree_diff.edit] to the input [daig]; [cfg_edit] and [fn] are passed as additional information needed for certain types of edit *)
 
+  val dirty : Name.t -> t -> t
+  (** dirty all dependencies of some name (including that name itself) *)
+
   val dump_dot : filename:string -> ?loc_labeller:(Cfg.Loc.t -> string option) -> t -> unit
   (** dump a DOT representation of a DAIG to [filename], decorating abstract-state cells according to [loc_labeller] if provided *)
 
