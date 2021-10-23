@@ -8,7 +8,7 @@ class Literals {
 	boolean t = true;
 	boolean f = false;
 
-	// ints/longs: all literals here have (decimal) value 42
+	// ints/longs
 	int a = 42; // decimal
 	int b = 0x2A; // hex
 	int c = 052; // octal
@@ -23,6 +23,7 @@ class Literals {
 	long b2 = 0x2al;
 	long c2 = 052l;
 	long d2 = 0b00101010l;
+	int binary64bit = 0b1010101010101010101010101010101010101010101010101010101010101010;
 
 	// floats/doubles
 	float a3 = 1e1f;

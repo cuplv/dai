@@ -185,7 +185,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
   let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
   | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
-  | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int i)))
+  | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int64 i)))
   | Expr.Lit (Float f) -> Some (Texpr1.Cst (Coeff.s_of_float f))
   | Expr.Lit (Bool b) -> Some (Texpr1.Cst (Coeff.s_of_float (if b then 1. else 0.)))
   | Expr.Lit _ -> None
@@ -276,7 +276,7 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
   | Binop { l; op = Ge; r } -> meet_with_op itv Tcons0.SUPEQ l r
   | Binop { l; op = Lt; r } -> meet_with_op itv Tcons0.SUP r l
   | Binop { l; op = Le; r } -> meet_with_op itv Tcons0.SUPEQ r l
-  | Unop { op = Not; e } -> meet_with_op itv Tcons0.EQ e (Lit (Int 0))
+  | Unop { op = Not; e } -> meet_with_op itv Tcons0.EQ e (Lit (Int 0L))
   | _ -> itv
 
 let eval_texpr itv =

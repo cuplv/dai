@@ -182,13 +182,13 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               raw
               |> String.chop_suffix_if_exists ~suffix:"l"
               |> String.chop_suffix_if_exists ~suffix:"L"
-              |> fun v -> Lit.Int (Int.of_string v)
+              |> fun v -> Lit.Int (Int64.of_string v)
           | `Octal_int_lit (_, raw) ->
               (* add an "0o" prefix to force octal decoding *)
               raw
               |> String.chop_suffix_if_exists ~suffix:"l"
               |> String.chop_suffix_if_exists ~suffix:"L"
-              |> fun v -> Lit.Int (Int.of_string ("0o" ^ v))
+              |> fun v -> Lit.Int (Int64.of_string ("0o" ^ v))
           | `Deci_floa_point_lit (_, raw) | `Hex_floa_point_lit (_, raw) ->
               raw
               |> String.chop_suffix_if_exists ~suffix:"f"
@@ -382,7 +382,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           let update_edge =
             ( curr_loc,
               next_loc,
-              Stmt.Assign { lhs = v; rhs = Expr.binop var op (Expr.Lit (Lit.Int 1)) } )
+              Stmt.Assign { lhs = v; rhs = Expr.binop var op (Expr.Lit (Lit.Int 1L)) } )
           in
           if is_pre then (var, (next_loc, update_edge :: intermediates))
           else
@@ -392,12 +392,12 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               | Binop.Minus -> Binop.Plus
               | _ -> failwith "unreachable"
             in
-            ( Expr.binop var inverse_op (Expr.Lit (Lit.Int 1)),
+            ( Expr.binop var inverse_op (Expr.Lit (Lit.Int 1L)),
               (next_loc, update_edge :: intermediates) )
       | Expr.Deref _ | Expr.Array_access _ ->
           unimplemented "`Unary_increment_or_decrement_on_heap" placeholder_expr
       | _ ->
-          if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1)), (curr_loc, intermediates))
+          if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1L)), (curr_loc, intermediates))
           else (e, (curr_loc, intermediates)) )
 
 and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) :

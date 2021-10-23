@@ -183,7 +183,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
     Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib) (Adapton.Types.String) (AAddr_or_val)
   module Heap =
     Adapton.Trie.Map.MakeNonInc (Name) (DefaultArtLib)
-      (Adapton.Types.Tuple2 (Addr) (Adapton.Types.Int))
+      (Adapton.Types.Tuple2 (Addr) (Adapton.Types.Int64))
       (AAddr_or_val)
   module AState = Adapton.Types.Tuple2 (Env) (Heap)
   include Adapton.Types.Option (AState)
@@ -258,7 +258,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               let heap =
                 List.foldi elts ~init:heap ~f:(fun i acc curr ->
                     match eval_expr env heap curr with
-                    | Some v -> Heap.add acc (alloc_site, i) v
+                    | Some v -> Heap.add acc (alloc_site, Int64.of_int i) v
                     | None -> acc)
               in
               Some (env, heap)
@@ -342,7 +342,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
           List
             (Heap.fold
                (fun a (obj, idx) v ->
-                 List [ Addr.sexp_of_t obj; Int.sexp_of_t idx; sexp_of_v v ] :: a)
+                 List [ Addr.sexp_of_t obj; Int64.sexp_of_t idx; sexp_of_v v ] :: a)
                [] heap)
         in
         List [ env_sexp; heap_sexp ]
@@ -368,7 +368,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         let heap =
           List.fold heap_sexp ~init:(Heap.of_list []) ~f:(fun heap -> function
             | List [ obj; fld; v ] ->
-                Heap.add heap (Addr.t_of_sexp obj, Int.t_of_sexp fld) (v_of_sexp v)
+                Heap.add heap (Addr.t_of_sexp obj, Int64.t_of_sexp fld) (v_of_sexp v)
             | _ -> failwith "malformed environment s-expression")
         in
         Some (env, heap)

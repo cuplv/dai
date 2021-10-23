@@ -7,7 +7,7 @@ module Lit = struct
   module T = struct
     type t =
       | Bool of bool
-      | Int of int
+      | Int of int64
       | Float of float
       | Null
       | String of string
@@ -20,7 +20,7 @@ module Lit = struct
 
   let pp fs = function
     | Bool b -> Bool.pp fs b
-    | Int i -> Int.pp fs i
+    | Int i -> Int64.pp fs i
     | Float f -> Float.pp fs f
     | Null -> Format.pp_print_string fs "null"
     | String s -> Format.pp_print_string fs ("\\\"" ^ s ^ "\\\"")
