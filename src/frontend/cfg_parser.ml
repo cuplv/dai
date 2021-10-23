@@ -182,45 +182,33 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               raw
               |> String.chop_suffix_if_exists ~suffix:"l"
               |> String.chop_suffix_if_exists ~suffix:"L"
-              |> fun v -> Lit.Int (Int64.of_string v)
+              |> Int64.of_string |> Lit.of_int
           | `Octal_int_lit (_, raw) ->
               (* add an "0o" prefix to force octal decoding *)
               raw
               |> String.chop_suffix_if_exists ~suffix:"l"
               |> String.chop_suffix_if_exists ~suffix:"L"
-              |> fun v -> Lit.Int (Int64.of_string ("0o" ^ v))
+              |> (fun s -> if String.is_prefix ~prefix:"0o" s then s else "0o" ^ s)
+              |> Int64.of_string |> Lit.of_int
           | `Deci_floa_point_lit (_, raw) | `Hex_floa_point_lit (_, raw) ->
               raw
               |> String.chop_suffix_if_exists ~suffix:"f"
               |> String.chop_suffix_if_exists ~suffix:"F"
               |> String.chop_suffix_if_exists ~suffix:"d"
               |> String.chop_suffix_if_exists ~suffix:"D"
-              |> fun v -> Lit.Float (Float.of_string v)
+              |> Float.of_string |> Lit.of_float
           | `True _ -> Lit.Bool true
           | `False _ -> Lit.Bool false
-          | `Char_lit (_, raw) -> (
+          | `Char_lit (_, raw) ->
               raw
               |> String.chop_prefix_if_exists ~prefix:"\'"
               |> String.chop_suffix_if_exists ~suffix:"\'"
-              |> fun contents ->
-              match String.length contents with
-              | 2 when Char.equal '\\' contents.[0] -> (
-                  match contents.[1] with
-                  | 'n' -> Lit.Char "\n"
-                  | 't' -> Lit.Char "\t"
-                  | 'r' -> Lit.Char "\r"
-                  | '\\' -> Lit.Char "\\"
-                  | '"' -> Lit.Char "\""
-                  | '\'' -> Lit.Char "'"
-                  | '0' -> Lit.Char "\o000"
-                  | _ ->
-                      failwith (Format.asprintf "unrecognized escape sequence: \\%c" contents.[1]) )
-              | _ -> Lit.Char contents )
+              |> Scanf.unescaped |> Lit.char_of_string
           | `Str_lit (_, raw) ->
               raw
               |> String.chop_prefix_if_exists ~prefix:"\""
               |> String.chop_suffix_if_exists ~suffix:"\""
-              |> fun contents -> Lit.String contents
+              |> Scanf.unescaped |> Lit.of_string
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))

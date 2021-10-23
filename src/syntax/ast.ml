@@ -11,12 +11,20 @@ module Lit = struct
       | Float of float
       | Null
       | String of string
-      | Char of string (* store chars as strings to support multi-byte UTF8-encoded java chars *)
+      | Char of string (* store chars as strings, representing (potentially) multi-byte UTF8-encoded java chars *)
     [@@deriving equal, compare, sexp, hash]
   end
 
   include T
   include Comparable.Make (T)
+
+  let of_int i = Int i
+
+  let of_float f = Float f
+
+  let char_of_string c = Char c
+
+  let of_string s = String s
 
   let pp fs = function
     | Bool b -> Bool.pp fs b
