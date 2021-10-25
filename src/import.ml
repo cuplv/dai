@@ -55,8 +55,6 @@ module Option = struct
 
   let cons xo xs = match xo with Some x -> x :: xs | None -> xs
 
-  let get opt = match opt with Some x -> x | None -> failwith "Option is empty"
-
   let merge l r f =
     match (l, r) with
     | None, None -> None

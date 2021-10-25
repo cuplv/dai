@@ -121,7 +121,7 @@ module Expr = struct
     | Var v -> Format.pp_print_string fs v
     | Lit l -> Lit.pp fs l
     | Binop { l; op; r } -> Format.fprintf fs "%a %a %a" pp l Binop.pp op pp r
-    | Unop { op; e } -> Format.fprintf fs "%a%a" Unop.pp op pp e
+    | Unop { op; e } -> Format.fprintf fs "%a(%a)" Unop.pp op pp e
     | Deref { rcvr; field } -> Format.fprintf fs "%s.%s" rcvr field
     | Array_access { rcvr; idx } -> Format.fprintf fs "%a[%a]" pp rcvr pp idx
     | Array_literal { elts; alloc_site } ->
