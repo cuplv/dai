@@ -631,8 +631,11 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
             let matches_some_case_expr, exit_loc, intermediate_stmts =
               matches_case_expr switch_head @@ get_non_default_label_expressions labels
             in
-            ( List.find_map labels ~f:(function `Defa _, _ -> Some (matches_default_expr exit_loc) | _ -> None) )
-            |> function
+            match
+              List.find_map labels ~f:(function
+                | `Defa _, _ -> Some (matches_default_expr exit_loc)
+                | _ -> None)
+            with
             | None -> (matches_some_case_expr, exit_loc, intermediate_stmts)
             | Some (matches_default_expr, exit_loc', intermediate_stmts') ->
                 ( Expr.Binop { l = matches_some_case_expr; op = Binop.Or; r = matches_default_expr },
@@ -664,14 +667,15 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
                   @ edges' @ edges'' )
           in
           let loc_map, body_edges = edge_list_of_cases first_block_head loc_map cases in
-             List.bind cases ~f:(fst)
-             |> List.exists ~f:(function
-                 |`Defa _, _ -> true
-                 | _ -> false)
-             |> (function
-                 | true -> (loc_map, intermediate_stmts @ body_edges)
-                 | false -> let matches_default_expr, exit_loc, intermediate_stmts' = matches_default_expr switch_head in
-                   (loc_map, (exit_loc, exit, Stmt.Assume matches_default_expr) :: intermediate_stmts' @ intermediate_stmts @ body_edges) )
+          if List.exists (List.bind cases ~f:fst) ~f:(function `Defa _, _ -> true | _ -> false)
+          then (loc_map, intermediate_stmts @ body_edges)
+          else
+            let matches_default_expr, exit_loc, intermediate_stmts' =
+              matches_default_expr switch_head
+            in
+            ( loc_map,
+              ((exit_loc, exit, Stmt.Assume matches_default_expr) :: intermediate_stmts')
+              @ intermediate_stmts @ body_edges )
       | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []) )
   | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
   | `Throw_stmt (_, e, _) ->
