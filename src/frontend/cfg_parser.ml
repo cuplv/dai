@@ -591,19 +591,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
   | `Switch_exp (_, (_, matching_exp, _), (_, cases_block, _)) -> (
       match cases_block with
       | `Rep_switch_blk_stmt_group cases ->
-          let match_var, switch_head, intermediate_stmts =
+          let match_var, (switch_head, intermediate_stmts) =
             match matching_exp with
-            | `Prim_exp (`Id (_, v)) -> (v, entry, [])
-            | _ ->
-                let matching_exp, (entry_loc, intermediate_stmts) =
-                  expr ~curr_loc:entry ~exc matching_exp
-                in
-                let match_var = fresh_tmp_var () in
-                let switch_head = Cfg.Loc.fresh () in
-                ( match_var,
-                  switch_head,
-                  (entry_loc, switch_head, Stmt.Assign { lhs = match_var; rhs = matching_exp })
-                  :: intermediate_stmts )
+            | `Prim_exp (`Id (_, v)) -> (v, (entry, []))
+            | _ -> expr_as_var ~curr_loc:entry ~exc matching_exp
           in
           let first_block_head = Cfg.Loc.fresh () in
           (* Strings are checked for equality using .equals, everything else is checked using == *)
