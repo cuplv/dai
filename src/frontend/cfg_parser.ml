@@ -225,7 +225,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let _, _targs, typ, (_, args, _), _initializer = unqualified in
       let ctor_name =
         match typ with
-        | `Id (_, typ) | `Gene_type (`Id (_, typ), _) -> typ
+        | `Id (_, typ) | `Gene_type (`Id (_, typ), _)
+        | `Gene_type (`Scoped_type_id (_,_,_,(_,typ)), _) -> typ
         | `Scoped_type_id _ -> unimplemented "`Scoped_type_id" "PLACEHOLDER"
         | _ ->
             failwith
