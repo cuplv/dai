@@ -590,6 +590,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc brk stmt : Loc_ma
         let matching_exp, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc matching_exp in
         let match_var = fresh_tmp_var () in
         let switch_head = Cfg.Loc.fresh () in
+        let first_block_head = Cfg.Loc.fresh () in
         (* Assumes that all expressions are not strings. TODO: handle strings properly *)
         let check_expr exp = Expr.Binop {l = Expr.Var match_var; op = Binop.Eq; r = exp} in
         let get_non_default_label_expressions labels = 
@@ -617,22 +618,20 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc brk stmt : Loc_ma
           | Some (matches_default_expr, exit_loc', intermediate_stmts') ->
             (Expr.Binop {l = matches_some_case_expr; op = Binop.Or; r = matches_default_expr}, exit_loc', intermediate_stmts @ intermediate_stmts') in
 
-        let rec edge_list_of_cases case_head lmap cases = match cases with 
+        let rec edge_list_of_cases block_head lmap cases = match cases with
           | [] -> (lmap, [])
           | [(labels, block)] ->
-            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr case_head labels in
-            let block_head = Cfg.Loc.fresh () in
+            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr switch_head labels in
             let (lmap', edges') = edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:exit ~ret ~exc ~brk:(Some exit) block
             in (lmap', (case_tail, block_head, Stmt.Assume match_expr) :: intermediate_stmts @ edges')
           | (labels, block) :: cases -> let block_tail = Cfg.Loc.fresh () in
-            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr case_head labels in
-            let block_head = Cfg.Loc.fresh () in
+            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr switch_head labels in
             let (lmap', edges') = edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:block_tail ~ret ~exc ~brk:(Some exit) block in 
             let (lmap'', edges'') = edge_list_of_cases block_tail lmap' cases
             in (lmap'', (case_tail, block_head, Stmt.Assume 
                            match_expr) :: intermediate_stmts @ edges' @ edges'') in
 
-        let (loc_map, body_edges) = edge_list_of_cases switch_head loc_map cases
+        let (loc_map, body_edges) = edge_list_of_cases first_block_head loc_map cases
         in (loc_map,
           (intermediate_loc, switch_head, Stmt.Assign { lhs = match_var; rhs = matching_exp })
           :: (intermediate_stmts @ body_edges))
@@ -1079,4 +1078,11 @@ let%test "Literals: various syntactic forms / types" =
   $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "literals.dot") cfgs)
+  |> Result.is_ok
+
+let%test "switch block statements" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Switch.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> () | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "switch_block_statement.dot") cfgs)
   |> Result.is_ok
