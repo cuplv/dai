@@ -664,7 +664,14 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
                   @ edges' @ edges'' )
           in
           let loc_map, body_edges = edge_list_of_cases first_block_head loc_map cases in
-          (loc_map, intermediate_stmts @ body_edges)
+             List.bind cases ~f:(fst)
+             |> List.exists ~f:(function
+                 |`Defa _, _ -> true
+                 | _ -> false)
+             |> (function
+                 | true -> (loc_map, intermediate_stmts @ body_edges)
+                 | false -> let matches_default_expr, exit_loc, intermediate_stmts' = matches_default_expr switch_head in
+                   (loc_map, (exit_loc, exit, Stmt.Assume matches_default_expr) :: intermediate_stmts' @ intermediate_stmts @ body_edges) )
       | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []) )
   | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
   | `Throw_stmt (_, e, _) ->
