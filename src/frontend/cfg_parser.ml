@@ -581,9 +581,61 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc brk stmt : Loc_ma
       in
       (entry, ret, stmt) :: intermediates |> pair loc_map
   | `SEMI _ -> (loc_map, [ (entry, exit, Stmt.skip) ])
-  | `Switch_exp (_, (_, _matching_exp, _), (_, cases_block, _)) -> (
+  | `Switch_exp (_, (_, matching_exp, _), (_, cases_block, _)) -> (
       match cases_block with
-      | `Rep_switch_blk_stmt_group _cases  -> unimplemented "`Rep_switch_blk_stmt_group`" (loc_map, [])
+      (* strings are handled differently than other things you can switch on. *)
+      (* strings use the equals method, everything else uses == *)
+      (* for now assuming everything is *NOT* a string *)
+      | `Rep_switch_blk_stmt_group cases  ->
+        let matching_exp, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc matching_exp in
+        let match_var = fresh_tmp_var () in
+        let switch_head = Cfg.Loc.fresh () in
+        (* Assumes that all expressions are not strings. TODO: handle strings properly *)
+        let check_expr exp = Expr.Binop {l = Expr.Var match_var; op = Binop.Eq; r = exp} in
+        let get_non_default_label_expressions labels = 
+                                           List.concat_map labels ~f:(fst >> function
+                                               | `Case_exp_rep_COMMA_exp (_, exp, extra_exps) -> exp :: List.map extra_exps ~f:snd
+                                               | `Defa _ -> []) in
+        let matches_case_expr entry_loc label_exprs = 
+          let (ir_exprs, exit_loc, intermediate_stmts) = List.fold label_exprs ~init:([], entry_loc, []) ~f:(fun (exprs, entry, intermediate_stmts) java_expr -> 
+            let ir_expr, (exit, new_stmts) = expr ~curr_loc:entry ~exc java_expr
+            in (check_expr ir_expr :: exprs, exit, new_stmts @ intermediate_stmts)) in
+          let expr_opt = List.reduce ir_exprs ~f:(fun e1 e2 -> Expr.Binop {l = e1; op = Binop.Or; r = e2})
+          in (Option.value expr_opt ~default:(Expr.Lit (Lit.Bool false)),
+              exit_loc, intermediate_stmts) in
+        let matches_default_expr entry_loc = let (matches_some_case_expr, exit_loc, intermediate_stmts) = List.concat_map cases ~f:(fst >> get_non_default_label_expressions)
+                                                                                                          |> matches_case_expr entry_loc
+          in (Expr.Unop {op = Unop.Not(*is this the right not?*); e = matches_some_case_expr}, exit_loc, intermediate_stmts) in
+        let create_labels_expr entry_loc labels = 
+          let (matches_some_case_expr, exit_loc, intermediate_stmts) = matches_case_expr entry_loc @@ get_non_default_label_expressions labels in
+          let default_case_opt = Option.(>>|) (List.find labels ~f:(fst >> function
+            | `Defa _ -> true
+            | `Case_exp_rep_COMMA_exp _ -> false))
+              (fun _ -> matches_default_expr exit_loc)
+          in match default_case_opt with
+          | None -> (matches_some_case_expr, exit_loc, intermediate_stmts)
+          | Some (matches_default_expr, exit_loc', intermediate_stmts') ->
+            (Expr.Binop {l = matches_some_case_expr; op = Binop.Or; r = matches_default_expr}, exit_loc', intermediate_stmts @ intermediate_stmts') in
+
+        let rec edge_list_of_cases case_head lmap cases = match cases with 
+          | [] -> (lmap, [])
+          | [(labels, block)] ->
+            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr case_head labels in
+            let block_head = Cfg.Loc.fresh () in
+            let (lmap', edges') = edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:exit ~ret ~exc ~brk:(Some exit) block
+            in (lmap', (case_tail, block_head, Stmt.Assume match_expr) :: intermediate_stmts @ edges')
+          | (labels, block) :: cases -> let block_tail = Cfg.Loc.fresh () in
+            let (match_expr, case_tail, intermediate_stmts) = create_labels_expr case_head labels in
+            let block_head = Cfg.Loc.fresh () in
+            let (lmap', edges') = edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:block_tail ~ret ~exc ~brk:(Some exit) block in 
+            let (lmap'', edges'') = edge_list_of_cases block_tail lmap' cases
+            in (lmap'', (case_tail, block_head, Stmt.Assume 
+                           match_expr) :: intermediate_stmts @ edges' @ edges'') in
+
+        let (loc_map, body_edges) = edge_list_of_cases switch_head loc_map cases
+        in (loc_map,
+          (intermediate_loc, switch_head, Stmt.Assign { lhs = match_var; rhs = matching_exp })
+          :: (intermediate_stmts @ body_edges))
       | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, [])
     )
   | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
