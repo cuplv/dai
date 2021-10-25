@@ -203,12 +203,14 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               raw
               |> String.chop_prefix_if_exists ~prefix:"\'"
               |> String.chop_suffix_if_exists ~suffix:"\'"
-              |> Scanf.unescaped |> Lit.char_of_string
+              |> (fun s -> try Scanf.unescaped s with _ -> "DAI_UNESCAPED_FAILED_" ^ s)
+              |> Lit.char_of_string
           | `Str_lit (_, raw) ->
               raw
               |> String.chop_prefix_if_exists ~prefix:"\""
               |> String.chop_suffix_if_exists ~suffix:"\""
-              |> Scanf.unescaped |> Lit.of_string
+              |> (fun s -> try Scanf.unescaped s with _ -> "DAI_UNESCAPED_FAILED_" ^ s)
+              |> Lit.of_string
           | `Null_lit _ -> Lit.Null )
       in
       (e, (curr_loc, []))
