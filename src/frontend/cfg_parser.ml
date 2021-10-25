@@ -631,8 +631,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
             let matches_some_case_expr, exit_loc, intermediate_stmts =
               matches_case_expr switch_head @@ get_non_default_label_expressions labels
             in
-            ( List.find labels ~f:(function `Defa _, _ -> true | _ -> false) >>| fun _ ->
-              matches_default_expr exit_loc )
+            ( List.find_map labels ~f:(function `Defa _, _ -> Some (matches_default_expr exit_loc) | _ -> None) )
             |> function
             | None -> (matches_some_case_expr, exit_loc, intermediate_stmts)
             | Some (matches_default_expr, exit_loc', intermediate_stmts') ->
