@@ -49,7 +49,7 @@ let fresh_tmp_var () =
   tmp_var_counter := !tmp_var_counter + 1;
   v
 
-let string_of_simple_type = function
+let rec string_of_simple_type = function
   | `Void_type _ -> "void"
   | `Inte_type (`Byte _) -> "byte"
   | `Inte_type (`Short _) -> "short"
@@ -60,8 +60,8 @@ let string_of_simple_type = function
   | `Floa_point_type (`Double _) -> "double"
   | `Bool_type _ -> "boolean"
   | `Id (_, ident) -> ident
-  | `Scoped_type_id _ -> unimplemented "`Scoped_type_id" "scoped_type_id"
-  | `Gene_type _ -> unimplemented "`Gene_type" "gene_type"
+  | `Scoped_type_id (scope_typ,_,_,(_,typ)) -> (string_of_simple_type scope_typ) ^ "$" ^ typ
+  | `Gene_type (typ,_) -> string_of_simple_type typ
 
 let rec string_of_unannotated_type = function
   | `Choice_void_type st -> string_of_simple_type st
@@ -223,16 +223,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
   | `Prim_exp (`Obj_crea_exp (`Prim_exp_DOT_unqu_obj_crea_exp (_, _, unqualified))) ->
       (* todo: deal with fully-qualified constructors *)
       let _, _targs, typ, (_, args, _), _initializer = unqualified in
-      let ctor_name =
-        match typ with
-        | `Id (_, typ) | `Gene_type (`Id (_, typ), _)
-        | `Gene_type (`Scoped_type_id (_,_,_,(_,typ)), _) -> typ
-        | `Scoped_type_id _ -> unimplemented "`Scoped_type_id" "PLACEHOLDER"
-        | _ ->
-            failwith
-              (Format.asprintf "unrecognized constructor simple-type: %a" Sexp.pp
-                 (CST.sexp_of_simple_type typ))
-      in
+      let ctor_name = string_of_simple_type typ in
       let args = match args with Some (e, es) -> e :: List.map ~f:snd es | None -> [] in
       let actuals, (curr_loc, arg_intermediates) =
         List.fold args
@@ -404,7 +395,7 @@ and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression
   | e ->
       let tmp = fresh_tmp_var () in
       let next_loc = Cfg.Loc.fresh () in
-      (tmp, (next_loc, intermediates @ [ (curr_loc, next_loc, Stmt.Assign { lhs = tmp; rhs = e }) ]))
+      (tmp, (next_loc, (curr_loc, next_loc, Stmt.Assign { lhs = tmp; rhs = e }) :: intermediates))
 
 and array_lit ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (lit : CST.array_initializer) :
     Ast.Expr.t * (Cfg.Loc.t * edge list) =
