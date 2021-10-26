@@ -60,8 +60,9 @@ let rec string_of_simple_type = function
   | `Floa_point_type (`Double _) -> "double"
   | `Bool_type _ -> "boolean"
   | `Id (_, ident) -> ident
-  | `Scoped_type_id (scope_typ,_,_,(_,typ)) -> (string_of_simple_type scope_typ) ^ "$" ^ typ
-  | `Gene_type (typ,_) -> string_of_simple_type typ
+  | `Scoped_type_id (((`Id _ | `Gene_type _ | `Scoped_type_id _) as base_typ), _, _, (_, typ)) ->
+      string_of_simple_type base_typ ^ "$" ^ typ
+  | `Gene_type (((`Id _ | `Scoped_type_id _) as typ), _) -> string_of_simple_type typ
 
 let rec string_of_unannotated_type = function
   | `Choice_void_type st -> string_of_simple_type st
