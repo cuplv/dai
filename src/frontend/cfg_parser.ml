@@ -512,7 +512,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
       |> pair loc_map
-  | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt" (loc_map, [])
+  | `Enha_for_stmt (_, _, _mods, _type, _var_id, _, _exp, _, _body) ->
+    unimplemented "`Enha_for_stmt" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
         expr ~exit_loc:exit ~curr_loc:entry ~exc e
