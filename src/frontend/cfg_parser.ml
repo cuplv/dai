@@ -280,8 +280,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               match rcvr with
               | `Prim_exp _ as e when Option.is_none super -> expr_as_var ~curr_loc ~exc e
               | `Prim_exp _ -> unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
-                                 (* V This one is the one we need, in almost every case. V *)
-              | `Super _ as _e when Option.is_none super -> (*unimplemented "`Choice_super_DOT"*) ("super", (curr_loc, []))
+              | `Super _ as _e when Option.is_none super -> ("super", (curr_loc, []))
               | `Super _ -> unimplemented "`Choice_super_DOT_super" ("PLACEHOLDER", (curr_loc, []))
             in
             match meth with
