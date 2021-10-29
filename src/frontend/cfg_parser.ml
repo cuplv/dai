@@ -1128,3 +1128,11 @@ let%test "switch block statements" =
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "switch.dot") cfgs)
   |> Result.is_ok
+
+let%test "Enhanced For loops" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/ForEach.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "for_each.dot") cfgs)
+  |> Result.is_ok
