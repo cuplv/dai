@@ -512,7 +512,29 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
       |> pair loc_map
-  | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt" (loc_map, [])
+  | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, var), None), _, exp, _, body) ->
+    (* Technically the way this reduces depends on whether the expression is an iterable or an array.
+     * because apparently arrays aren't iterables.
+     * starting with the iterable implementation, since that seems to be the most prevelant version *)
+        let iter = fresh_tmp_var () in
+        let cond_result = fresh_tmp_var () in
+        let cond_entry = Cfg.Loc.fresh () in
+        let cond_exit = Cfg.Loc.fresh () in
+        let update_entry = Cfg.Loc.fresh () in
+        let body_entry = Cfg.Loc.fresh () in
+        let expr, (expr_exit, expr_intermediate_stmts) = expr_as_var ~curr_loc:entry ~exc exp in
+        let for_logic_stmts = [(expr_exit, cond_entry, Ast.Stmt.Call {lhs = iter; rcvr = expr; meth = "iterator"; actuals = []; alloc_site = None});
+                               (expr_exit, exc, Ast.Stmt.Exceptional_call {rcvr = expr; meth = "iterator"; actuals = []});
+                               (cond_entry, cond_exit, Ast.Stmt.Call {lhs = cond_result; rcvr = iter; meth = "hasNext"; actuals = []; alloc_site = None});
+                               (cond_entry, exc, Ast.Stmt.Exceptional_call {rcvr = iter; meth = "hasNext"; actuals = []});
+                               (cond_exit, update_entry, Stmt.Assume (Expr.Var cond_result));
+                               (cond_exit, exit, Stmt.Assume (Expr.Unop {op = Unop.Not; e = Expr.Var cond_result}));
+                               (update_entry, body_entry, Ast.Stmt.Call {lhs = var; rcvr = iter; meth = "next"; actuals = []; alloc_site = None});
+                               (update_entry, exc, Ast.Stmt.Exceptional_call {rcvr = iter; meth = "next"; actuals = []})]
+        in
+        let loc_map', body_intermediate_stmts = edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit) body
+        in (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
+  | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
         expr ~exit_loc:exit ~curr_loc:entry ~exc e
@@ -1125,4 +1147,12 @@ let%test "switch block statements" =
   $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "switch.dot") cfgs)
+  |> Result.is_ok
+
+let%test "Enhanced For loops" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/ForEach.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "for_each.dot") cfgs)
   |> Result.is_ok
