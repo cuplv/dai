@@ -1030,8 +1030,7 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
    * For each "class Foo { ... }"  in this file, also map "Foo" to its [package] declaration
    *)
   let imports : string list String.Map.t =
-    String.Map.of_alist_exn
-    @@ List.filter_map cst ~f:(function
+    List.fold ~init:String.Map.empty cst ~f:(fun acc -> function
          | `Decl (`Import_decl (_, _, nm, None, _)) -> (
              let rec quals = function
                | `Id (_, ident) -> [ ident ]
@@ -1039,11 +1038,11 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
                | `Choice_open _ -> unimplemented "`Choice_open" []
              in
              match nm with
-             | `Id (_, ident) -> Some (ident, [])
-             | `Scoped_id (q, _, (_, ident)) -> Some (ident, List.rev (quals q))
-             | `Choice_open _ -> unimplemented "`Choice_open" None )
-         | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) -> Some (class_name, package)
-         | _ -> None)
+             | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
+             | `Scoped_id (q, _, (_, ident)) ->  Map.set acc ~key:ident ~data:(List.rev (quals q))
+             | `Choice_open _ -> unimplemented "`Choice_open" acc)
+         | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) -> Map.set acc ~key:class_name ~data:package
+         | _ -> acc)
   in
   List.fold cst ~init:acc ~f:(fun acc -> function
     | `Decl (`Class_decl cd) -> parse_class_decl cd ~package ~acc ~imports
