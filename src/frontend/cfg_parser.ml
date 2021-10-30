@@ -279,7 +279,9 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             let rcvr, aux_info =
               match rcvr with
               | `Prim_exp _ as e when Option.is_none super -> expr_as_var ~curr_loc ~exc e
-              | _ -> unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
+              | `Prim_exp _ -> unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
+              | `Super _ when Option.is_none super -> ("super", (curr_loc, []))
+              | `Super _ -> unimplemented "`Choice_super_DOT_super" ("PLACEHOLDER", (curr_loc, []))
             in
             match meth with
             | `Id (_, meth_name) -> (rcvr, meth_name, aux_info)
@@ -1155,4 +1157,12 @@ let%test "Enhanced For loops" =
   $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "for_each.dot") cfgs)
+  |> Result.is_ok
+
+let%test "super method call" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/SuperMethodInvocation.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "supercall.dot") cfgs)
   |> Result.is_ok
