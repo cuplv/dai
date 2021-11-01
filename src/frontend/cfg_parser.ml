@@ -161,13 +161,13 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         | `Exp_DASH_exp (e1, _, e2) -> (e1, Binop.Minus, e2)
         | `Exp_STAR_exp (e1, _, e2) -> (e1, Binop.Times, e2)
         | `Exp_SLASH_exp (e1, _, e2) -> (e1, Binop.Divided_by, e2)
-        | `Exp_AMP_exp (e1, _, e2) -> unimplemented "`Exp_AMP_exp" (e1, Binop.Eq, e2)
-        | `Exp_BAR_exp (e1, _, e2) -> unimplemented "`Exp_BAR_exp" (e1, Binop.Eq, e2)
-        | `Exp_HAT_exp (e1, _, e2) -> unimplemented "`Exp_HAT_exp" (e1, Binop.Eq, e2)
+        | `Exp_AMP_exp (e1, _, e2) -> (e1, Binop.BAnd, e2)
+        | `Exp_BAR_exp (e1, _, e2) -> (e1, Binop.BOr, e2)
+        | `Exp_HAT_exp (e1, _, e2) -> (e1, Binop.BXor, e2)
         | `Exp_PERC_exp (e1, _, e2) -> (e1, Binop.Mod, e2)
-        | `Exp_LTLT_exp (e1, _, e2) -> unimplemented "`Exp_LTLT_exp" (e1, Binop.Eq, e2)
-        | `Exp_GTGT_exp (e1, _, e2) -> unimplemented "`Exp_GTGT_exp" (e1, Binop.Eq, e2)
-        | `Exp_GTGTGT_exp (e1, _, e2) -> unimplemented "`Exp_GTGTGT_exp" (e1, Binop.Eq, e2)
+        | `Exp_LTLT_exp (e1, _, e2) -> (e1, Binop.LShift, e2)
+        | `Exp_GTGT_exp (e1, _, e2) -> (e1, Binop.RShift, e2)
+        | `Exp_GTGTGT_exp (e1, _, e2) -> (e1, Binop.URShift, e2)
       in
       let l, (curr_loc, l_intermediates) = expr ~curr_loc ~exc l in
       let r, (curr_loc, r_intermediates) = expr ~curr_loc ~exc r in
