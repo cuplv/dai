@@ -504,7 +504,13 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
   | `Brk_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn brk, Stmt.Skip) ])
   | `Brk_stmt _ -> unimplemented "`Brk_stmt with label" (loc_map, [])
   | `Cont_stmt _ -> unimplemented "`Cont_stmt" (loc_map, [])
-  | `Decl _ -> unimplemented "`Decl" (loc_map, [])
+  | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Import_decl _) -> unimplemented "`Import_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Class_decl _) -> unimplemented "`Class_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Inte_decl _) -> unimplemented "`Inte_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Anno_type_decl _) -> unimplemented "`Anno_type_decl in edge_list_of_stmt" (loc_map, [])
+  | `Decl (`Enum_decl _) -> unimplemented "`Enum_decl in edge_list_of_stmt" (loc_map, [])
   | `Do_stmt (_, body, _, (_, cond, _), _) ->
       let body_exit = Cfg.Loc.fresh () in
       let cond, (cond_exit, cond_intermediate_stmts) = expr ~curr_loc:body_exit ~exc cond in
