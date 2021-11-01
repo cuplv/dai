@@ -117,13 +117,13 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         | `DASHEQ _ -> Expr.binop lhs_expr Binop.Minus rhs_expr
         | `STAREQ _ -> Expr.binop lhs_expr Binop.Times rhs_expr
         | `SLASHEQ _ -> Expr.binop lhs_expr Binop.Divided_by rhs_expr
-        | `AMPEQ _ -> unimplemented "`AMPEQ" (fst placeholder_expr)
-        | `BAREQ _ -> unimplemented "`BAREQ" (fst placeholder_expr)
-        | `HATEQ _ -> unimplemented "`HATEQ" (fst placeholder_expr)
-        | `PERCEQ _ -> unimplemented "`PERCEQ" (fst placeholder_expr)
-        | `LTLTEQ _ -> unimplemented "`LTLTEQ" (fst placeholder_expr)
-        | `GTGTEQ _ -> unimplemented "`GTGTEQ" (fst placeholder_expr)
-        | `GTGTGTEQ _ -> unimplemented "`GTGTGTEQ" (fst placeholder_expr)
+        | `AMPEQ _ -> Expr.binop lhs_expr Binop.BAnd rhs_expr
+        | `BAREQ _ -> Expr.binop lhs_expr Binop.BOr rhs_expr
+        | `HATEQ _ -> Expr.binop lhs_expr Binop.BXor rhs_expr
+        | `PERCEQ _ -> Expr.binop lhs_expr Binop.Mod rhs_expr
+        | `LTLTEQ _ -> Expr.binop lhs_expr Binop.LShift rhs_expr
+        | `GTGTEQ _ -> Expr.binop lhs_expr Binop.RShift rhs_expr
+        | `GTGTGTEQ _ -> Expr.binop lhs_expr Binop.URShift rhs_expr
       in
       let stmt =
         match lhs with
