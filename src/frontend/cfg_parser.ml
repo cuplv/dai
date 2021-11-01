@@ -279,7 +279,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             let rcvr, aux_info =
               match rcvr with
               | `Prim_exp _ as e when Option.is_none super -> expr_as_var ~curr_loc ~exc e
-              | `Prim_exp _ -> unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
+              | `Prim_exp _ ->
+                  unimplemented "`Choice_prim_exp_DOT_super" ("PLACEHOLDER", (curr_loc, []))
               | `Super _ when Option.is_none super -> ("super", (curr_loc, []))
               | `Super _ -> unimplemented "`Choice_super_DOT_super" ("PLACEHOLDER", (curr_loc, []))
             in
@@ -515,27 +516,46 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       |> List.append cond_intermediate_stmts
       |> pair loc_map
   | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, var), None), _, exp, _, body) ->
-    (* Technically the way this reduces depends on whether the expression is an iterable or an array.
-     * because apparently arrays aren't iterables.
-     * starting with the iterable implementation, since that seems to be the most prevelant version *)
-        let iter = fresh_tmp_var () in
-        let cond_result = fresh_tmp_var () in
-        let cond_entry = Cfg.Loc.fresh () in
-        let cond_exit = Cfg.Loc.fresh () in
-        let update_entry = Cfg.Loc.fresh () in
-        let body_entry = Cfg.Loc.fresh () in
-        let expr, (expr_exit, expr_intermediate_stmts) = expr_as_var ~curr_loc:entry ~exc exp in
-        let for_logic_stmts = [(expr_exit, cond_entry, Ast.Stmt.Call {lhs = iter; rcvr = expr; meth = "iterator"; actuals = []; alloc_site = None});
-                               (expr_exit, exc, Ast.Stmt.Exceptional_call {rcvr = expr; meth = "iterator"; actuals = []});
-                               (cond_entry, cond_exit, Ast.Stmt.Call {lhs = cond_result; rcvr = iter; meth = "hasNext"; actuals = []; alloc_site = None});
-                               (cond_entry, exc, Ast.Stmt.Exceptional_call {rcvr = iter; meth = "hasNext"; actuals = []});
-                               (cond_exit, update_entry, Stmt.Assume (Expr.Var cond_result));
-                               (cond_exit, exit, Stmt.Assume (Expr.Unop {op = Unop.Not; e = Expr.Var cond_result}));
-                               (update_entry, body_entry, Ast.Stmt.Call {lhs = var; rcvr = iter; meth = "next"; actuals = []; alloc_site = None});
-                               (update_entry, exc, Ast.Stmt.Exceptional_call {rcvr = iter; meth = "next"; actuals = []})]
-        in
-        let loc_map', body_intermediate_stmts = edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit) body
-        in (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
+      (* Technically the way this reduces depends on whether the expression is an iterable or an array.
+       * because apparently arrays aren't iterables.
+       * starting with the iterable implementation, since that seems to be the most prevelant version *)
+      let iter = fresh_tmp_var () in
+      let cond_result = fresh_tmp_var () in
+      let cond_entry = Cfg.Loc.fresh () in
+      let cond_exit = Cfg.Loc.fresh () in
+      let update_entry = Cfg.Loc.fresh () in
+      let body_entry = Cfg.Loc.fresh () in
+      let expr, (expr_exit, expr_intermediate_stmts) = expr_as_var ~curr_loc:entry ~exc exp in
+      let for_logic_stmts =
+        [
+          ( expr_exit,
+            cond_entry,
+            Ast.Stmt.Call
+              { lhs = iter; rcvr = expr; meth = "iterator"; actuals = []; alloc_site = None } );
+          ( expr_exit,
+            exc,
+            Ast.Stmt.Exceptional_call { rcvr = expr; meth = "iterator"; actuals = [] } );
+          ( cond_entry,
+            cond_exit,
+            Ast.Stmt.Call
+              { lhs = cond_result; rcvr = iter; meth = "hasNext"; actuals = []; alloc_site = None }
+          );
+          ( cond_entry,
+            exc,
+            Ast.Stmt.Exceptional_call { rcvr = iter; meth = "hasNext"; actuals = [] } );
+          (cond_exit, update_entry, Stmt.Assume (Expr.Var cond_result));
+          (cond_exit, exit, Stmt.Assume (Expr.Unop { op = Unop.Not; e = Expr.Var cond_result }));
+          ( update_entry,
+            body_entry,
+            Ast.Stmt.Call { lhs = var; rcvr = iter; meth = "next"; actuals = []; alloc_site = None }
+          );
+          (update_entry, exc, Ast.Stmt.Exceptional_call { rcvr = iter; meth = "next"; actuals = [] });
+        ]
+      in
+      let loc_map', body_intermediate_stmts =
+        edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit) body
+      in
+      (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
@@ -1055,18 +1075,19 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
    *)
   let imports : string list String.Map.t =
     List.fold ~init:String.Map.empty cst ~f:(fun acc -> function
-         | `Decl (`Import_decl (_, _, nm, None, _)) -> (
-             let rec quals = function
-               | `Id (_, ident) -> [ ident ]
-               | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
-               | `Choice_open _ -> unimplemented "`Choice_open" []
-             in
-             match nm with
-             | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
-             | `Scoped_id (q, _, (_, ident)) ->  Map.set acc ~key:ident ~data:(List.rev (quals q))
-             | `Choice_open _ -> unimplemented "`Choice_open" acc)
-         | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) -> Map.set acc ~key:class_name ~data:package
-         | _ -> acc)
+      | `Decl (`Import_decl (_, _, nm, None, _)) -> (
+          let rec quals = function
+            | `Id (_, ident) -> [ ident ]
+            | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
+            | `Choice_open _ -> unimplemented "`Choice_open" []
+          in
+          match nm with
+          | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
+          | `Scoped_id (q, _, (_, ident)) -> Map.set acc ~key:ident ~data:(List.rev (quals q))
+          | `Choice_open _ -> unimplemented "`Choice_open" acc )
+      | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) ->
+          Map.set acc ~key:class_name ~data:package
+      | _ -> acc)
   in
   List.fold cst ~init:acc ~f:(fun acc -> function
     | `Decl (`Class_decl cd) -> parse_class_decl cd ~package ~acc ~imports
