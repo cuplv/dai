@@ -482,7 +482,7 @@ let rec declarations stmts : string list =
   in
   stmts >>= local_decls_of_stmt
 
-let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, [])) stmt :
+let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, [])) ?(cont = (None, [])) stmt :
     Loc_map.t * edge list =
   let open Ast in
   let loc_map =
@@ -504,10 +504,11 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
             expr ~curr_loc:entry ~exc e
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
-  | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk stmts
+  | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk ~cont stmts
   | `Brk_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn (fst brk), Stmt.Skip) ])
   | `Brk_stmt (_, Some label, _) -> (loc_map, [ (entry, snd @@ List.find_exn (snd brk) ~f:(fst >> snd >> (=) (snd label)), Stmt.Skip) ])
-  | `Cont_stmt _ -> unimplemented "`Cont_stmt" (loc_map, [])
+  | `Cont_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn (fst cont), Stmt.Skip) ])
+  | `Cont_stmt (_, Some _, _) -> unimplemented "`Cont_stmt labeled" (loc_map, [])
   | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Import_decl _) -> unimplemented "`Import_decl in edge_list_of_stmt" (loc_map, [])
@@ -520,7 +521,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let cond, (cond_exit, cond_intermediate_stmts) = expr ~curr_loc:body_exit ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map entry body_exit ret exc ~brk:(Some exit, snd brk) body
+        edge_list_of_stmt method_id loc_map entry body_exit ret exc ~brk:(Some exit, snd brk) ~cont:(Some body_exit, snd cont) body
       in
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
@@ -563,7 +564,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
         ]
       in
       let loc_map', body_intermediate_stmts =
-        edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit, snd brk) body
+        edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit, snd brk) ~cont:(Some cond_entry, snd cont) body
       in
       (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
@@ -580,7 +581,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
         for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_map f
       in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map body_entry body_exit ret exc ~brk:(Some exit, snd brk) body
+        edge_list_of_stmt method_id loc_map body_entry body_exit ret exc ~brk:(Some exit, snd brk) ~cont:(Some body_exit, snd cont) body
       in
       (loc_map, header @ body)
   | `If_stmt (_, (_, cond, _), t_branch, f_branch_opt) ->
@@ -588,7 +589,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let cond, (entry, cond_intermediate_stmts) = expr ~curr_loc:entry ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, t_branch =
-        edge_list_of_stmt method_id loc_map t_branch_entry exit ret exc ~brk t_branch
+        edge_list_of_stmt method_id loc_map t_branch_entry exit ret exc ~brk ~cont t_branch
         |> fun (loc_map, edges) -> (loc_map, (entry, t_branch_entry, Stmt.Assume cond) :: edges)
       in
       let loc_map, f_branch =
@@ -596,12 +597,13 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
         | None -> (loc_map, [ (entry, exit, Stmt.Assume cond_neg) ])
         | Some (_, f_branch) ->
             let f_branch_entry = Cfg.Loc.fresh () in
-            edge_list_of_stmt method_id loc_map f_branch_entry exit ret exc ~brk f_branch
+            edge_list_of_stmt method_id loc_map f_branch_entry exit ret exc ~brk ~cont f_branch
             |> fun (loc_map, edges) ->
             (loc_map, (entry, f_branch_entry, Stmt.Assume cond_neg) :: edges)
       in
       cond_intermediate_stmts @ t_branch @ f_branch |> pair loc_map
-  | `Labe_stmt (label, _, s) -> edge_list_of_stmt method_id loc_map entry exit ret exc ~brk:(fst brk, (label, exit) :: snd brk) s
+        (* insert some cases so that continues can be labeled correctly? *)
+  | `Labe_stmt (label, _, s) -> edge_list_of_stmt method_id loc_map entry exit ret exc ~brk:(fst brk, (label, exit) :: snd brk) ~cont s
   | `Local_var_decl (_, _, (v, vs), _) ->
       let decls = v :: List.map ~f:snd vs in
       (* Loc.t * edge list component of return is for intermediate stmts as described in [expr] documentation above *)
@@ -698,7 +700,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
                 let match_expr, case_tail, intermediate_stmts = create_labels_expr labels in
                 let lmap', edges' =
                   edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit ~ret ~exc
-                    ~brk:(Some exit, snd brk) block
+                    ~brk:(Some exit, snd brk) ~cont block
                 in
                 ( lmap',
                   ((case_tail, block_head, Stmt.Assume match_expr) :: intermediate_stmts) @ edges'
@@ -708,7 +710,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
                 let match_expr, case_tail, intermediate_stmts = create_labels_expr labels in
                 let lmap', edges' =
                   edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:block_tail ~ret ~exc
-                    ~brk:(Some exit, snd brk) block
+                    ~brk:(Some exit, snd brk) ~cont block
                 in
                 let lmap'', edges'' = edge_list_of_cases block_tail lmap' cases in
                 ( lmap'',
@@ -727,19 +729,20 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
               @ intermediate_stmts @ body_edges )
       | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []) )
   | `Sync_stmt (_, _, (_, body, _)) ->
-      edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk body
+      edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk ~cont body
   | `Throw_stmt (_, e, _) ->
       let thrown_expr, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc e in
       let throw_edge =
         (intermediate_loc, exc, Stmt.Assign { lhs = Cfg.exc_retvar; rhs = thrown_expr })
       in
       (loc_map, throw_edge :: intermediate_stmts)
+      (* try statements with finally disrupt the flow of continues and breaks *)
   | `Try_stmt (_, (_, try_block, _), `Rep1_catch_clause catch_clauses) ->
       let loc_map, catch_loc, catch_edges =
-        build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk
+        build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk ~cont
       in
       let loc_map, try_edges =
-        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc ~brk try_block
+        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc ~brk ~cont try_block
       in
       (loc_map, try_edges @ catch_edges)
   | `Try_stmt
@@ -750,14 +753,14 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let finally_exit_loc = Cfg.Loc.fresh () in
       let loc_map, catch_loc, catch_edges =
         build_catch_cfg catch_clauses loc_map method_id ~exit:finally_entry_loc ~ret
-          ~exc:finally_entry_loc ~brk
+          ~exc:finally_entry_loc ~brk ~cont
       in
       let loc_map, try_edges =
-        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc ~brk try_block
+        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc ~brk ~cont try_block
       in
       let loc_map, finally_edges =
         edge_list_of_stmt_list method_id loc_map ~entry:finally_entry_loc ~exit:finally_exit_loc
-          ~ret ~exc ~brk finally_block
+          ~ret ~exc ~brk ~cont finally_block
       in
       ( loc_map,
         (* control flow can go to either normal or exceptional exit from finally block*)
@@ -769,7 +772,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let cond, (intermediate_loc, cond_intermediates) = expr ~curr_loc:entry ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map body_entry entry ret exc ~brk:(Some exit, snd brk) body
+        edge_list_of_stmt method_id loc_map body_entry entry ret exc ~brk:(Some exit, snd brk) ~cont:(Some entry, snd cont) body
       in
       (intermediate_loc, body_entry, Stmt.Assume cond)
       :: (intermediate_loc, exit, Stmt.Assume cond_neg)
@@ -777,7 +780,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       |> List.append cond_intermediates |> pair loc_map
   | `Yield_stmt _ -> unimplemented "`Yield_stmt" (loc_map, [])
 
-and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk :
+and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk ~cont :
     Loc_map.t * Cfg.Loc.t * edge list =
   let open Ast in
   let condition_of_catch_clause = function
@@ -816,7 +819,7 @@ and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk :
           let exn_binding_loc = Cfg.Loc.fresh () in
           let loc_map, block_edges =
             edge_list_of_stmt_list method_id loc_map (body_of_catch_clause cc)
-              ~entry:block_entry_loc ~exit ~ret ~exc ~brk
+              ~entry:block_entry_loc ~exit ~ret ~exc ~brk ~cont
           in
           let next_loc, (loc_map, ccs_edges) =
             match ccs with
@@ -845,15 +848,15 @@ and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk :
     build_catch_cfg_impl catch_loc loc_map catch_clauses |> fun (loc_map, edges) ->
     (loc_map, catch_loc, edges)
 
-and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ?(brk = (None, [])) stmts :
+and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ?(brk = (None, [])) ?(cont = (None, [])) stmts :
     Loc_map.t * edge list =
   let rec edges_of_stmts loc_map curr_loc = function
     | [] -> (loc_map, [ (curr_loc, exit, Ast.Stmt.Skip) ])
-    | [ s ] -> edge_list_of_stmt method_id loc_map curr_loc exit ret exc ~brk s
+    | [ s ] -> edge_list_of_stmt method_id loc_map curr_loc exit ret exc ~brk ~cont s
     | s :: ss ->
         let next_loc = Cfg.Loc.fresh () in
         let loc_map, s_edges =
-          edge_list_of_stmt method_id loc_map curr_loc next_loc ret exc ~brk s
+          edge_list_of_stmt method_id loc_map curr_loc next_loc ret exc ~brk ~cont s
         in
         let loc_map, ss_edges = edges_of_stmts loc_map next_loc ss in
         (loc_map, s_edges @ ss_edges)
@@ -867,7 +870,7 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_
         match init with
         | `Local_var_decl _ as decl ->
             let l = Cfg.Loc.fresh () in
-            (* Can you break in a loop header? and if so, where should that go? the end of the for loop or the pre-existing break target? *)
+            (* Can you break/continue in a loop header? and if so, where should that go? the end of the for loop or the pre-existing break target? *)
             (* TODO: update the None below, and possibly the signiture of this function as well *)
             let loc_map, es = edge_list_of_stmt method_id loc_map entry l ret exc decl in
             (loc_map, (l, es))

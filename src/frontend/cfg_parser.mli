@@ -69,7 +69,8 @@ val edge_list_of_stmt_list :
   exit:Cfg.Loc.t ->
   ret:Cfg.Loc.t ->
   exc:Cfg.Loc.t ->
-  ?brk:(Cfg.Loc.t option * (CST.void_type * Cfg.Loc.t) list)->
+  ?brk:(Cfg.Loc.t option * (CST.void_type * Cfg.Loc.t) list) ->
+  ?cont:(Cfg.Loc.t option * (CST.void_type * Cfg.Loc.t) list) ->
   CST.program ->
   Loc_map.t * edge list
 
