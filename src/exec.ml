@@ -12,7 +12,9 @@ let rec java_srcs dir =
   | `Yes ->
       List.bind (ls_dir dir) ~f:(fun f ->
           let file = dir ^ dir_sep ^ f in
-          if is_directory_exn file then java_srcs file
+          if is_directory_exn file then
+            (* ignore test directories *)
+            if String.equal "test" file then [] else java_srcs file
           else if String.(equal "package-info.java" f || equal "module-info.java" f) then []
           else if is_file_exn file && String.equal ".java" (extension f) then [ file ]
           else [])
