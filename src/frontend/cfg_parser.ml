@@ -486,10 +486,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
     | `Ok lm -> lm
     | `Collision ->
         (* handle this case if it comes up in evaluation.  Perhaps by enumerating the occurrences topologically to disambiguate, storing a sequence of loc_ctx's for the statement and scanning parse trees for the order as needed?*)
-        Format.(fprintf std_formatter)
-          "WARNING: two syntactically-identical statements in method %s.%s; this is problematic \
-           only if there's an edit there.\n"
-          method_id.class_name method_id.method_name;
+        (* Format.(fprintf std_formatter)
+           "WARNING: two syntactically-identical statements in method %s.%s; this is problematic \
+            only if there's an edit there.\n"
+           method_id.class_name method_id.method_name;*)
         loc_map
   in
   match stmt with
