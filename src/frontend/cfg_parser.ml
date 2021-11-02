@@ -722,7 +722,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
               ((exit_loc, exit, Stmt.Assume matches_default_expr) :: intermediate_stmts')
               @ intermediate_stmts @ body_edges )
       | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []) )
-  | `Sync_stmt _ -> unimplemented "`Sync_stmt" (loc_map, [])
+  | `Sync_stmt (_, _, (_, body, _)) ->
+      edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk body
   | `Throw_stmt (_, e, _) ->
       let thrown_expr, (intermediate_loc, intermediate_stmts) = expr ~curr_loc:entry ~exc e in
       let throw_edge =
