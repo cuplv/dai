@@ -25,6 +25,7 @@ class Literals {
 	long d2 = 0b00101010l;
 	int binary64bit = 0b1010101010101010101010101010101010101010101010101010101010101010;
 	int prefixed_octal = 0o12345;
+	long int64_min_value = -9223372036854775808L;
 
 	// floats/doubles
 	float a3 = 1e1f;

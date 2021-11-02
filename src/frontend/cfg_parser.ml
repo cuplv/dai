@@ -340,6 +340,11 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
         :: (cond_intermediates @ then_intermediates @ else_intermediates)
       in
       (Expr.Var tmp, (curr_loc, stmts))
+  | `Un_exp (`DASH_exp (_, `Prim_exp (`Lit (`Deci_int_lit (_, "9223372036854775808")))))
+  | `Un_exp (`DASH_exp (_, `Prim_exp (`Lit (`Deci_int_lit (_, "9223372036854775808l")))))
+  | `Un_exp (`DASH_exp (_, `Prim_exp (`Lit (`Deci_int_lit (_, "9223372036854775808L"))))) ->
+      (* special-case this because otherwise it gets parsed as the negation of an int literal one larger than Int64.max_value, causing a crash*)
+      (Expr.Lit (Lit.Int Int64.min_value), (curr_loc, []))
   | `Un_exp u ->
       let e, op =
         match u with
