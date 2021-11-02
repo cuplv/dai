@@ -1055,12 +1055,7 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
                   cha = acc.cha;
                 }
             | None -> acc )
-        | `Field_decl _ ->
-            acc (* skip over field declarations, as they are handled outside of this List.fold *)
-        | `Inte_decl _ -> acc (* skip over interface declarations -- no code to analyze! *)
-        | `Anno_type_decl _ -> unimplemented "`Anno_type_decl" acc
-        | `SEMI _ -> acc
-        | `Blk _ -> acc
+        | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ -> acc
         | `Enum_decl _ -> unimplemented "`Enum_decl" acc
         | `Static_init _ -> unimplemented "`Static_init" acc
         | `Record_decl _ -> unimplemented "`Record_decl" acc)
@@ -1110,7 +1105,8 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
     | `Decl (`Enum_decl _) | `Decl (`Import_decl _) | `Decl (`Inte_decl _) | `Decl (`Pack_decl _) ->
         acc
     | `Decl (`Module_decl _) -> unimplemented "`Module_decl" acc
-    | `Decl (`Anno_type_decl _) -> unimplemented "`Anno_type_decl" acc
+    | `Decl (`Anno_type_decl _) -> acc
+    | `SEMI _ -> acc
     | stmt ->
         let rec first_atom = function
           | Sexp.Atom a -> a

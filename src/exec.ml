@@ -3,6 +3,8 @@ open Import
 open Command
 open Command.Let_syntax
 
+let exclusions = [ "test"; "package-info.java"; "module-info.java" ]
+
 let rec java_srcs dir =
   let open Sys in
   let open Stdlib.Filename in
@@ -11,13 +13,12 @@ let rec java_srcs dir =
       failwith (Format.asprintf "can't get java sources from non-directory file %s" dir)
   | `Yes ->
       List.bind (ls_dir dir) ~f:(fun f ->
-          let file = dir ^ dir_sep ^ f in
-          if is_directory_exn file then
-            (* ignore test directories *)
-            if String.equal "test" file then [] else java_srcs file
-          else if String.(equal "package-info.java" f || equal "module-info.java" f) then []
-          else if is_file_exn file && String.equal ".java" (extension f) then [ file ]
-          else [])
+          if List.mem exclusions f ~equal:String.equal then []
+          else
+            let file = dir ^ dir_sep ^ f in
+            if is_directory_exn file then java_srcs file
+            else if is_file_exn file && String.equal ".java" (extension f) then [ file ]
+            else [])
 
 let analyze =
   basic ~summary:"Interactively analyze a Java program using the DAI framework."
