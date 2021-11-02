@@ -934,8 +934,7 @@ let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declarat
   | _, (_, _, (`Choice_open _, _, _), _), _ -> None
   | _, _, `SEMI _ -> None
 
-let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructor_declarator)
-    (body : CST.constructor_body) =
+let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd body =
   match (cd, body) with
   | (_tparams, _, formals), (_, explicit_constructor_invo, stmts, _) ->
       let entry = Cfg.Loc.fresh () in
@@ -944,6 +943,8 @@ let of_constructor_decl loc_map ?(package = []) ~class_name (cd : CST.constructo
       let arg_types = types_of_formals formals in
       let formals = parse_formals formals in
       let locals = declarations stmts in
+      (* prepend instance initializer block to constructor body, if one is given *)
+      let stmts = Option.fold instance_init ~init:stmts ~f:(flip ( @ )) in
       let method_id : Method_id.t =
         { package; class_name; method_name = "<init>"; static = false; arg_types }
       in
@@ -1022,6 +1023,9 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
         in
         Declared_fields.add ~package ~class_name ~fields:{ static; instance } acc.fields
       in
+      let instance_init =
+        List.find_map decls ~f:(function `Blk (_, b, _) -> Some b | _ -> None)
+      in
       List.fold decls ~init:{ cfgs = acc.cfgs; fields; cha; loc_map = acc.loc_map } ~f:(fun acc ->
         function
         | `Meth_decl md -> (
@@ -1037,7 +1041,7 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
         | `Class_decl cd ->
             parse_class_decl cd ~package ~containing_class_name:(Some class_name) ~imports ~acc
         | `Cons_decl (_, cd, _, body) -> (
-            match of_constructor_decl acc.loc_map ~package ~class_name cd body with
+            match of_constructor_decl acc.loc_map ~package ~class_name ~instance_init cd body with
             | Some (loc_map, edges, fn) ->
                 {
                   cfgs = Cfg.add_fn fn ~edges acc.cfgs;
@@ -1050,8 +1054,8 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             acc (* skip over field declarations, as they are handled outside of this List.fold *)
         | `Inte_decl _ -> acc (* skip over interface declarations -- no code to analyze! *)
         | `Anno_type_decl _ -> unimplemented "`Anno_type_decl" acc
-        | `SEMI _ -> unimplemented "`SEMI" acc
-        | `Blk _ -> unimplemented "`Blk" acc
+        | `SEMI _ -> acc
+        | `Blk _ -> acc
         | `Enum_decl _ -> unimplemented "`Enum_decl" acc
         | `Static_init _ -> unimplemented "`Static_init" acc
         | `Record_decl _ -> unimplemented "`Record_decl" acc)
@@ -1193,4 +1197,13 @@ let%test "super method call" =
   $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "supercall.dot") cfgs)
+  |> Result.is_ok
+
+let%test "instance initializers" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/InstanceInitializer.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } ->
+           Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "instance_init.dot") cfgs)
   |> Result.is_ok

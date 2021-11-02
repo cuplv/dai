@@ -53,6 +53,7 @@ val of_constructor_decl :
   Loc_map.t ->
   ?package:string list ->
   class_name:string ->
+  instance_init:CST.program option ->
   CST.constructor_declarator ->
   CST.constructor_body ->
   (Loc_map.t * edge list * Cfg.Fn.t) option
