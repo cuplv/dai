@@ -948,8 +948,6 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd bo
       let arg_types = types_of_formals formals in
       let formals = parse_formals formals in
       let locals = declarations stmts in
-      (* prepend instance initializer block to constructor body, if one is given *)
-      let stmts = Option.fold instance_init ~init:stmts ~f:(flip ( @ )) in
       let method_id : Method_id.t =
         { package; class_name; method_name = "<init>"; static = false; arg_types }
       in
@@ -957,6 +955,8 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd bo
       let loc_map, edges =
         match explicit_constructor_invo with
         | None ->
+            (* prepend instance initializer block to constructor body, if one is given *)
+            let stmts = Option.fold instance_init ~init:stmts ~f:(flip ( @ )) in
             edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit ~exc:exc_exit stmts
         | Some (`Opt_type_args_choice_this (_typargs, `This _), args, _) ->
             let args = match args with _, Some (e, es), _ -> e :: List.map ~f:snd es | _ -> [] in
