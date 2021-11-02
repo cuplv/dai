@@ -482,8 +482,7 @@ let rec declarations stmts : string list =
   in
   stmts >>= local_decls_of_stmt
 
-(* [brk] will need to be a map of labels to cfg locations to handle labelled break statements *)
-let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stmt :
+let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, [])) stmt :
     Loc_map.t * edge list =
   let open Ast in
   let loc_map =
@@ -506,8 +505,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
   | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk stmts
-  | `Brk_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn brk, Stmt.Skip) ])
-  | `Brk_stmt _ -> unimplemented "`Brk_stmt with label" (loc_map, [])
+  | `Brk_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn (fst brk), Stmt.Skip) ])
+  | `Brk_stmt (_, Some label, _) -> (loc_map, [ (entry, snd @@ List.find_exn (snd brk) ~f:(fst >> snd >> (=) (snd label)), Stmt.Skip) ])
   | `Cont_stmt _ -> unimplemented "`Cont_stmt" (loc_map, [])
   | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
@@ -521,7 +520,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       let cond, (cond_exit, cond_intermediate_stmts) = expr ~curr_loc:body_exit ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map entry body_exit ret exc ~brk:(Some exit) body
+        edge_list_of_stmt method_id loc_map entry body_exit ret exc ~brk:(Some exit, snd brk) body
       in
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
@@ -564,7 +563,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
         ]
       in
       let loc_map', body_intermediate_stmts =
-        edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit) body
+        edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc ~brk:(Some exit, snd brk) body
       in
       (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
@@ -581,7 +580,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
         for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_map f
       in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map body_entry body_exit ret exc ~brk:(Some exit) body
+        edge_list_of_stmt method_id loc_map body_entry body_exit ret exc ~brk:(Some exit, snd brk) body
       in
       (loc_map, header @ body)
   | `If_stmt (_, (_, cond, _), t_branch, f_branch_opt) ->
@@ -602,7 +601,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
             (loc_map, (entry, f_branch_entry, Stmt.Assume cond_neg) :: edges)
       in
       cond_intermediate_stmts @ t_branch @ f_branch |> pair loc_map
-  | `Labe_stmt (_label, _, s) -> edge_list_of_stmt method_id loc_map entry exit ret exc ~brk s
+  | `Labe_stmt (label, _, s) -> edge_list_of_stmt method_id loc_map entry exit ret exc ~brk:(fst brk, (label, exit) :: snd brk) s
   | `Local_var_decl (_, _, (v, vs), _) ->
       let decls = v :: List.map ~f:snd vs in
       (* Loc.t * edge list component of return is for intermediate stmts as described in [expr] documentation above *)
@@ -699,7 +698,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
                 let match_expr, case_tail, intermediate_stmts = create_labels_expr labels in
                 let lmap', edges' =
                   edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit ~ret ~exc
-                    ~brk:(Some exit) block
+                    ~brk:(Some exit, snd brk) block
                 in
                 ( lmap',
                   ((case_tail, block_head, Stmt.Assume match_expr) :: intermediate_stmts) @ edges'
@@ -709,7 +708,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
                 let match_expr, case_tail, intermediate_stmts = create_labels_expr labels in
                 let lmap', edges' =
                   edge_list_of_stmt_list method_id lmap ~entry:block_head ~exit:block_tail ~ret ~exc
-                    ~brk:(Some exit) block
+                    ~brk:(Some exit, snd brk) block
                 in
                 let lmap'', edges'' = edge_list_of_cases block_tail lmap' cases in
                 ( lmap'',
@@ -770,7 +769,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = None) stm
       let cond, (intermediate_loc, cond_intermediates) = expr ~curr_loc:entry ~exc cond in
       let cond_neg = Expr.unop Unop.Not cond in
       let loc_map, body =
-        edge_list_of_stmt method_id loc_map body_entry entry ret exc ~brk:(Some exit) body
+        edge_list_of_stmt method_id loc_map body_entry entry ret exc ~brk:(Some exit, snd brk) body
       in
       (intermediate_loc, body_entry, Stmt.Assume cond)
       :: (intermediate_loc, exit, Stmt.Assume cond_neg)
@@ -846,7 +845,7 @@ and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk :
     build_catch_cfg_impl catch_loc loc_map catch_clauses |> fun (loc_map, edges) ->
     (loc_map, catch_loc, edges)
 
-and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ?(brk = None) stmts :
+and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ?(brk = (None, [])) stmts :
     Loc_map.t * edge list =
   let rec edges_of_stmts loc_map curr_loc = function
     | [] -> (loc_map, [ (curr_loc, exit, Ast.Stmt.Skip) ])
@@ -1207,4 +1206,13 @@ let%test "instance initializers" =
        | Error _ -> ()
        | Ok { cfgs; _ } ->
            Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "instance_init.dot") cfgs)
+  |> Result.is_ok
+
+let%test "labeled breaks" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Break.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } ->
+           Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "break.dot") cfgs)
   |> Result.is_ok
