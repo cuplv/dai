@@ -54,6 +54,7 @@ val of_constructor_decl :
   ?package:string list ->
   class_name:string ->
   instance_init:CST.program option ->
+  cha:Class_hierarchy.t ->
   CST.constructor_declarator ->
   CST.constructor_body ->
   (Loc_map.t * edge list * Cfg.Fn.t) option

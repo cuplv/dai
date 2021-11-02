@@ -939,7 +939,8 @@ let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declarat
   | _, (_, _, (`Choice_open _, _, _), _), _ -> None
   | _, _, `SEMI _ -> None
 
-let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd body =
+let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
+    ~(cha : Class_hierarchy.t) cd body =
   match (cd, body) with
   | (_tparams, _, formals), (_, explicit_constructor_invo, stmts, _) ->
       let entry = Cfg.Loc.fresh () in
@@ -958,7 +959,7 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd bo
             (* prepend instance initializer block to constructor body, if one is given *)
             let stmts = Option.fold instance_init ~init:stmts ~f:(flip ( @ )) in
             edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit ~exc:exc_exit stmts
-        | Some (`Opt_type_args_choice_this (_typargs, `This _), args, _) ->
+        | Some (`Opt_type_args_choice_this (_typargs, rcvr), args, _semi) ->
             let args = match args with _, Some (e, es), _ -> e :: List.map ~f:snd es | _ -> [] in
             let actuals, (pre_invocation_loc, pre_invocation_edges) =
               List.fold args
@@ -972,13 +973,22 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd bo
               edge_list_of_stmt_list method_id loc_map ~entry:post_invocation_loc ~exit ~ret:exit
                 ~exc:exc_exit stmts
             in
+            let rcvr =
+              match rcvr with
+              | `This _ -> class_name
+              | `Super _ -> (
+                  match Class_hierarchy.get_superclass_name ~package ~class_name cha with
+                  | Some s -> s
+                  | None -> "super" )
+              (* if no superclass name exists in [cha] then we don't have code for the superclass' constructor, so just emit this placeholder *)
+            in
             let invocation =
               ( pre_invocation_loc,
                 post_invocation_loc,
                 Ast.Stmt.Call
                   {
                     lhs = "this";
-                    rcvr = class_name;
+                    rcvr;
                     meth = "<init>";
                     actuals;
                     alloc_site = Some (Alloc_site.fresh ());
@@ -992,8 +1002,6 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init cd bo
             (loc_map, invocation :: exc_invocation :: (pre_invocation_edges @ body_edges))
         | Some (`Choice_prim_exp_DOT_opt_type_args_super _, _, _) ->
             unimplemented "`Choice_prim_exp_DOT_opt_type_args_super" (loc_map, [])
-        | Some (`Opt_type_args_choice_this _, _, _) ->
-            unimplemented "`Opt_type_args_choice_this" (loc_map, [])
       in
 
       Some (loc_map, edges, fn)
@@ -1046,7 +1054,9 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
         | `Class_decl cd ->
             parse_class_decl cd ~package ~containing_class_name:(Some class_name) ~imports ~acc
         | `Cons_decl (_, cd, _, body) -> (
-            match of_constructor_decl acc.loc_map ~package ~class_name ~instance_init cd body with
+            match
+              of_constructor_decl acc.loc_map ~package ~class_name ~instance_init ~cha cd body
+            with
             | Some (loc_map, edges, fn) ->
                 {
                   cfgs = Cfg.add_fn fn ~edges acc.cfgs;

@@ -12,6 +12,19 @@ let add ~(package : string list) ~(class_name : string) ~(super_package : string
   let superclass_id = String.(concat ~sep:"." super_package ^ "." ^ superclass_name) in
   G.Edge.(insert (create class_id superclass_id ()))
 
+let get_superclass_name ~(package : string list) ~(class_name : string) : t -> string option =
+  let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
+  G.Node.preds class_id >> Seq.to_list >> function
+  | [] -> None
+  | [ superclass_id ] ->
+      Some
+        ( match String.rsplit2 superclass_id ~on:'.' with
+        | Some (_pkg, cls) -> cls
+        | None -> superclass_id )
+  | _ ->
+      (* only single inheritance in java *)
+      failwith "multiple inheritance? in _this_ economy???"
+
 let ancestors ~(package : string list) ~(class_name : string) cha : string list =
   let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
   Graph.fold_reachable (module G) cha class_id ~init:[] ~f:(flip List.cons)
