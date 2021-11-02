@@ -181,7 +181,7 @@ let mk_bool_binop itv op l r =
 *)
 let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
   let open Ast in
-  let mk_arith_binop op l r = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Zero)) in
+  let mk_arith_binop op l r = Some Texpr1.(Binop (op, l, r, Double, Zero)) in
   let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
   | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
@@ -204,6 +204,18 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       | Ge -> mk_bool_binop itv Tcons0.SUPEQ l r
       | Lt -> mk_bool_binop itv Tcons0.SUP r l
       | Le -> mk_bool_binop itv Tcons0.SUPEQ r l
+      | BAnd | BOr | BXor ->
+          (* sending bitwise arihmetic to top because APRON does not support it *)
+          Some (Texpr1.Cst (Coeff.Interval Interval.top))
+      | LShift ->
+          (* IR expression `l >> r` becomes APRON expression `l * (2^r)` *)
+          let two_to_the_r = Texpr1.(Binop (Pow, Cst (Coeff.s_of_int 2), r, Double, Zero)) in
+          Some Texpr1.(Binop (Mul, l, two_to_the_r, Double, Zero))
+      | URShift | RShift ->
+          (* IR expression `l >> r` becomes APRON expression `l / (2^r)` *)
+          (* todo: mess with sign for unsigned shift --- this isn't quite right for negative values of [l] *)
+          let two_to_the_r = Texpr1.(Binop (Pow, Cst (Coeff.s_of_int 2), r, Double, Zero)) in
+          Some Texpr1.(Binop (Div, l, two_to_the_r, Double, Zero))
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
           None )
@@ -221,7 +233,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       texpr_of_expr ~fallback itv e
       >>= fun e ->
       match op with
-      | Unop.Neg -> Some (Texpr1.Unop (Texpr1.Neg, e, Texpr1.Double, Texpr0.Zero))
+      | Unop.Neg -> Some Texpr1.(Unop (Neg, e, Double, Zero))
       | Unop.Not -> mk_bool_binop itv Tcons0.EQ e (Texpr1.Cst (Coeff.s_of_float 0.))
       | Unop.Plus -> Some e
       | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
@@ -243,22 +255,23 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
           Abstract1.meet_tcons_array man itv tcons_array)
     |> Option.value ~default:itv
   in
+  let flip_binop =
+    let open Ast.Binop in
+    function
+    | And -> Some Or
+    | Or -> Some And
+    | Eq -> Some NEq
+    | NEq -> Some Eq
+    | Gt -> Some Le
+    | Lt -> Some Ge
+    | Ge -> Some Lt
+    | Le -> Some Gt
+    | _ -> None
+  in
   function
-  | Unop { op = Not; e = Binop { l; op; r } } ->
-      (* apply demorgans to push negations out to leaves of boolean operators; flip equalities/inequalities *)
-      let open Ast.Binop in
-      let flipped_op =
-        match op with
-        | And -> Or
-        | Or -> And
-        | Eq -> NEq
-        | NEq -> Eq
-        | Gt -> Le
-        | Lt -> Ge
-        | Ge -> Lt
-        | Le -> Gt
-        | op -> failwith (Format.asprintf "unrecognized binary operator %a" pp op)
-      in
+  | Unop { op = Not; e = Binop { l; op; r } } when Option.is_some (flip_binop op) ->
+      (* flip equalities/disequalities/inequalities, and apply demorgan's where possible *)
+      let flipped_op = flip_binop op |> fun x -> Option.value_exn x in
       let new_l = if op = And || op = Or then Unop { op = Not; e = l } else l in
       let new_r = if op = And || op = Or then Unop { op = Not; e = r } else r in
       meet_with_constraint ~fallback itv (Binop { l = new_l; op = flipped_op; r = new_r })
