@@ -505,9 +505,16 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       in
       (loc_map, (entry, exit, Stmt.Assume expr) :: intermediate_stmts)
   | `Blk (_, stmts, _) -> edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk ~cont stmts
-  | `Brk_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn (fst brk), Stmt.Skip) ])
-  | `Brk_stmt (_, Some label, _) -> (loc_map, [ (entry, snd @@ List.find_exn (snd brk) ~f:(fst >> snd >> (=) (snd label)), Stmt.Skip) ])
-  | `Cont_stmt (_, None, _) -> (loc_map, [ (entry, Option.value_exn (fst cont), Stmt.Skip) ])
+  | `Brk_stmt (_, None, _) -> (match (fst brk) with
+      | None -> (unimplemented "`Brk_stmt inside try catch with finally" (loc_map, []))
+      | Some brk_target -> (loc_map, [ (entry, brk_target, Stmt.Skip) ]))
+  | `Brk_stmt (_, Some label, _) -> 
+    (match List.find (snd brk) ~f:(fst >> snd >> (=) (snd label)) with 
+     | Some target -> (loc_map, [ (entry, snd target, Stmt.Skip) ])
+     | None -> unimplemented "`Brk_stmt with label inside try catch with finally" (loc_map, []))
+  | `Cont_stmt (_, None, _) -> (match (fst cont) with
+      | None -> (unimplemented "`Cont_stmt inside try catch with finally" (loc_map, []))
+      | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ]))
   | `Cont_stmt (_, Some _, _) -> unimplemented "`Cont_stmt labeled" (loc_map, [])
   | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
@@ -753,10 +760,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let finally_exit_loc = Cfg.Loc.fresh () in
       let loc_map, catch_loc, catch_edges =
         build_catch_cfg catch_clauses loc_map method_id ~exit:finally_entry_loc ~ret
-          ~exc:finally_entry_loc ~brk ~cont
+          ~exc:finally_entry_loc ~brk:(None, []) ~cont:(None, [])
       in
       let loc_map, try_edges =
-        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc ~brk ~cont try_block
+        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc try_block
       in
       let loc_map, finally_edges =
         edge_list_of_stmt_list method_id loc_map ~entry:finally_entry_loc ~exit:finally_exit_loc
