@@ -216,6 +216,9 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
           (* todo: mess with sign for unsigned shift --- this isn't quite right for negative values of [l] *)
           let two_to_the_r = Texpr1.(Binop (Pow, Cst (Coeff.s_of_int 2), r, Double, Zero)) in
           Some Texpr1.(Binop (Div, l, two_to_the_r, Double, Zero))
+      | Instanceof ->
+          (* result of instanceof is a bool; from interval's perspective, either a 0 or 1 *)
+          Some (Texpr1.Cst (Coeff.Interval (Interval.of_int 0 1)))
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
           None )

@@ -173,7 +173,11 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let r, (curr_loc, r_intermediates) = expr ~curr_loc ~exc r in
       (Expr.Binop { l; op; r }, (curr_loc, l_intermediates @ r_intermediates))
   | `Cast_exp (_, _type, _, _, e) -> expr ~curr_loc ~exc e
-  | `Inst_exp _ -> unimplemented "`Inst_exp" placeholder_expr
+  | `Inst_exp (e, _instanceof, `Unan_type ty) | `Inst_exp (e, _instanceof, `Anno_type (_, ty)) ->
+      let l, aux = expr ~curr_loc ~exc e in
+      let r = Expr.Lit (Lit.String (string_of_unannotated_type ty)) in
+      let op = Binop.Instanceof in
+      (Expr.Binop { l; op; r }, aux)
   | `Lambda_exp _ -> unimplemented "`Lambda_exp" placeholder_expr
   | `Prim_exp (`Lit l) ->
       let e =
