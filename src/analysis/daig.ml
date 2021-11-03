@@ -135,7 +135,7 @@ module Make (Dom : Abstract.Dom) = struct
               | (j, l) :: rest ->
                   if Cfg.Loc.equal l loop_head then rest else (j, l) :: unset_ic rest
             in
-            match unset_ic iter_ctx with [] -> n | ic -> Iterate (ic, n) )
+            match unset_ic iter_ctx with [] -> n | ic -> Iterate (ic, n))
         | n -> failwith (Format.asprintf "can't unset_iterate on non-Iterate name %a" pp n)
     end
 
@@ -164,7 +164,7 @@ module Make (Dom : Abstract.Dom) = struct
 
     module Map = struct
       include (
-        Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t )
+        Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
 
       type 'v t = 'v Map.M(T_comparator).t
 
@@ -380,7 +380,7 @@ module Make (Dom : Abstract.Dom) = struct
        into the loop head goes to the 0th iterate and flow out is from the fixpoint.
     *)
     let name_of_loc ?(dst = false) l =
-      ( match (loop_iteration_ctx, Map.find loop_head_map l) with
+      (match (loop_iteration_ctx, Map.find loop_head_map l) with
       | None, None -> Name.Loc l
       | None, Some loopheads ->
           let ic = List.map loopheads ~f:(pair 0) in
@@ -388,7 +388,7 @@ module Make (Dom : Abstract.Dom) = struct
       | Some ic, None -> Name.(Iterate (ic, Loc l))
       | Some ic, Some loopheads ->
           let ic = List.fold loopheads ~init:ic ~f:(fun acc curr -> (0, curr) :: acc) in
-          Name.(Iterate (ic, Loc l)) )
+          Name.(Iterate (ic, Loc l)))
       |> fun n ->
       if dst && List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.wrap_iterate 0 l n else n
     in
@@ -687,7 +687,7 @@ module Make (Dom : Abstract.Dom) = struct
               (Format.asprintf
                  "outdegree-0 refs must be abstract state for a function or program exit location; \
                   [%a] is neither"
-                 Name.pp x) )
+                 Name.pp x))
       else
         Seq.fold outgoing_edges ~init:acc ~f:(fun (frontier, lh_fps, sc_edges) e ->
             let succ = G.Edge.dst e in
@@ -718,13 +718,13 @@ module Make (Dom : Abstract.Dom) = struct
                       (lh :: succ :: frontier, succ :: lh_fps, sc_edges)
                   | _ ->
                       Ref.dirty succ;
-                      (succ :: frontier, succ :: lh_fps, sc_edges) )
+                      (succ :: frontier, succ :: lh_fps, sc_edges))
               | _ ->
                   failwith
                     "malformed DAIG -- the destination of a `Fix edge is always the loop fixpoint"
             else (
               Ref.dirty succ;
-              (succ :: frontier, lh_fps, sc_edges) ))
+              (succ :: frontier, lh_fps, sc_edges)))
     in
     let rec change_prop frontier loop_head_fixpoints loop_shortcircuit_edges =
       if List.is_empty frontier then (loop_head_fixpoints, loop_shortcircuit_edges)
@@ -759,7 +759,7 @@ module Make (Dom : Abstract.Dom) = struct
                   Ref.dirty n;
                   Seq.fold ~init:daig ~f:(flip G.Edge.remove) (G.Node.inputs n daig)
                   |> G.Node.remove n)
-          | _ -> daig )
+          | _ -> daig)
       | _ ->
           failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
     |> fun daig ->
@@ -798,7 +798,7 @@ module Make (Dom : Abstract.Dom) = struct
               | Result ps -> (
                   match get pred summarizer g with
                   | Result p, g -> (Result (p :: ps), g)
-                  | (Summ_qry _ as sq), g -> (sq, g) )
+                  | (Summ_qry _ as sq), g -> (sq, g))
               | _ -> (acc, g))
         (* apply analysis function (transfer, join, widen, etc.)  indicated by DAIG-edge label *)
         >>=
@@ -816,10 +816,10 @@ module Make (Dom : Abstract.Dom) = struct
                         | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi }
                       in
                       (res, daig)
-                  | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi)), daig) )
+                  | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi)), daig))
               | _ ->
                   failwith
-                    "malformed DCG: transfer function must have one Stmt and one AState input" )
+                    "malformed DCG: transfer function must have one Stmt and one AState input")
           | `Join -> (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.join), daig)
           | `Widen ->
               (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.widen), daig)
@@ -831,7 +831,7 @@ module Make (Dom : Abstract.Dom) = struct
                   (* If fixpoint reached, return it.  Otherwise, unroll the loop and continue. *)
                   if Dom.equal iter1 iter2 then (Result iter1, daig)
                   else unroll_loop daig p2 |> get r summarizer >>| Ref.astate_exn
-              | _ -> failwith "fix always has two inputs (by construction)" )
+              | _ -> failwith "fix always has two inputs (by construction)")
           | `Transfer_after_fix loop_head -> (
               match preds with
               | [ s; phi ] ->
@@ -846,7 +846,7 @@ module Make (Dom : Abstract.Dom) = struct
                   (Result (Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi_fp)), daig)
               | _ ->
                   failwith
-                    "malformed DCG: transfer function must have one Stmt and one AState input" ) )
+                    "malformed DCG: transfer function must have one Stmt and one AState input") )
         (* write result to the queried ref-cell and return *)
         >>| fun result ->
         phi.state <- Some result;
@@ -868,7 +868,7 @@ module Make (Dom : Abstract.Dom) = struct
             let ic = if ic1_wrt_lh < ic2_wrt_lh then ic1 else ic2 in
             let ref_cell_fp = ref_by_name_exn Name.(Iterate (ic, l)) daig in
             get ref_cell_fp summarize daig
-        | _ -> failwith (Format.asprintf "malformed DAIG for loop head %a" Cfg.Loc.pp loop_head) )
+        | _ -> failwith (Format.asprintf "malformed DAIG for loop head %a" Cfg.Loc.pp loop_head))
     | n -> failwith (Format.asprintf "can't get fixedpoint of non-loop-body ref_cell %a" Name.pp n)
 
   and _bind_formals caller_state callsite callee =
@@ -888,7 +888,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Ref.AState _ as r -> (
         match get r summarizer daig with
         | Result r, daig -> (Result (Ref.astate_exn r), daig)
-        | (Summ_qry _ as sq), daig -> (sq, daig) )
+        | (Summ_qry _ as sq), daig -> (sq, daig))
     | _ -> failwith "malformed daig: get_by_ref_impl is only used for abstract state queries"
 
   let get_by_loc ?(summarizer = fun ~callsite:_ _ -> None) loc daig =

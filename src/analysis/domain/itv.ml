@@ -160,12 +160,12 @@ let mk_tcons env op l r =
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
 (* abstractly evaluate boolean binary operation [l op r] at interval [itv] by translating it to [(l - r) op 0]
-   (since apron can only solve booleran constraints of that form), and intersecting the result with [itv].
-   If that intersection is  ...
-     ... bottom then expression is false
-     ... equal to [itv] then expression is true
-     ... anything else then the expression may be true or false
-  Return that result as an apron interval constant: [0,0], [1,1], or [0,1] respectively.
+    (since apron can only solve booleran constraints of that form), and intersecting the result with [itv].
+    If that intersection is  ...
+      ... bottom then expression is false
+      ... equal to [itv] then expression is true
+      ... anything else then the expression may be true or false
+   Return that result as an apron interval constant: [0,0], [1,1], or [0,1] respectively.
 *)
 let mk_bool_binop itv op l r =
   let env = Abstract1.env itv in
@@ -224,7 +224,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
           Some (Texpr1.Cst (Coeff.Interval (Interval.of_int 0 1)))
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
-          None )
+          None)
   (* cancel out double-negations, arithmetic and boolean *)
   | Expr.Unop { op = Unop.Neg; e = Expr.Unop { op = Unop.Neg; e } }
   | Expr.Unop { op = Unop.Not; e = Expr.Unop { op = Unop.Not; e } } ->
@@ -244,7 +244,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       | Unop.Plus -> Some e
       | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
       | Unop.Decr -> mk_arith_binop Texpr1.Sub e (Texpr1.Cst (Coeff.s_of_float 1.))
-      | Unop.Typeof | Unop.BNot -> None )
+      | Unop.Typeof | Unop.BNot -> None)
   | expr -> fallback itv expr
 
 let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
@@ -354,7 +354,7 @@ let interpret stmt itv =
           if Environment.mem_var (Abstract1.env itv) lhs then
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man itv [| lhs |] false
-          else (* lhs was unconstrained, treat as a `skip`*) itv )
+          else (* lhs was unconstrained, treat as a `skip`*) itv)
 
 let sanitize itv = itv
 

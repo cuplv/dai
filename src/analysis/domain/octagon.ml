@@ -96,12 +96,12 @@ let mk_tcons env op l r =
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
 (* abstractly evaluate boolean binary operation [l op r] at octagon [oct] by translating it to [(l - r) op 0]
-   (since apron can only solve booleran constraints of that form), and intersecting the result with [oct].
-   If that intersection is  ...
-     ... bottom then expression is false
-     ... equal to [oct] then expression is true
-     ... anything else then the expression may be true or false
-  Return that result as an apron interval constant: [0,0], [1,1], or [0,1] respectively.
+    (since apron can only solve booleran constraints of that form), and intersecting the result with [oct].
+    If that intersection is  ...
+      ... bottom then expression is false
+      ... equal to [oct] then expression is true
+      ... anything else then the expression may be true or false
+   Return that result as an apron interval constant: [0,0], [1,1], or [0,1] respectively.
 *)
 let mk_bool_binop oct op l r =
   let env = Abstract1.env oct in
@@ -142,7 +142,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) oct =
       | Le -> mk_bool_binop oct Tcons0.SUPEQ r l
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
-          None )
+          None)
   (* cancel out double-negations, arithmetic and boolean *)
   | Expr.Unop { op = Unop.Neg; e = Expr.Unop { op = Unop.Neg; e } }
   | Expr.Unop { op = Unop.Not; e = Expr.Unop { op = Unop.Not; e } } ->
@@ -162,7 +162,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) oct =
       | Unop.Plus -> Some e
       | Unop.Incr -> mk_arith_binop Texpr1.Add e (Texpr1.Cst (Coeff.s_of_float 1.))
       | Unop.Decr -> mk_arith_binop Texpr1.Sub e (Texpr1.Cst (Coeff.s_of_float 1.))
-      | Unop.Typeof | Unop.BNot -> None )
+      | Unop.Typeof | Unop.BNot -> None)
   | expr -> fallback oct expr
 
 let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
@@ -255,7 +255,7 @@ let interpret stmt oct =
           if Environment.mem_var env lhs then
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man oct [| lhs |] false
-          else (* lhs was unconstrained, treat as a `skip`*) oct )
+          else (* lhs was unconstrained, treat as a `skip`*) oct)
   | Array_write _ | Exceptional_call _ -> failwith "todo"
 
 let sanitize oct = oct

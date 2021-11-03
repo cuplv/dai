@@ -18,9 +18,9 @@ let get_superclass_name ~(package : string list) ~(class_name : string) : t -> s
   | [] -> None
   | [ superclass_id ] ->
       Some
-        ( match String.rsplit2 superclass_id ~on:'.' with
+        (match String.rsplit2 superclass_id ~on:'.' with
         | Some (_pkg, cls) -> cls
-        | None -> superclass_id )
+        | None -> superclass_id)
   | _ ->
       (* only single inheritance in java *)
       failwith "multiple inheritance? in _this_ economy???"

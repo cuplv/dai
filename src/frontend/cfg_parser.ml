@@ -31,7 +31,7 @@ let unimplemented syntax default_val =
   if !diagnostic_mode then (
     let old_count = Map.find !unimplemented_syntax syntax |> Option.value ~default:0 in
     unimplemented_syntax := Map.set !unimplemented_syntax ~key:syntax ~data:(old_count + 1);
-    default_val )
+    default_val)
   else failwith ("TODO: unimplemented syntactic form " ^ syntax)
 
 let print_diagnostic_results () =
@@ -182,7 +182,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
   | `Prim_exp (`Lit l) ->
       let e =
         Expr.Lit
-          ( match l with
+          (match l with
           | `Deci_int_lit (_, raw) | `Hex_int_lit (_, raw) | `Bin_int_lit (_, raw) ->
               raw
               |> String.chop_suffix_if_exists ~suffix:"l"
@@ -216,7 +216,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               |> String.chop_suffix_if_exists ~suffix:"\""
               |> (fun s -> try Scanf.unescaped s with _ -> "DAI_UNESCAPED_FAILED_" ^ s)
               |> Lit.of_string
-          | `Null_lit _ -> Lit.Null )
+          | `Null_lit _ -> Lit.Null)
       in
       (e, (curr_loc, []))
   | `Prim_exp (`Class_lit _) -> unimplemented "`Class_lit" placeholder_expr
@@ -291,7 +291,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             match meth with
             | `Id (_, meth_name) -> (rcvr, meth_name, aux_info)
             | `Choice_open _ ->
-                unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, [])) )
+                unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, [])))
       in
       let args = match args with Some (e, es) -> e :: List.map ~f:snd es | None -> [] in
       let actuals, (curr_loc, arg_intermediates) =
@@ -318,12 +318,12 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             expr ~curr_loc ~exc outermost_dim_expr
           in
           let e = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
-          (e, (curr_loc, intermediate_stmts)) )
+          (e, (curr_loc, intermediate_stmts)))
   | `Switch_exp (_, (_, _matching_exp, _), (_, cases_block, _)) -> (
       match cases_block with
       | `Rep_switch_blk_stmt_group _cases ->
           unimplemented "`Rep_switch_blk_stmt_group`" placeholder_expr
-      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" placeholder_expr )
+      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" placeholder_expr)
   | `Tern_exp (if_exp, _, then_exp, _, else_exp) ->
       let tmp = fresh_tmp_var () in
       let if_exp, (curr_loc, cond_intermediates) = expr ~curr_loc ~exc if_exp in
@@ -397,7 +397,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           unimplemented "`Unary_increment_or_decrement_on_heap" placeholder_expr
       | _ ->
           if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1L)), (curr_loc, intermediates))
-          else (e, (curr_loc, intermediates)) )
+          else (e, (curr_loc, intermediates)))
 
 and expr_as_var ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.expression) :
     string * (Cfg.Loc.t * edge list) =
@@ -455,16 +455,16 @@ let rec declarations stmts : string list =
     | `Enha_for_stmt (_, _, _, _, binding, _, _, _, s) -> (
         match binding with
         | `Id (_, v), _ -> v :: local_decls_of_stmt s
-        | _ -> local_decls_of_stmt s )
+        | _ -> local_decls_of_stmt s)
     | `Exp_stmt _ -> []
     | `For_stmt (_, _, binding, _, _, _, _, s) -> (
         match binding with
         | `Local_var_decl (_, _, _, _) as l -> local_decls_of_stmt l @ local_decls_of_stmt s
-        | _ -> local_decls_of_stmt s )
+        | _ -> local_decls_of_stmt s)
     | `If_stmt (_, _, t_stmt, f_branch) -> (
         match f_branch with
         | None -> local_decls_of_stmt t_stmt
-        | Some (_, f_stmt) -> local_decls_of_stmt t_stmt @ local_decls_of_stmt f_stmt )
+        | Some (_, f_stmt) -> local_decls_of_stmt t_stmt @ local_decls_of_stmt f_stmt)
     | `Labe_stmt (_label, _, s) -> local_decls_of_stmt s
     | `Local_var_decl (_, _, (v, vs), _) ->
         ident_of_var_declarator v :: (vs >>| (snd >> ident_of_var_declarator))
@@ -476,7 +476,7 @@ let rec declarations stmts : string list =
         | `Rep_switch_rule cases -> (
             cases >>= function
             | _, _, ((`Exp_stmt _ | `Throw_stmt _) as s) -> declarations [ s ]
-            | _, _, `Blk (_, block_stmts, _) -> declarations block_stmts ) )
+            | _, _, `Blk (_, block_stmts, _) -> declarations block_stmts))
     | `Sync_stmt (_, _, (_, stmts, _)) -> declarations stmts
     | `Throw_stmt _ -> []
     | `Try_stmt (_, (_, stmts, _), _) -> declarations stmts
@@ -513,19 +513,19 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
   | `Brk_stmt (_, None, _) -> (
       match fst brk with
       | Some brk_target -> (loc_map, [ (entry, brk_target, Stmt.Skip) ])
-      | None -> unimplemented "`Brk_stmt inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Brk_stmt inside try catch with finally" (loc_map, []))
   | `Brk_stmt (_, Some (_, label), _) -> (
       match String.Map.find (snd brk) label with
       | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Brk_stmt with label inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Brk_stmt with label inside try catch with finally" (loc_map, []))
   | `Cont_stmt (_, None, _) -> (
       match fst cont with
       | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Cont_stmt inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Cont_stmt inside try catch with finally" (loc_map, []))
   | `Cont_stmt (_, Some (_, label), _) -> (
       match String.Map.find (snd cont) label with
       | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Cont_stmt with label inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Cont_stmt with label inside try catch with finally" (loc_map, []))
   | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Import_decl _) -> unimplemented "`Import_decl in edge_list_of_stmt" (loc_map, [])
@@ -772,7 +772,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
             ( loc_map,
               ((exit_loc, exit, Stmt.Assume matches_default_expr) :: intermediate_stmts')
               @ intermediate_stmts @ body_edges )
-      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []) )
+      | `Rep_switch_rule _cases -> unimplemented "`Rep_switch_rule`" (loc_map, []))
   | `Sync_stmt (_, _, (_, body, _)) ->
       edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ~brk ~cont body
   | `Throw_stmt (_, e, _) ->
@@ -1037,7 +1037,7 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
               | `Super _ -> (
                   match Class_hierarchy.get_superclass_name ~package ~class_name cha with
                   | Some s -> s
-                  | None -> "super" )
+                  | None -> "super")
               (* if no superclass name exists in [cha] then we don't have code for the superclass' constructor, so just emit this placeholder *)
             in
             let invocation =
@@ -1078,7 +1078,7 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             match Map.find imports superclass_name with
             | Some super_package ->
                 Class_hierarchy.add ~package ~class_name ~super_package ~superclass_name acc.cha
-            | None -> acc.cha )
+            | None -> acc.cha)
       in
       let fields =
         let static, instance =
@@ -1108,7 +1108,7 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
                   fields = acc.fields;
                   cha = acc.cha;
                 }
-            | None -> acc )
+            | None -> acc)
         | `Class_decl cd ->
             parse_class_decl cd ~package ~containing_class_name:(Some class_name) ~imports ~acc
         | `Cons_decl (_, cd, _, body) -> (
@@ -1122,16 +1122,16 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
                   fields = acc.fields;
                   cha = acc.cha;
                 }
-            | None -> acc )
+            | None -> acc)
         | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ -> acc
         | `Enum_decl _ -> unimplemented "`Enum_decl" acc
         | `Static_init _ -> unimplemented "`Static_init" acc
         | `Record_decl _ -> unimplemented "`Record_decl" acc)
 
-(*        | d ->
-            failwith
-              (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
-                 (CST.sexp_of_class_body_declaration d)))*)
+(* | d ->
+     failwith
+       (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
+          (CST.sexp_of_class_body_declaration d)))*)
 
 let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.program) :
     prgm_parse_result =
@@ -1163,7 +1163,7 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
           match nm with
           | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
           | `Scoped_id (q, _, (_, ident)) -> Map.set acc ~key:ident ~data:(List.rev (quals q))
-          | `Choice_open _ -> unimplemented "`Choice_open" acc )
+          | `Choice_open _ -> unimplemented "`Choice_open" acc)
       | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) ->
           Map.set acc ~key:class_name ~data:package
       | _ -> acc)

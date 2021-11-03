@@ -70,7 +70,7 @@ end
 module Map = struct
   include (
     Base.Map :
-      module type of Base.Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Base.Map.t )
+      module type of Base.Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Base.Map.t)
 
   type 'v t = 'v Base.Map.M(T_comparator).t
 

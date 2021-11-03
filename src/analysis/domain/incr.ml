@@ -70,8 +70,7 @@ end = struct
   let rec eval_expr env =
     let open Ast in
     function
-    | Expr.Var v -> (
-        match Env.find env v with Some value -> value | None -> Val.of_lit Lit.Null )
+    | Expr.Var v -> ( match Env.find env v with Some value -> value | None -> Val.of_lit Lit.Null)
     | Expr.Lit l -> Val.of_lit l
     | Expr.Binop { l; op; r } -> Val.eval_binop (eval_expr env l) op (eval_expr env r)
     | Expr.Unop { op; e } -> Val.eval_unop op (eval_expr env e)
@@ -91,7 +90,7 @@ end = struct
           | Assume e -> (
               match Val.truthiness (eval_expr env e) with
               | `T | `Either -> Some env
-              | `F | `Neither -> None )
+              | `F | `Neither -> None)
           | Expr _ | Skip | Write _ | Call _ -> Some env
           | Array_write _ | Exceptional_call _ -> failwith "todo")
     in
@@ -207,13 +206,13 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         match (eval_expr env heap l, eval_expr env heap r) with
         | Some (AAddr_or_val.InR v_l), Some (AAddr_or_val.InR v_r) ->
             some_val @@ Val.eval_binop v_l op v_r
-        | _ -> None )
+        | _ -> None)
     | Expr.Unop { op; e } -> (
         match eval_expr env heap e with
         | Some (AAddr_or_val.InR v) -> Some (AAddr_or_val.InR (Val.eval_unop op v))
         | Some (AAddr_or_val.InL _) when Unop.equal op Unop.Typeof ->
             Some (AAddr_or_val.InR (Val.of_lit (Lit.String "object")))
-        | _ -> None )
+        | _ -> None)
     | Expr.Deref _ ->
         failwith "todo"
         (*(
@@ -272,7 +271,7 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
           | Assume e -> (
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function
               | `T | `Either -> Some (env, heap)
-              | _ -> None )
+              | _ -> None)
           | Skip | Expr _ | Call _ -> Some (env, heap)
           | Array_write _ | Exceptional_call _ -> failwith "todo")
     in

@@ -71,7 +71,8 @@ module Loc = struct
   end
 
   module Map = struct
-    include (Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
+    include (
+      Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
 
     type 'v t = 'v Map.M(T_comparator).t
 
@@ -154,7 +155,8 @@ module Fn = struct
   end
 
   module Map = struct
-    include (Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
+    include (
+      Map : module type of Map with type ('key, 'value, 'cmp) t := ('key, 'value, 'cmp) Map.t)
 
     type 'v t = 'v Map.M(T_comparator).t
 
@@ -210,9 +212,9 @@ let natural_loop backedge cfg =
         Seq.fold (G.Node.preds loc cfg) ~init:acc ~f:(fun (acc_wl, acc_loop) pred ->
             if
               not
-                ( Loc.equal pred (src backedge)
+                (Loc.equal pred (src backedge)
                 || Loc.equal pred (dst backedge)
-                || Set.mem acc_loop pred )
+                || Set.mem acc_loop pred)
             then (Set.add acc_wl pred, Set.add acc_loop pred)
             else (acc_wl, acc_loop))
       in
@@ -327,20 +329,20 @@ let dump_dot_interproc ?print ~filename (cfg : t Fn.Map.t) =
 (** Given a program [cfg] and a location [loc] therein, return those sequences of callsites such that [loc] is reachable from the program entry with that sequence on the stack *)
 let call_chains_to ~loc:_ ~cfg:_ : G.edge list list = failwith "todo"
 
-(*  match containing_fn loc cfg with
-  | None -> [ [] ] (* in main function, reachable with empty stack *)
-  | Some fn ->
-      (* in other function; recursively get chains to each of its callers, appending that caller to each chain*)
-      Seq.filter
-        (G.edges (fst cfg))
-        ~f:(fun _e ->
-          (*Ast.Stmt.callee (G.Edge.label e)*)
-          match failwith "todo" with
-          | Some edge_callee -> String.equal (Fn.name fn) edge_callee
-          | None -> false)
-      |> Seq.to_list
-      |> List.bind ~f:(fun caller ->
-             call_chains_to ~loc:(G.Edge.src caller) ~cfg |> List.(map ~f:(cons caller)))
+(* match containing_fn loc cfg with
+   | None -> [ [] ] (* in main function, reachable with empty stack *)
+   | Some fn ->
+       (* in other function; recursively get chains to each of its callers, appending that caller to each chain*)
+       Seq.filter
+         (G.edges (fst cfg))
+         ~f:(fun _e ->
+           (*Ast.Stmt.callee (G.Edge.label e)*)
+           match failwith "todo" with
+           | Some edge_callee -> String.equal (Fn.name fn) edge_callee
+           | None -> false)
+       |> Seq.to_list
+       |> List.bind ~f:(fun caller ->
+              call_chains_to ~loc:(G.Edge.src caller) ~cfg |> List.(map ~f:(cons caller)))
 *)
 (* module Interpreter (Dom : sig
      include Abstract.Dom

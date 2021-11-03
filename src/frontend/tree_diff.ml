@@ -117,7 +117,7 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
         Add_statements { method_id; at_loc = loc_by_idx idx; stmts = to_list stmts } :: acc_edits
     | Replace (prev_stmts, next_stmts) ->
         flip ( @ ) acc_edits
-          ( match (prev_stmts, next_stmts) with
+          (match (prev_stmts, next_stmts) with
           | [||], [||] -> failwith "malformed diff: empty replacement"
           | ( [| `If_stmt (_, (_, prev_cond, _), prev_t_branch, prev_f_branch) as prev_stmt |],
               [| `If_stmt (_, (_, next_cond, _), next_t_branch, next_f_branch) as next_stmt |] ) ->
@@ -166,7 +166,7 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) as next_stmt |]
             ) ->
               let is_header_unchanged =
-                ( match (prev_init, next_init) with
+                (match (prev_init, next_init) with
                 | `Local_var_decl p, `Local_var_decl n ->
                     Sexp.equal
                       (CST.sexp_of_local_variable_declaration p)
@@ -178,12 +178,12 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
                     Sexp.equal
                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
-                | _ -> false )
-                && ( match (prev_cond, next_cond) with
+                | _ -> false)
+                && (match (prev_cond, next_cond) with
                    | None, None -> true
                    | Some p, Some n ->
                        Sexp.equal (CST.sexp_of_expression p) (CST.sexp_of_expression n)
-                   | _ -> false )
+                   | _ -> false)
                 &&
                 match (prev_iter, next_iter) with
                 | None, None -> true
@@ -205,7 +205,7 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
                 Modify_header { method_id; prev_loc_ctx; next_stmt; loop_body_exit } :: body_diff
           | prevs, nexts ->
               let from_loc, to_loc = loc_range method_id loc_map prevs in
-              [ Modify_statements { method_id; from_loc; to_loc; new_stmts = to_list nexts } ] )
+              [ Modify_statements { method_id; from_loc; to_loc; new_stmts = to_list nexts } ])
     | Same _ -> acc_edits
     | Unified _ -> failwith "Unrecognized diff type: \"Unified\"")
 
@@ -470,7 +470,7 @@ let apply diff loc_map cfgs =
           | Some (loc_map, edges, fn) ->
               let cfgs = Cfg.add_fn fn ~edges cfgs in
               (loc_map, cfgs)
-          | None -> (loc_map, cfgs) )
+          | None -> (loc_map, cfgs))
       | Delete_function { method_id } ->
           let loc_map = Loc_map.remove_fn loc_map method_id in
           let cfgs = Cfg.remove_fn method_id cfgs in
@@ -488,7 +488,7 @@ let apply diff loc_map cfgs =
               let cfgs = Cfg.remove_fn method_id cfgs in
               (loc_map, Cfg.set_fn_cfg fn ~cfg:old_fn_cfg cfgs)
           | None ->
-              failwith (Format.asprintf "can't modify unknown function %a" Method_id.pp method_id) )
+              failwith (Format.asprintf "can't modify unknown function %a" Method_id.pp method_id))
       | Add_statements { method_id; _ }
       | Modify_statements { method_id; _ }
       | Modify_header { method_id; _ }
@@ -501,7 +501,7 @@ let apply diff loc_map cfgs =
               let { cfg; new_loc_map; _ } =
                 apply_edit ~ret:fn.exit ~exc:fn.exc_exit edit lm old_fn_cfg
               in
-              (new_loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:cfg) ))
+              (new_loc_map, Cfg.Fn.Map.set cfgs ~key:fn ~data:cfg)))
 
 open Result
 open Option.Monad_infix

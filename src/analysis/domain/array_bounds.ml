@@ -69,7 +69,7 @@ let apron_var_of_array_len addr = Var.of_string (Format.asprintf "__dai_%a.len" 
 let project_fields itv addrs =
   Itv.filter_env itv
     ~f:
-      ( String.chop_prefix ~prefix:"__dai_alloc_"
+      (String.chop_prefix ~prefix:"__dai_alloc_"
       >> Option.exists
            ~f:(String.take_while ~f:Char.is_digit >> Int.of_string >> Addr.of_int >> Set.mem addrs)
       )
@@ -220,7 +220,7 @@ let interpret stmt phi =
           if Environment.mem_var env lhs then
             (* lhs was constrained, quantify that out *)
             (am, Abstract1.forget_array man itv [| lhs |] false)
-          else (* lhs was unconstrained, treat as a `skip`*) (am, itv) )
+          else (* lhs was unconstrained, treat as a `skip`*) (am, itv))
   | Assume e ->
       (am, Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr (am, itv) e) itv e)
   | Skip -> (am, itv)
@@ -267,7 +267,7 @@ let is_in_bounds addr (idx : Interval.t) itv =
 let is_safe (var : string) (idx : Ast.Expr.t) ((am, itv) : t) =
   if not @@ Map.mem am var then (
     Format.(fprintf std_formatter) "WARNING: No array address information available for %s\n" var;
-    None )
+    None)
   else
     Map.find am var >>= fun aaddr ->
     texpr_of_expr (am, itv) idx >>| Itv.eval_texpr itv >>= fun idx ->
@@ -369,7 +369,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
         else if String.equal rcvr "this" then `This
         else
           `AAddr
-            ( match alloc_site with
+            (match alloc_site with
             | Some a -> Addr.Abstract.of_alloc_site a
             | None -> (
                 match Map.find caller_amap rcvr with
@@ -377,7 +377,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
                 | None ->
                     failwith
                       (Format.asprintf "error: no materialized address for receiver of callsite %a"
-                         Ast.Stmt.pp callsite) ) )
+                         Ast.Stmt.pp callsite)))
       in
       let callee_instance_fields =
         if callee.method_id.static then String.Set.empty
@@ -397,13 +397,13 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
       *)
       let itv =
         (* (1) *)
-        ( Itv.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+        (Itv.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
         |>
         match Map.find return_amap Cfg.retvar with
         | None -> Fn.id
         | Some retval_aaddr ->
             let retval_fields_itv = project_fields return_itv retval_aaddr in
-            Itv.meet retval_fields_itv )
+            Itv.meet retval_fields_itv)
         (* (2) *)
         |> fun itv ->
         Set.fold callee_instance_fields ~init:itv ~f:(fun itv fld ->
@@ -435,12 +435,12 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
       (* (1) bind the receiver's abstract address if needed, then
          (2) transfer any return-value address binding to the callsite's lhs *)
       let amap =
-        ( (* (1) *)
-        match rcvr_aaddr with
+        (* (1) *)
+        (match rcvr_aaddr with
         | `This | `Static -> caller_amap
         | `AAddr rcvr_aaddr ->
             if String.equal "<init>" meth then Addr_map.set caller_amap ~key:lhs ~aaddr:rcvr_aaddr
-            else Addr_map.set caller_amap ~key:rcvr ~aaddr:rcvr_aaddr )
+            else Addr_map.set caller_amap ~key:rcvr ~aaddr:rcvr_aaddr)
         (* (2) *)
         |>
         match Map.find return_amap Cfg.retvar with

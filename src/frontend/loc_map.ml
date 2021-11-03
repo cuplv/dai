@@ -22,7 +22,7 @@ let add method_id stmt loc_ctx lmap =
   | Some stmt_hash_map -> (
       match Int.Map.add stmt_hash_map ~key:stmt_hash ~data:loc_ctx with
       | `Duplicate -> `Collision
-      | `Ok data -> `Ok (Method_id.Map.set lmap ~key:method_id ~data) )
+      | `Ok data -> `Ok (Method_id.Map.set lmap ~key:method_id ~data))
 
 let remove method_id stmt lmap =
   let stmt_hash = CST.sexp_of_statement stmt |> Sexp.hash in

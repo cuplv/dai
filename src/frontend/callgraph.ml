@@ -105,9 +105,9 @@ let deserialize ~fns =
                let cg =
                  Method_id.Map.set acc_cg ~key:caller
                    ~data:
-                     ( match Method_id.Map.find acc_cg caller with
+                     (match Method_id.Map.find acc_cg caller with
                      | Some callees -> Set.add callees callee
-                     | None -> Cfg.Fn.Set.singleton callee )
+                     | None -> Cfg.Fn.Set.singleton callee)
                in
                (cg, curr_caller))
   >> fst

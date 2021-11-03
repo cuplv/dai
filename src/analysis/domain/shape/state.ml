@@ -264,7 +264,7 @@ module T = struct
       | (a1, a2, v) :: psi -> (
           match List.find psi ~f:(fst3 >> Memloc.equal a1) with
           | Some (_, a2_prime, v_prime) -> Some (a1, a2, a2_prime, psi, v, v_prime)
-          | None -> find_alias psi )
+          | None -> find_alias psi)
     in
 
     find_alias psi >>= fun (a1, a2, a2_prime, psi, v, v_prime) ->
@@ -467,7 +467,7 @@ module T = struct
             (* pre-state has a next ptr edge from rcvr addr;
                - bind lhs variable to its destination
             *)
-            (g, p, Env.update e lhs ~f:(fun _ -> G.Edge.dst next)) )
+            (g, p, Env.update e lhs ~f:(fun _ -> G.Edge.dst next)))
     | Stmt.Write { rcvr; field = "next"; rhs } -> (
         let g, e, rcvr_addr =
           match Env.find e rcvr with
@@ -488,13 +488,13 @@ module T = struct
             let new_edge = G.Edge.create rcvr_addr dst_addr `Next_ptr in
             match G.edge rcvr_addr g with
             | Some edge -> (G.Edge.remove edge g |> G.Edge.insert new_edge, p, e)
-            | None -> (G.Edge.insert new_edge g, p, e) )
+            | None -> (G.Edge.insert new_edge g, p, e))
         | Expr.Lit Lit.Null -> (
             let new_edge = G.Edge.create rcvr_addr Memloc.null `Next_ptr in
             match G.edge rcvr_addr g with
             | Some edge -> (G.Edge.remove edge g |> G.Edge.insert new_edge, p, e)
-            | None -> (G.Edge.insert new_edge g, p, e) )
-        | _ -> (g, p, e) )
+            | None -> (G.Edge.insert new_edge g, p, e))
+        | _ -> (g, p, e))
     | Stmt.Assume expr -> (g, Pure.assume expr e p, e)
     | _ -> (g, p, e)
 
@@ -525,7 +525,7 @@ module T = struct
         | `Next_ptr, `Next_ptr | `List_seg, `List_seg -> (
             match Memloc.Map.add phi ~key:(G.Edge.dst e2) ~data:(G.Edge.dst e1) with
             | `Ok phi -> Some (G.Edge.remove e1 g1, G.Edge.remove e2 g2, phi)
-            | `Duplicate -> failwith "todo" )
+            | `Duplicate -> failwith "todo")
         | `Next_ptr, `List_seg ->
             failwith "ask evan -- is implementing implies even necessary here? I suspect not."
         | `List_seg, `Next_ptr -> failwith "ask evan")
@@ -537,26 +537,26 @@ end
 include T
 
 (*module IncrT = Dai.Context.MakeInsensitive (Domain.Incr.Make (T))
-module Daig = Analysis.Daig.Make (IncrT)
+  module Daig = Analysis.Daig.Make (IncrT)
 
-let%test "build daig, analyze, dump dot: list_append.js" =
-  let cfg =
-    Dai.Cfg_parser.(json_of_file >> cfg_of_json) (abs_of_rel_path "test_cases/list_append.js")
-  in
-  let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
-  let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in
-  let mem =
-    Graph.create
-      (module G)
-      ~nodes:[ a0; a1; Memloc.null ]
-      ~edges:[ (a1, Memloc.null, `List_seg); (a0, Memloc.null, `List_seg) ]
-      ()
-  in
-  let init_state : IncrT.t = Obj.magic (mem, [], env) in
-  let daig = Daig.of_cfg ~init_state cfg in
-  Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_pre.dot");
-  let exit_loc = Daig.Name.Loc (Dai.Cfg.Loc.exit, IncrT.Ctx.init) in
-  let _, daig = Daig.get_by_name exit_loc daig in
-  Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_post.dot");
-  true
+  let%test "build daig, analyze, dump dot: list_append.js" =
+    let cfg =
+      Dai.Cfg_parser.(json_of_file >> cfg_of_json) (abs_of_rel_path "test_cases/list_append.js")
+    in
+    let a0, a1 = (Memloc.of_int 0, Memloc.of_int 1) in
+    let env = Env.of_alist_exn [ ("p", a0); ("q", a1) ] in
+    let mem =
+      Graph.create
+        (module G)
+        ~nodes:[ a0; a1; Memloc.null ]
+        ~edges:[ (a1, Memloc.null, `List_seg); (a0, Memloc.null, `List_seg) ]
+        ()
+    in
+    let init_state : IncrT.t = Obj.magic (mem, [], env) in
+    let daig = Daig.of_cfg ~init_state cfg in
+    Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_pre.dot");
+    let exit_loc = Daig.Name.Loc (Dai.Cfg.Loc.exit, IncrT.Ctx.init) in
+    let _, daig = Daig.get_by_name exit_loc daig in
+    Daig.dump_dot daig ~filename:(abs_of_rel_path "out/daig/list_append_post.dot");
+    true
 *)

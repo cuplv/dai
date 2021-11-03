@@ -239,7 +239,7 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
                     failwith "got bottom new_qry"
                   else ();
-                  if List.is_empty new_qrys then hodaig else solve_subqueries hodaig new_qrys )
+                  if List.is_empty new_qrys then hodaig else solve_subqueries hodaig new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries hodaig qrys
           | qry :: qrys -> (
               let callee_daig, hodaig =
@@ -284,7 +284,7 @@ module Make (Dom : Abstract.Dom) = struct
                     callee_subqueries_of_summ_qry hodaig fields ~callsite ~caller_state ~callgraph
                       qry.fn.method_id ~caller_entry_state:qry.entry_state
                   in
-                  solve_subqueries hodaig (new_qrys @ qrys) )
+                  solve_subqueries hodaig (new_qrys @ qrys))
         in
         let hodaig =
           solve_subqueries hodaig
@@ -300,7 +300,7 @@ module Make (Dom : Abstract.Dom) = struct
               (Format.asprintf
                  "error: solve_subqueries terminated but more summaries are needed to resolve \
                   query for %a in %a"
-                 Method_id.pp method_id Dom.pp entry_state) )
+                 Method_id.pp method_id Dom.pp entry_state))
 
   let apply_edit ~diff loc_map (hodaig : t) =
     List.fold diff ~init:(loc_map, hodaig) ~f:(fun (loc_map, hodaig) ->
@@ -322,7 +322,7 @@ module Make (Dom : Abstract.Dom) = struct
             | None ->
                 failwith
                   (Format.asprintf "Can't remove function %a: does not exist in DAIG" Method_id.pp
-                     method_id) )
+                     method_id))
         | Modify_function { method_id; new_header } -> (
             let new_method_id, formals =
               match new_header with _ -> failwith "todo: Modify_function edit"
@@ -355,7 +355,7 @@ module Make (Dom : Abstract.Dom) = struct
                 let new_daigs =
                   Map.map daigs ~f:(fun daig -> D.apply_edit ~daig ~cfg_edit ~fn edit)
                 in
-                (cfg_edit.new_loc_map, Map.set hodaig ~key:fn ~data:(cfg_edit.cfg, new_daigs)) ))
+                (cfg_edit.new_loc_map, Map.set hodaig ~key:fn ~data:(cfg_edit.cfg, new_daigs))))
 end
 
 module H = Make (Array_bounds)
