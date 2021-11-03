@@ -277,10 +277,27 @@ let is_safe (var : string) (idx : Ast.Expr.t) ((am, itv) : t) =
     |> List.reduce_exn ~f:(fun x y ->
            match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
 
+let arrayify_varargs (actuals : Expr.t list) (formals : int) (phi : t) : Expr.t list * t =
+  let tmp_var = "__DAI_array_for_varargs" in
+  let varargs = List.drop actuals (formals - 1) in
+  let arrayify =
+    Stmt.Assign
+      {
+        lhs = tmp_var;
+        rhs = Expr.Array_literal { elts = varargs; alloc_site = Alloc_site.fresh () };
+      }
+  in
+  let phi' = interpret arrayify phi in
+  (List.take actuals (formals - 1) @ [ Expr.Var tmp_var ], phi')
+
 let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
   let caller_am, caller_itv = extend_env_by_uses callsite caller_state in
   match callsite with
   | Ast.Stmt.Call { rcvr; actuals; alloc_site = _; _ } ->
+      let actuals, (caller_am, caller_itv) =
+        if List.(length actuals = length callee.formals) then (actuals, (caller_am, caller_itv))
+        else arrayify_varargs actuals (List.length callee.formals) (caller_am, caller_itv)
+      in
       (* re-scope the address map to include only the formal parameters *)
       let callee_am =
         List.(fold (zip_exn callee.formals actuals)) ~init:Addr_map.empty

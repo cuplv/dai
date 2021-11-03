@@ -6,18 +6,25 @@ type t = Cfg.Fn.Set.t Method_id.Map.t
 (* a callgraph is a map from caller [Method_id]'s to sets of callee [Cfg.Fn]'s *)
 
 let resolve_by_name ~callsite candidates =
+  let compatible_args (fn : Cfg.Fn.t) actuals =
+    let num_formals = List.length fn.formals in
+    let num_actuals = List.length actuals in
+    num_formals = num_actuals
+    || (* WALA callgraph output doesn't know about varargs,
+          so we conservatively assume any function whose last argument has array type may be variadic *)
+    (num_formals > 0 && String.is_suffix ~suffix:"[]" (List.last_exn fn.method_id.arg_types))
+  in
   match callsite with
   | Ast.Stmt.Call { lhs = _; rcvr; meth = "<init>"; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr; meth = "<init>"; actuals } ->
       Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
           String.equal rcvr (String.split candidate.method_id.class_name ~on:'$' |> List.last_exn)
           && String.equal "<init>" candidate.method_id.method_name
-          && Int.equal (List.length candidate.formals) (List.length actuals))
+          && compatible_args candidate actuals)
   | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr = _; meth; actuals } ->
       Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
-          String.equal meth candidate.method_id.method_name
-          && Int.equal (List.length candidate.formals) (List.length actuals))
+          String.equal meth candidate.method_id.method_name && compatible_args candidate actuals)
   | s ->
       failwith
         (Format.asprintf "can't resolve call targets of non-method-call statement %a" Ast.Stmt.pp s)

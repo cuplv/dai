@@ -1,0 +1,3 @@
+CALLER: static Variadic#main(java.lang.String[])
+	CALLEE: static Variadic#sum(int[])
+CALLER: static Variadic#sum(int[])

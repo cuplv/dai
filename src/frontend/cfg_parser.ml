@@ -906,9 +906,10 @@ and for_loop_header method_id ~body_entry ~body_exit ~entry ~exit ~ret ~exc loc_
 let parse_formals = function
   | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
       let formal_name = function
-        | `Formal_param (_mods, _type, (`Id (_, id), _dims)) -> id
-        | `Formal_param _ -> unimplemented "`Formal_param" "PLACEHOLDER"
-        | `Spread_param _ -> unimplemented "`Spread_param" "PLACEHOLDER"
+        | `Formal_param (_, _, var_decl_id) ->
+            let var_decl = (var_decl_id, None) in
+            ident_of_var_declarator var_decl
+        | `Spread_param (_, _, _, var_decl) -> ident_of_var_declarator var_decl
       in
       formal_name first :: List.map rest ~f:(snd >> formal_name)
   | _, _, None, _ -> []
@@ -916,8 +917,8 @@ let parse_formals = function
 let types_of_formals = function
   | _open_paren, _rcvr_param, Some (first, rest), _close_paren ->
       let type_of_formal = function
-        | `Spread_param _ -> unimplemented "`Spread_param" "PLACEHOLDER"
-        | `Formal_param (_mods, t, _) -> string_of_unannotated_type t
+        | `Formal_param (_, t, _) -> string_of_unannotated_type t
+        | `Spread_param (_, t, _, _) -> string_of_unannotated_type t ^ "[]"
       in
       type_of_formal first :: List.map rest ~f:(snd >> type_of_formal)
   | _, _, None, _ -> []
@@ -929,11 +930,11 @@ let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declarat
       let exit = Cfg.Loc.fresh () in
       let exc_exit = Cfg.Loc.fresh () in
       let arg_types = types_of_formals formals in
-      let formals = parse_formals formals in
-      let locals = declarations stmts in
       let static =
         Option.exists modifiers ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
       in
+      let formals = parse_formals formals in
+      let locals = declarations stmts in
       let method_id : Method_id.t = { package; class_name; method_name; static; arg_types } in
       let fn : Cfg.Fn.t = { method_id; formals; locals; entry; exit; exc_exit } in
       let loc_map, edges =
@@ -1135,7 +1136,10 @@ let of_file_exn ?(acc = empty_parse_result) filename =
   let file = Src_file.of_file filename in
   let tree = Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file in
   match tree with
-  | Ok tree -> of_java_cst ~acc tree
+  | Ok tree ->
+      let { loc_map; cfgs; fields; cha } = of_java_cst ~acc tree in
+      let fields = Class_hierarchy.compute_closure ~cha ~fields in
+      { loc_map; cfgs; fields; cha }
   | Error _e -> failwith @@ "parse error in " ^ filename
 
 let of_files ~files =

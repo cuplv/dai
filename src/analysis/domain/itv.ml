@@ -184,7 +184,10 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
   let mk_arith_binop op l r = Some Texpr1.(Binop (op, l, r, Double, Zero)) in
   let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
-  | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
+  | Expr.Var v ->
+      let av = Var.of_string v in
+      if Environment.mem_var (Abstract1.env itv) av then Some (Texpr1.Var (Var.of_string v))
+      else None
   | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int64 i)))
   | Expr.Lit (Float f) -> Some (Texpr1.Cst (Coeff.s_of_float f))
   | Expr.Lit (Bool b) -> Some (Texpr1.Cst (Coeff.s_of_float (if b then 1. else 0.)))
@@ -299,7 +302,7 @@ let eval_texpr itv =
   (fun e ->
     try Texpr1.of_expr (Abstract1.env itv) e
     with _ ->
-      failwith (Format.asprintf "error in Texpr1.of_expr; expr = [%a]\n" Texpr1.print_expr e))
+      failwith (Format.asprintf "error in Texpr1.of_expr; expr = %a\n" Texpr1.print_expr e))
   >> Abstract1.bound_texpr (get_man ()) itv
 
 let extend_env_by_uses stmt itv =
