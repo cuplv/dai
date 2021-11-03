@@ -70,7 +70,8 @@ val edge_list_of_stmt_list :
   exit:Cfg.Loc.t ->
   ret:Cfg.Loc.t ->
   exc:Cfg.Loc.t ->
-  ?brk:Cfg.Loc.t option ->
+  ?brk:Cfg.Loc.t option * Cfg.Loc.t Dai.Import.String.Map.t ->
+  ?cont:Cfg.Loc.t option * Cfg.Loc.t Dai.Import.String.Map.t ->
   CST.program ->
   Loc_map.t * edge list
 
