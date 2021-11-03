@@ -5,7 +5,7 @@ export DAI_ROOT=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 default: build
 
 .PHONY: build
-build:
+build: fmt
 	dune build
 
 .PHONY: test
