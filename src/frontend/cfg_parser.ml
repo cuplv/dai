@@ -482,8 +482,8 @@ let rec declarations stmts : string list =
   in
   stmts >>= local_decls_of_stmt
 
-let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []))
-    ?(cont = (None, [])) ?cont_label stmt : Loc_map.t * edge list =
+let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, String.Map.empty))
+    ?(cont = (None, String.Map.empty)) ?cont_label stmt : Loc_map.t * edge list =
   let open Ast in
   let loc_map =
     match Loc_map.add method_id stmt { entry; exit; ret; exc } loc_map with
@@ -509,19 +509,19 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
   | `Brk_stmt (_, None, _) -> (
       match fst brk with
       | Some brk_target -> (loc_map, [ (entry, brk_target, Stmt.Skip) ])
-      | None -> unimplemented "`Brk_stmt inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Brk_stmt inside try catch with finally" (loc_map, []))
   | `Brk_stmt (_, Some (_, label), _) -> (
-      match List.find (snd brk) ~f:(fst >> snd >> ( = ) label) with
-      | Some cont_target -> (loc_map, [ (entry, snd cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Brk_stmt with label inside try catch with finally" (loc_map, []) )
+      match String.Map.find (snd brk) label with
+      | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
+      | None -> unimplemented "`Brk_stmt with label inside try catch with finally" (loc_map, []))
   | `Cont_stmt (_, None, _) -> (
       match fst cont with
       | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Cont_stmt inside try catch with finally" (loc_map, []) )
+      | None -> unimplemented "`Cont_stmt inside try catch with finally" (loc_map, []))
   | `Cont_stmt (_, Some (_, label), _) -> (
-      match List.find (snd cont) ~f:(fst >> snd >> ( = ) label) with
-      | Some cont_target -> (loc_map, [ (entry, snd cont_target, Stmt.Skip) ])
-      | None -> unimplemented "`Cont_stmt with label inside try catch with finally" (loc_map, []) )
+      match String.Map.find (snd cont) label with
+      | Some cont_target -> (loc_map, [ (entry, cont_target, Stmt.Skip) ])
+      | None -> unimplemented "`Cont_stmt with label inside try catch with finally" (loc_map, []))
   | `Decl (`Module_decl _) -> unimplemented "`Module_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Pack_decl _) -> unimplemented "`Pack_decl in edge_list_of_stmt" (loc_map, [])
   | `Decl (`Import_decl _) -> unimplemented "`Import_decl in edge_list_of_stmt" (loc_map, [])
@@ -535,7 +535,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let cond_neg = Expr.unop Unop.Not cond in
       let cont =
         ( Some body_exit,
-          match cont_label with None -> snd cont | Some label -> (label, body_exit) :: snd cont )
+          match cont_label with
+          | None -> snd cont
+          | Some label -> String.Map.set (snd cont) ~key:label ~data:body_exit )
       in
       let loc_map, body =
         edge_list_of_stmt method_id loc_map entry body_exit ret exc
@@ -584,7 +586,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       in
       let cont =
         ( Some cond_entry,
-          match cont_label with None -> snd cont | Some label -> (label, cond_entry) :: snd cont )
+          match cont_label with
+          | None -> snd cont
+          | Some label -> String.Map.set (snd cont) ~key:label ~data:cond_entry )
       in
       let loc_map', body_intermediate_stmts =
         edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc
@@ -607,7 +611,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       in
       let cont =
         ( Some body_exit,
-          match cont_label with None -> snd cont | Some label -> (label, body_exit) :: snd cont )
+          match cont_label with
+          | None -> snd cont
+          | Some label -> String.Map.set (snd cont) ~key:label ~data:body_exit )
       in
       let loc_map, body =
         edge_list_of_stmt method_id loc_map body_entry body_exit ret exc
@@ -633,9 +639,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
             (loc_map, (entry, f_branch_entry, Stmt.Assume cond_neg) :: edges)
       in
       cond_intermediate_stmts @ t_branch @ f_branch |> pair loc_map
-  | `Labe_stmt (label, _, s) ->
+  | `Labe_stmt ((_, label), _, s) ->
       edge_list_of_stmt method_id loc_map entry exit ret exc
-        ~brk:(fst brk, (label, exit) :: snd brk)
+        ~brk:(fst brk, String.Map.set (snd brk) ~key:label ~data:exit)
         ~cont ~cont_label:label s
   | `Local_var_decl (_, _, (v, vs), _) ->
       let decls = v :: List.map ~f:snd vs in
@@ -789,7 +795,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let finally_exit_loc = Cfg.Loc.fresh () in
       let loc_map, catch_loc, catch_edges =
         build_catch_cfg catch_clauses loc_map method_id ~exit:finally_entry_loc ~ret
-          ~exc:finally_entry_loc ~brk:(None, []) ~cont:(None, [])
+          ~exc:finally_entry_loc ~brk:(None, String.Map.empty) ~cont:(None, String.Map.empty)
       in
       let loc_map, try_edges =
         edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc try_block
@@ -809,7 +815,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, []
       let cond_neg = Expr.unop Unop.Not cond in
       let cont =
         ( Some entry,
-          match cont_label with None -> snd cont | Some label -> (label, entry) :: snd cont )
+          match cont_label with
+          | None -> snd cont
+          | Some label -> String.Map.set (snd cont) ~key:label ~data:entry )
       in
       let loc_map, body =
         edge_list_of_stmt method_id loc_map body_entry entry ret exc
@@ -890,8 +898,9 @@ and build_catch_cfg catch_clauses loc_map method_id ~exit ~ret ~exc ~brk ~cont :
     build_catch_cfg_impl catch_loc loc_map catch_clauses |> fun (loc_map, edges) ->
     (loc_map, catch_loc, edges)
 
-and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc ?(brk = (None, []))
-    ?(cont = (None, [])) stmts : Loc_map.t * edge list =
+and edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc
+    ?(brk = (None, String.Map.empty)) ?(cont = (None, String.Map.empty)) stmts :
+    Loc_map.t * edge list =
   let rec edges_of_stmts loc_map curr_loc = function
     | [] -> (loc_map, [ (curr_loc, exit, Ast.Stmt.Skip) ])
     | [ s ] -> edge_list_of_stmt method_id loc_map curr_loc exit ret exc ~brk ~cont s
