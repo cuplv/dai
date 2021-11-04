@@ -588,7 +588,9 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
       (cond_exit, entry, Stmt.Assume cond) :: (cond_exit, exit, Stmt.Assume cond_neg) :: body
       |> List.append cond_intermediate_stmts
       |> pair loc_map
-  | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, var), None), _, exp, _, body) ->
+  | `Enha_for_stmt
+      (_, _, _mods, _type, ((`Id (_, var) | `Choice_open (`Module (_, var))), None), _, exp, _, body)
+    ->
       (* Technically the way this reduces depends on whether the expression is an iterable or an array.
        * because apparently arrays aren't iterables.
        * starting with the iterable implementation, since that seems to be the most prevelant version *)
@@ -639,8 +641,6 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
       (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
   | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, _var), Some _dims), _, _exp, _, _body) ->
       unimplemented "`Enha_for_stmt var with dims" (loc_map, [])
-  | `Enha_for_stmt (_, _, _mods, _type, (`Choice_open _, None), _, _exp, _, _body) ->
-      unimplemented "`Enha_for_stmt on open/module" (loc_map, [])
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
