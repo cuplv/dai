@@ -88,7 +88,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let lhs_expr, (curr_loc, lhs_intermediates) =
         match lhs with
         | `Id (_, ident) -> (Expr.Var ident, (curr_loc, []))
-        | `Choice_open _ -> unimplemented "`Choice_open" placeholder_expr
+        | `Choice_open (`Open _) -> (Expr.Var "open", (curr_loc, []))
+        | `Choice_open (`Module _) -> (Expr.Var "module", (curr_loc, []))
         | `Field_access (rcvr, _, _, field) ->
             let rcvr, aux_info =
               match rcvr with
@@ -98,7 +99,9 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             let field =
               match field with
               | `Id (_, fld) -> fld
-              | `Choice_open _ -> unimplemented "`Choice_open" "DIAGNOSTIC MODE PLACEHOLDER"
+              | `Choice_open (`Module _) -> "module"
+              | `Choice_open _ ->
+                  unimplemented "\"open\" as field name" "DIAGNOSTIC MODE PLACEHOLDER"
               | `This _ -> "this"
             in
             (Expr.Deref { rcvr; field }, aux_info)
@@ -128,7 +131,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let stmt =
         match lhs with
         | `Id (_, lhs) -> Stmt.Assign { lhs; rhs = rhs_expr_with_op }
-        | `Choice_open _ -> unimplemented "`Choice_open" Stmt.Skip
+        | `Choice_open (`Open _) -> Stmt.Assign { lhs = "open"; rhs = rhs_expr_with_op }
+        | `Choice_open (`Module _) -> Stmt.Assign { lhs = "module"; rhs = rhs_expr_with_op }
         | `Field_access _ ->
             let rcvr, field =
               match lhs_expr with
@@ -222,7 +226,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
   | `Prim_exp (`Class_lit _) -> unimplemented "`Class_lit" placeholder_expr
   | `Prim_exp (`This _) -> (Expr.Var "this", (curr_loc, []))
   | `Prim_exp (`Id (_, ident)) -> (Expr.Var ident, (curr_loc, []))
-  | `Prim_exp (`Choice_open _) -> unimplemented "`Choice_open" placeholder_expr
+  | `Prim_exp (`Choice_open (`Open _)) -> (Expr.Var "open", (curr_loc, []))
+  | `Prim_exp (`Choice_open (`Module _)) -> (Expr.Var "module", (curr_loc, []))
   | `Prim_exp (`Paren_exp (_, e, _)) -> expr ?exit_loc ~curr_loc ~exc e
   | `Prim_exp (`Obj_crea_exp (`Unqu_obj_crea_exp unqualified))
   | `Prim_exp (`Obj_crea_exp (`Prim_exp_DOT_unqu_obj_crea_exp (_, _, unqualified))) ->
@@ -263,7 +268,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let field =
         match field with
         | `Id (_, fld) -> fld
-        | `Choice_open _ -> unimplemented "`Choice_open" "DIAGNOSTIC MODE PLACEHOLDER"
+        | `Choice_open (`Open _) -> "open"
+        | `Choice_open (`Module _) -> "module"
         | `This _ -> "this"
       in
       (Expr.Deref { rcvr; field }, aux_info)
@@ -276,8 +282,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       let rcvr, meth, (curr_loc, rcvr_intermediates) =
         match rcvr_and_meth with
         | `Choice_id (`Id (_, meth)) -> ("this", meth, (curr_loc, []))
-        | `Choice_id (`Choice_open _) ->
-            unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, []))
+        | `Choice_id (`Choice_open (`Open _)) -> ("this", "open", (curr_loc, []))
+        | `Choice_id (`Choice_open (`Module _)) -> ("this", "module", (curr_loc, []))
         | `Choice_prim_exp_DOT_opt_super_DOT_opt_type_args_choice_id
             (rcvr, _dot, super, _typeargs, meth) -> (
             let rcvr, aux_info =
@@ -290,8 +296,8 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
             in
             match meth with
             | `Id (_, meth_name) -> (rcvr, meth_name, aux_info)
-            | `Choice_open _ ->
-                unimplemented "`Choice_open" ("PLACEHOLDER", "PLACEHOLDER", (curr_loc, [])))
+            | `Choice_open (`Open _) -> (rcvr, "open", aux_info)
+            | `Choice_open (`Module _) -> (rcvr, "module", aux_info))
       in
       let args = match args with Some (e, es) -> e :: List.map ~f:snd es | None -> [] in
       let actuals, (curr_loc, arg_intermediates) =
@@ -440,8 +446,9 @@ let rec expr_of_nonempty_list ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) :
       (e, (l, intermediate_stmts @ stmts))
 
 let ident_of_var_declarator : CST.variable_declarator -> string = function
-  | (`Id (_, ident), _), _initializer -> ident
-  | _ -> unimplemented "variable_declarator" "DIAGNOSTIC MODE PLACEHOLDER"
+  | (`Id (_, ident), _), _ -> ident
+  | (`Choice_open (`Open _), _), _ -> "open"
+  | (`Choice_open (`Module _), _), _ -> "module"
 
 let rec declarations stmts : string list =
   let open List.Monad_infix in
@@ -659,7 +666,7 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
         | (`Id (_, lhs), _), Some (_, `Array_init lit) ->
             let rhs, intermediate_stmts = array_lit ~curr_loc ~exc lit in
             (Stmt.Assign { lhs; rhs }, intermediate_stmts)
-        | (`Choice_open _, _), _ -> unimplemented "`Choice_open" (Stmt.Skip, (curr_loc, []))
+        | (`Choice_open _, _), _ -> (Stmt.Skip, (curr_loc, []))
       in
       let rec edges_of_decls curr_loc = function
         | [] -> failwith "unreachable"
@@ -1061,7 +1068,6 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
         | Some (`Choice_prim_exp_DOT_opt_type_args_super _, _, _) ->
             unimplemented "`Choice_prim_exp_DOT_opt_type_args_super" (loc_map, [])
       in
-
       Some (loc_map, edges, fn)
 
 let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~imports
@@ -1125,13 +1131,22 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             | None -> acc)
         | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ -> acc
         | `Enum_decl _ -> unimplemented "`Enum_decl" acc
-        | `Static_init _ -> unimplemented "`Static_init" acc
+        | `Static_init (_, (_, block, _)) ->
+            let entry = Cfg.Loc.fresh () in
+            let exit = Cfg.Loc.fresh () in
+            let exc_exit = Cfg.Loc.fresh () in
+            let method_id : Method_id.t =
+              { package; class_name; method_name = "<staticinit>"; static = true; arg_types = [] }
+            in
+            let fn : Cfg.Fn.t =
+              { method_id; formals = []; locals = declarations block; entry; exit; exc_exit }
+            in
+            let loc_map, edges =
+              edge_list_of_stmt_list method_id acc.loc_map ~entry ~exit ~ret:exit ~exc:exc_exit
+                block
+            in
+            { cfgs = Cfg.add_fn fn ~edges acc.cfgs; loc_map; fields = acc.fields; cha = acc.cha }
         | `Record_decl _ -> unimplemented "`Record_decl" acc)
-
-(* | d ->
-     failwith
-       (Format.asprintf "unrecognized class body declaration: %a" Sexp.pp
-          (CST.sexp_of_class_body_declaration d)))*)
 
 let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.program) :
     prgm_parse_result =
@@ -1143,7 +1158,7 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
     | Some n ->
         let rec list_of_name = function
           | `Id (_, ident) -> [ ident ]
-          | `Choice_open _ -> unimplemented "`Choice_open" []
+          | `Choice_open _ -> unimplemented "`Choice_open in package decl" []
           | `Scoped_id (nm, _dot, (_, ident)) -> list_of_name nm @ [ ident ]
         in
         list_of_name n
@@ -1158,12 +1173,12 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
           let rec quals = function
             | `Id (_, ident) -> [ ident ]
             | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
-            | `Choice_open _ -> unimplemented "`Choice_open" []
+            | `Choice_open _ -> []
           in
           match nm with
           | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
           | `Scoped_id (q, _, (_, ident)) -> Map.set acc ~key:ident ~data:(List.rev (quals q))
-          | `Choice_open _ -> unimplemented "`Choice_open" acc)
+          | `Choice_open _ -> acc)
       | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) ->
           Map.set acc ~key:class_name ~data:package
       | _ -> acc)
