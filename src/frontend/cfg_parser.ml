@@ -637,6 +637,10 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           ~cont body
       in
       (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
+  | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, _var), Some _dims), _, _exp, _, _body) ->
+      unimplemented "`Enha_for_stmt var with dims" (loc_map, [])
+  | `Enha_for_stmt (_, _, _mods, _type, (`Choice_open _, None), _, _exp, _, _body) ->
+      unimplemented "`Enha_for_stmt on open/module" (loc_map, [])
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
   | `Exp_stmt (e, _) ->
       let _value_of_e, (intermediate_loc, intermediate_stmts) =
