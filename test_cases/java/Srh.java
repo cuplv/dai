@@ -1,3 +1,4 @@
+package foo.bar;
 // Example adapated from Sagiv,Reps,Horwitz '96
 // "Precise interprocedural dataflow analysis with applications to constant propagation"
 public class Srh {
