@@ -403,25 +403,31 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           let next_loc = Cfg.Loc.fresh () in
           let end_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
           let result = fresh_tmp_var () in
-          let update_stmt =
+          let update_edges =
             match heap_loc with
-            | Expr.Deref { rcvr; field } -> Stmt.Write { rcvr; field; rhs = Expr.Var result }
-            | Expr.Array_access { rcvr = Expr.Var arr; idx } ->
-                Stmt.Array_write { rcvr = arr; idx; rhs = Expr.Var result }
+            | Expr.Deref { rcvr; field } ->
+                [
+                  ( curr_loc,
+                    next_loc,
+                    Stmt.Assign
+                      { lhs = result; rhs = Expr.binop heap_loc op (Expr.Lit (Lit.Int 1L)) } );
+                  (next_loc, end_loc, Stmt.Write { rcvr; field; rhs = Expr.Var result });
+                ]
+            | Expr.Array_access { rcvr = Expr.Var rcvr; idx = Expr.Var idx } ->
+                [
+                  ( curr_loc,
+                    next_loc,
+                    Stmt.Assign
+                      { lhs = result; rhs = Expr.binop heap_loc op (Expr.Lit (Lit.Int 1L)) } );
+                  ( next_loc,
+                    end_loc,
+                    Stmt.Array_write { rcvr; idx = Expr.Var idx; rhs = Expr.Var result } );
+                ]
             | Expr.Array_access _ ->
-                unimplemented "Unary_increment_or_decrement_of_nonvar_array_access" Stmt.Skip
+                unimplemented "Unary_increment_or_decrement_of_nonvar_array_or_idx" []
             | _ -> failwith "unreachable"
           in
-          let update_edges =
-            [
-              ( curr_loc,
-                next_loc,
-                Stmt.Assign { lhs = result; rhs = Expr.binop heap_loc op (Expr.Lit (Lit.Int 1L)) }
-              );
-              (next_loc, end_loc, update_stmt);
-            ]
-          in
-          if is_pre then (Expr.Var result, (next_loc, update_edges @ intermediates))
+          if is_pre then (Expr.Var result, (end_loc, update_edges @ intermediates))
           else
             let inverse_op =
               match op with
@@ -430,7 +436,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
               | _ -> failwith "unreachable"
             in
             ( Expr.binop (Expr.Var result) inverse_op (Expr.Lit (Lit.Int 1L)),
-              (next_loc, update_edges @ intermediates) )
+              (end_loc, update_edges @ intermediates) )
       | _ ->
           if is_pre then (Expr.binop e op (Expr.Lit (Lit.Int 1L)), (curr_loc, intermediates))
           else (e, (curr_loc, intermediates)))
