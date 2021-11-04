@@ -33,9 +33,10 @@ let analyze =
       in
       fun () ->
         let srcs = java_srcs src_dir in
-        Format.printf "Initializing DAI; java sources found:\n\t%a"
-          (List.pp ~pre:"" ~suf:"\n\n" "\n\t" String.pp)
-          srcs;
+        Format.printf "Initializing DAI; java src_dir: %s\n" src_dir;
+        (* Format.printf "Initializing DAI; java sources found:\n\t%a"
+           (List.pp ~pre:"" ~suf:"\n\n" "\n\t" String.pp)
+           srcs;*)
         let open Frontend in
         let open Result.Monad_infix in
         List.iter srcs ~f:(fun src ->
