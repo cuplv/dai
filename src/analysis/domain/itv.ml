@@ -392,7 +392,7 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
 
 let return ~callee:_ ~caller:_ ~callsite ~caller_state ~return_state ~fields:_ =
   match callsite with
-  | Ast.Stmt.Call { lhs; _ } ->
+  | Ast.Stmt.Call { lhs = Some lhs; _ } ->
       let man = get_man () in
       let return_val =
         let retvar = Var.of_string Cfg.retvar in
@@ -401,6 +401,7 @@ let return ~callee:_ ~caller:_ ~callsite ~caller_state ~return_state ~fields:_ =
         else Interval.top
       in
       assign caller_state (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+  | Ast.Stmt.Call _ -> caller_state
   | Ast.Stmt.Exceptional_call _ -> failwith "todo: exceptional Itv#return"
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 

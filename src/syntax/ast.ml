@@ -159,7 +159,7 @@ module Stmt = struct
     | Assign of { lhs : string; rhs : Expr.t }
     | Assume of Expr.t
     | Call of {
-        lhs : string;
+        lhs : string option;
         rcvr : string;
         meth : string;
         actuals : Expr.t list;
@@ -177,8 +177,10 @@ module Stmt = struct
         Format.fprintf fs "%s[%a] := %a" rcvr Expr.pp idx Expr.pp rhs
     | Assign { lhs; rhs } -> Format.fprintf fs "%s := %a" lhs Expr.pp rhs
     | Assume e -> Format.fprintf fs "assume %a" Expr.pp e
-    | Call { lhs; rcvr; meth; actuals; alloc_site = _ } ->
+    | Call { lhs = Some lhs; rcvr; meth; actuals; alloc_site = _ } ->
         Format.fprintf fs "%s := %s.%s(%a)" lhs rcvr meth (List.pp ", " Expr.pp) actuals
+    | Call { lhs = None; rcvr; meth; actuals; alloc_site = _ } ->
+        Format.fprintf fs "%s.%s(%a)" rcvr meth (List.pp ", " Expr.pp) actuals
     | Exceptional_call { rcvr; meth; actuals } ->
         Format.fprintf fs "exc-return %s.%s(%a)" rcvr meth (List.pp ", " Expr.pp) actuals
     | Expr e -> Expr.pp fs e
@@ -197,7 +199,7 @@ module Stmt = struct
     | Skip -> String.Set.empty
     | Write { rcvr; field = _; rhs } -> String.Set.add (Expr.uses rhs) rcvr
 
-  let def = function Assign { lhs; _ } | Call { lhs; _ } -> Some lhs | _ -> None
+  let def = function Assign { lhs; _ } -> Some lhs | Call { lhs; _ } -> lhs | _ -> None
 
   let to_string stmt : string =
     Format.fprintf Format.str_formatter "%a" pp stmt;

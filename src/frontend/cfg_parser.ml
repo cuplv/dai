@@ -249,7 +249,7 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
           next_loc,
           Stmt.Call
             {
-              lhs;
+              lhs = Some lhs;
               rcvr = ctor_name;
               meth = "<init>";
               actuals;
@@ -309,7 +309,9 @@ let rec expr ?exit_loc ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) (cst : CST.exp
       in
       let lhs = fresh_tmp_var () in
       let next_loc = Option.value exit_loc ~default:(Cfg.Loc.fresh ()) in
-      let call = (curr_loc, next_loc, Stmt.Call { lhs; rcvr; meth; actuals; alloc_site = None }) in
+      let call =
+        (curr_loc, next_loc, Stmt.Call { lhs = Some lhs; rcvr; meth; actuals; alloc_site = None })
+      in
       let exc_call = (curr_loc, exc, Stmt.Exceptional_call { rcvr; meth; actuals }) in
       (Expr.Var lhs, (next_loc, (call :: exc_call :: rcvr_intermediates) @ arg_intermediates))
   | `Prim_exp (`Meth_ref _) -> unimplemented "`Meth_ref" placeholder_expr
@@ -445,13 +447,22 @@ let rec expr_of_nonempty_list ~(curr_loc : Cfg.Loc.t) ~(exc : Cfg.Loc.t) :
       expr_of_nonempty_list ~curr_loc:intermediate_loc ~exc es |> fun (e, (l, stmts)) ->
       (e, (l, intermediate_stmts @ stmts))
 
-let ident_of_var_declarator : CST.variable_declarator -> string = function
-  | (`Id (_, ident), _), _ -> ident
-  | (`Choice_open (`Open _), _), _ -> "open"
-  | (`Choice_open (`Module _), _), _ -> "module"
+let ident_of_var_declarator_id = function
+  | `Id (_, ident), _ -> ident
+  | `Choice_open (`Open _), _ -> "open"
+  | `Choice_open (`Module _), _ -> "module"
+
+let ident_of_var_declarator = fst >> ident_of_var_declarator_id
 
 let rec declarations stmts : string list =
   let open List.Monad_infix in
+  let decls_of_var_decl_id : CST.variable_declarator_id -> string list =
+    fst >> function `Id (_, x) -> [ x ] | _ -> []
+  in
+  let decls_of_catch_clause_list : CST.catch_clause list -> string list =
+    List.bind ~f:(fun (_, _, (_, _, var_decl_id), _, (_, blk, _)) ->
+        decls_of_var_decl_id var_decl_id @ declarations blk)
+  in
   let rec local_decls_of_stmt : CST.statement -> string list = function
     | `Assert_stmt _ -> []
     | `Blk (_, stmts, _) -> declarations stmts
@@ -486,8 +497,23 @@ let rec declarations stmts : string list =
             | _, _, `Blk (_, block_stmts, _) -> declarations block_stmts))
     | `Sync_stmt (_, _, (_, stmts, _)) -> declarations stmts
     | `Throw_stmt _ -> []
-    | `Try_stmt (_, (_, stmts, _), _) -> declarations stmts
-    | `Try_with_resous_stmt _ -> []
+    | `Try_stmt (_, (_, stmts, _), catches) ->
+        let catch_and_finally_decls =
+          match catches with
+          | `Rep1_catch_clause ccs -> decls_of_catch_clause_list ccs
+          | `Rep_catch_clause_fina_clause (ccs, (_, (_, fin_blk, _))) ->
+              decls_of_catch_clause_list ccs @ declarations fin_blk
+        in
+        catch_and_finally_decls @ declarations stmts
+    | `Try_with_resous_stmt (_, resource_spec, (_, blk, _), catches, opt_finally) ->
+        let rs = match resource_spec with _, r, rs, _, _ -> r :: List.map ~f:snd rs in
+        List.bind rs ~f:(function
+          | `Opt_modifs_unan_type_var_decl_id_EQ_exp (_, _, vdi, _, _) -> decls_of_var_decl_id vdi
+          | `Id (_, x) -> [ x ]
+          | _ -> [])
+        @ Option.fold opt_finally ~init:[] ~f:(fun _ (_, (_, fin_blk, _)) -> declarations fin_blk)
+        @ decls_of_catch_clause_list catches
+        @ declarations blk
     | `While_stmt (_, _, s) -> local_decls_of_stmt s
     | `Yield_stmt _ -> []
   in
@@ -574,15 +600,21 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           ( expr_exit,
             cond_entry,
             Ast.Stmt.Call
-              { lhs = iter; rcvr = expr; meth = "iterator"; actuals = []; alloc_site = None } );
+              { lhs = Some iter; rcvr = expr; meth = "iterator"; actuals = []; alloc_site = None }
+          );
           ( expr_exit,
             exc,
             Ast.Stmt.Exceptional_call { rcvr = expr; meth = "iterator"; actuals = [] } );
           ( cond_entry,
             cond_exit,
             Ast.Stmt.Call
-              { lhs = cond_result; rcvr = iter; meth = "hasNext"; actuals = []; alloc_site = None }
-          );
+              {
+                lhs = Some cond_result;
+                rcvr = iter;
+                meth = "hasNext";
+                actuals = [];
+                alloc_site = None;
+              } );
           ( cond_entry,
             exc,
             Ast.Stmt.Exceptional_call { rcvr = iter; meth = "hasNext"; actuals = [] } );
@@ -590,8 +622,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           (cond_exit, exit, Stmt.Assume (Expr.Unop { op = Unop.Not; e = Expr.Var cond_result }));
           ( update_entry,
             body_entry,
-            Ast.Stmt.Call { lhs = var; rcvr = iter; meth = "next"; actuals = []; alloc_site = None }
-          );
+            Ast.Stmt.Call
+              { lhs = Some var; rcvr = iter; meth = "next"; actuals = []; alloc_site = None } );
           (update_entry, exc, Ast.Stmt.Exceptional_call { rcvr = iter; meth = "next"; actuals = [] });
         ]
       in
@@ -799,27 +831,97 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
       in
       (loc_map, try_edges @ catch_edges)
   | `Try_stmt
-      ( _,
-        (_, try_block, _),
-        `Rep_catch_clause_fina_clause (catch_clauses, (_, (_, finally_block, _))) ) ->
-      let finally_entry_loc = Cfg.Loc.fresh () in
-      let finally_exit_loc = Cfg.Loc.fresh () in
+      (_, (_, try_block, _), `Rep_catch_clause_fina_clause (catch_clauses, (_, (_, f_blk, _)))) ->
+      let f_blk_entry = Cfg.Loc.fresh () in
+      let f_blk_exit = Cfg.Loc.fresh () in
       let loc_map, catch_loc, catch_edges =
-        build_catch_cfg catch_clauses loc_map method_id ~exit:finally_entry_loc ~ret
-          ~exc:finally_entry_loc ~brk:(None, String.Map.empty) ~cont:(None, String.Map.empty)
+        build_catch_cfg catch_clauses loc_map method_id ~exit:f_blk_entry ~ret ~exc:f_blk_entry
+          ~brk:(None, String.Map.empty) ~cont:(None, String.Map.empty)
       in
       let loc_map, try_edges =
-        edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret ~exc:catch_loc try_block
+        edge_list_of_stmt_list method_id loc_map ~entry ~exit:f_blk_entry ~ret ~exc:catch_loc
+          try_block
       in
       let loc_map, finally_edges =
-        edge_list_of_stmt_list method_id loc_map ~entry:finally_entry_loc ~exit:finally_exit_loc
-          ~ret ~exc ~brk ~cont finally_block
+        edge_list_of_stmt_list method_id loc_map ~entry:f_blk_entry ~exit:f_blk_exit ~ret ~exc ~brk
+          ~cont f_blk
+      in
+      let f_blk_egress_edges =
+        let has_uncaught_exc : edge list -> bool =
+          List.exists ~f:(function
+            | _, dst, Stmt.Assign { lhs; rhs = _ } ->
+                Cfg.Loc.equal dst f_blk_entry && lhs = Cfg.exc_retvar
+            | _ -> false)
+        in
+        if has_uncaught_exc try_edges || has_uncaught_exc catch_edges then
+          [ (f_blk_exit, exit, Stmt.Skip); (f_blk_exit, exc, Stmt.Skip) ]
+        else [ (f_blk_exit, exit, Stmt.Skip) ]
+      in
+      (loc_map, List.concat [ f_blk_egress_edges; try_edges; catch_edges; finally_edges ])
+  | `Try_with_resous_stmt (_, resource_spec, (_, blk, _), catches, opt_finally) ->
+      let rs = match resource_spec with _, r, rs, _, _ -> r :: List.map ~f:snd rs in
+      let try_entry_loc, resource_decl_edges, resource_vars =
+        (* NOTE: resource_exprs are in reverse order here, processed in reverse below *)
+        List.fold rs ~init:(entry, [], []) ~f:(fun (curr_loc, edges, vars) -> function
+          | `Field_access _ as fa ->
+              let var, (curr_loc, new_edges) = expr_as_var ~curr_loc ~exc (`Prim_exp fa) in
+              (curr_loc, new_edges @ edges, var :: vars)
+          | `Id (_, ident) -> (curr_loc, edges, ident :: vars)
+          | `Opt_modifs_unan_type_var_decl_id_EQ_exp (_, _, vdi, _, rhs) ->
+              let lhs = ident_of_var_declarator_id vdi in
+              let rhs, (curr_loc, rhs_edges) = expr ~curr_loc ~exc rhs in
+              let next_loc = Cfg.Loc.fresh () in
+              let binding = (curr_loc, next_loc, Stmt.Assign { lhs; rhs }) in
+              (next_loc, (binding :: rhs_edges) @ edges, lhs :: vars))
+      in
+      let close_entry = Cfg.Loc.fresh () in
+      let f_blk_entry, f_blk_exit, (loc_map, finally_edges) =
+        (match opt_finally with
+        | Some (_, (_, f_blk, _)) ->
+            let f_blk_entry = Cfg.Loc.fresh () in
+            let f_blk_exit = Cfg.Loc.fresh () in
+            ( f_blk_entry,
+              f_blk_exit,
+              edge_list_of_stmt_list method_id loc_map f_blk ~entry:f_blk_entry ~exit:f_blk_exit
+                ~ret ~exc ~brk ~cont )
+        | None -> (exit, exit, (loc_map, [])))
+        |> fun init ->
+        List.fold resource_vars ~init ~f:(fun (entry, exit, (lm, edges)) resource ->
+            let new_entry = Cfg.Loc.fresh () in
+            let close_resource_edge =
+              ( new_entry,
+                entry,
+                Stmt.Call
+                  { lhs = None; rcvr = resource; meth = "close"; actuals = []; alloc_site = None }
+              )
+            in
+            (new_entry, exit, (lm, close_resource_edge :: edges)))
+      in
+      let loc_map, catch_loc, catch_edges =
+        let brk, cont =
+          if Option.is_some opt_finally then ((None, String.Map.empty), (None, String.Map.empty))
+          else (brk, cont)
+        in
+        build_catch_cfg catches loc_map method_id ~exit:f_blk_entry ~ret ~exc:f_blk_entry ~brk ~cont
+      in
+      let loc_map, try_edges =
+        edge_list_of_stmt_list method_id loc_map ~entry:try_entry_loc ~exit:close_entry
+          ~exc:catch_loc ~ret:close_entry blk
+      in
+      let f_blk_egress_edges =
+        let has_uncaught_exc : edge list -> bool =
+          List.exists ~f:(function
+            | _, dst, Stmt.Assign { lhs; rhs = _ } ->
+                Cfg.Loc.equal dst f_blk_entry && lhs = Cfg.exc_retvar
+            | _ -> false)
+        in
+        if Option.is_some opt_finally && (has_uncaught_exc try_edges || has_uncaught_exc catch_edges)
+        then [ (f_blk_exit, exit, Stmt.Skip); (f_blk_exit, exc, Stmt.Skip) ]
+        else [ (f_blk_exit, exit, Stmt.Skip) ]
       in
       ( loc_map,
-        (* control flow can go to either normal or exceptional exit from finally block*)
-        ((finally_exit_loc, exit, Stmt.Skip) :: (finally_exit_loc, exc, Stmt.Skip) :: try_edges)
-        @ catch_edges @ finally_edges )
-  | `Try_with_resous_stmt _ -> unimplemented "`Try_with_resous_stmt" (loc_map, [])
+        List.concat
+          [ resource_decl_edges; try_edges; catch_edges; finally_edges; f_blk_egress_edges ] )
   | `While_stmt (_, (_, cond, _), body) ->
       let body_entry = Cfg.Loc.fresh () in
       let cond, (intermediate_loc, cond_intermediates) = expr ~curr_loc:entry ~exc cond in
@@ -1052,7 +1154,7 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
                 post_invocation_loc,
                 Ast.Stmt.Call
                   {
-                    lhs = "this";
+                    lhs = Some "this";
                     rcvr;
                     meth = "<init>";
                     actuals;
@@ -1301,4 +1403,13 @@ let%test "labeled breaks" =
   $> (function
        | Error _ -> ()
        | Ok { cfgs; _ } -> Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "break.dot") cfgs)
+  |> Result.is_ok
+
+let%test "try-with-resources" =
+  let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/TryWithResources.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } ->
+           Cfg.dump_dot_interproc ~filename:(abs_of_rel_path "trywithresources.dot") cfgs)
   |> Result.is_ok

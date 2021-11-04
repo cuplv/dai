@@ -397,7 +397,10 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
       *)
       let itv =
         (* (1) *)
-        (Itv.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+        ((match lhs with
+         | Some lhs ->
+             Itv.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+         | None -> caller_itv)
         |>
         match Map.find return_amap Cfg.retvar with
         | None -> Fn.id
@@ -439,13 +442,15 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
         (match rcvr_aaddr with
         | `This | `Static -> caller_amap
         | `AAddr rcvr_aaddr ->
-            if String.equal "<init>" meth then Addr_map.set caller_amap ~key:lhs ~aaddr:rcvr_aaddr
+            if String.equal "<init>" meth && Option.is_some lhs then
+              Addr_map.set caller_amap ~key:(Option.value_exn lhs) ~aaddr:rcvr_aaddr
             else Addr_map.set caller_amap ~key:rcvr ~aaddr:rcvr_aaddr)
         (* (2) *)
         |>
         match Map.find return_amap Cfg.retvar with
-        | None -> Fn.id
-        | Some retval_aaddr -> Addr_map.set ~key:lhs ~aaddr:retval_aaddr
+        | Some retval_aaddr when Option.is_some lhs ->
+            Addr_map.set ~key:(Option.value_exn lhs) ~aaddr:retval_aaddr
+        | _ -> Fn.id
       in
       (amap, itv)
   | Ast.Stmt.Exceptional_call _ -> failwith "todo: exceptional Array_bounds#return"
@@ -461,10 +466,13 @@ let approximate_missing_callee ~caller_state ~callsite =
   @@
   match callsite with
   (* unknown constructor -- just bind the address and ignore the rest *)
-  | Ast.Stmt.Call { lhs; rcvr = _; meth = _; actuals = _; alloc_site = Some a } ->
+  | Ast.Stmt.Call { lhs = Some lhs; rcvr = _; meth = _; actuals = _; alloc_site = Some a } ->
       let caller_am, caller_itv = caller_state in
       let am = Addr_map.set caller_am ~key:lhs ~aaddr:(Addr.Abstract.singleton a) in
       (am, caller_itv)
+  (* unknown constructor, value being discarded -- no-op*)
+  | Ast.Stmt.Call { lhs = None; alloc_site = Some _; _ } -> caller_state
+  (* call to assumed-no-op library methods -- no-op*)
   | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals = _; alloc_site = _ }
     when Set.mem noop_library_methods meth ->
       caller_state
