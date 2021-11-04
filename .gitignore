@@ -2,6 +2,7 @@ _build
 **/.merlin
 out/*
 run_d1a_experiment
-*.dot
-*.png
+**/*.dot
+**/*.png
+**/*.jar
 _bugswarm
