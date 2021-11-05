@@ -114,6 +114,8 @@ module Expr = struct
     | Array_access of { rcvr : t; idx : t }
     | Array_literal of { elts : t list; alloc_site : Alloc_site.t }
     | Array_create of { elt_type : string; size : t; alloc_site : Alloc_site.t }
+    | Method_ref of { rcvr : string; meth : string }
+    | Class_lit of { name : string }
   [@@deriving equal, compare, hash, sexp_of]
 
   let rec pp fs e =
@@ -128,6 +130,8 @@ module Expr = struct
         Format.fprintf fs "%a%@%a" (List.pp ", " ~pre:"{" ~suf:"}" pp) elts Alloc_site.pp alloc_site
     | Array_create { elt_type; size; alloc_site } ->
         Format.fprintf fs "new@%a %a[%a]" Alloc_site.pp alloc_site String.pp elt_type pp size
+    | Method_ref { rcvr; meth } -> Format.fprintf fs "%s::%s" rcvr meth
+    | Class_lit { name } -> Format.fprintf fs "%s.class" name
 
   let rec uses =
     let uses_in_list exprs =

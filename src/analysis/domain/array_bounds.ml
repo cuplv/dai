@@ -234,7 +234,8 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
     | Expr.Binop { l; op = _; r } -> expr_derefs l @ expr_derefs r
     | Expr.Unop { op = _; e } -> expr_derefs e
     | Expr.Array_literal { elts; alloc_site = _ } -> List.bind elts ~f:expr_derefs
-    | Expr.Array_access _ | Expr.Array_create _ -> failwith "todo"
+    | Expr.Array_access _ | Expr.Array_create _ | Expr.Method_ref _ | Expr.Class_lit _ ->
+        failwith "todo"
   in
   function
   | Assign { lhs = _; rhs } -> expr_derefs rhs

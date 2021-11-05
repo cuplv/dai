@@ -74,8 +74,9 @@ end = struct
     | Expr.Lit l -> Val.of_lit l
     | Expr.Binop { l; op; r } -> Val.eval_binop (eval_expr env l) op (eval_expr env r)
     | Expr.Unop { op; e } -> Val.eval_unop op (eval_expr env e)
-    | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _ ->
-        failwith "Arrays and Objects not handled by this basic environment functor"
+    | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _
+    | Expr.Method_ref _ | Expr.Class_lit _ ->
+        failwith "expression not handled by this basic environment functor"
 
   let interpret =
     let mfn =
@@ -227,7 +228,8 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
                 None heap
               |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
                                         | _ -> None )*)
-    | Expr.Array_access _ | Expr.Array_create _ -> failwith "todo"
+    | Expr.Array_access _ | Expr.Array_create _ | Expr.Method_ref _ | Expr.Class_lit _ ->
+        failwith "todo"
     | Expr.Array_literal _ ->
         (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
            eval_expr so we can store elements there and then return the addr

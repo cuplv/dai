@@ -69,6 +69,8 @@ let rec string_of_unannotated_type = function
   | `Choice_void_type st -> string_of_simple_type st
   | `Array_type (ut, _) -> string_of_unannotated_type ut ^ "[]"
 
+let string_of_type = function `Unan_type ut | `Anno_type (_, ut) -> string_of_unannotated_type ut
+
 (** Convert an expression concrete syntax tree to an expression in our IR, along with potentially some preceding statements for any function invocations and assignments therein, and a shifted current program location to accomodate those intermediate statements.
     That is, 
       * if `cst` represents a simple expression with no function invocations or assignments, return value is (<that expression in our IR>, (curr_loc,[]))
@@ -224,7 +226,8 @@ let rec expr ?exit_loc ~(curr_loc : Loc.t) ~(exc : Loc.t) (cst : CST.expression)
           | `Null_lit _ -> Lit.Null)
       in
       (e, (curr_loc, []))
-  | `Prim_exp (`Class_lit _) -> unimplemented "`Class_lit" placeholder_expr
+  | `Prim_exp (`Class_lit (typ, _, _)) ->
+      (Expr.Class_lit { name = string_of_unannotated_type typ }, (curr_loc, []))
   | `Prim_exp (`This _) -> (Expr.Var "this", (curr_loc, []))
   | `Prim_exp (`Id (_, ident)) -> (Expr.Var ident, (curr_loc, []))
   | `Prim_exp (`Choice_open (`Open _)) -> (Expr.Var "open", (curr_loc, []))
@@ -315,7 +318,14 @@ let rec expr ?exit_loc ~(curr_loc : Loc.t) ~(exc : Loc.t) (cst : CST.expression)
       in
       let exc_call = (curr_loc, exc, Stmt.Exceptional_call { rcvr; meth; actuals }) in
       (Expr.Var lhs, (next_loc, (call :: exc_call :: rcvr_intermediates) @ arg_intermediates))
-  | `Prim_exp (`Meth_ref _) -> unimplemented "`Meth_ref" placeholder_expr
+  | `Prim_exp (`Meth_ref (klass, _, _, meth)) -> (
+      let meth = match meth with `Id (_, id) -> id | `New _ -> "<init>" in
+      match klass with
+      | `Type ty -> (Expr.Method_ref { rcvr = string_of_type ty; meth }, (curr_loc, []))
+      | `Prim_exp _ as e ->
+          let rcvr, aux = expr_as_var ~curr_loc ~exc e in
+          (Expr.Method_ref { rcvr; meth }, aux)
+      | `Super _ -> (Expr.Method_ref { rcvr = "super"; meth }, (curr_loc, [])))
   | `Prim_exp (`Array_crea_exp (_new, simple_type, initial_array)) -> (
       match initial_array with
       | `Dimens_array_init (_, ai) -> array_lit ~curr_loc ~exc ai
@@ -1259,8 +1269,7 @@ let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~import
             | Some (loc_map, edges, fn) ->
                 { cfgs = add_fn fn ~edges acc.cfgs; loc_map; fields = acc.fields; cha = acc.cha }
             | None -> acc)
-        | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ -> acc
-        | `Enum_decl _ -> unimplemented "`Enum_decl" acc
+        | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ | `Enum_decl _ -> acc
         | `Static_init (_, (_, block, _)) ->
             let entry = Loc.fresh () in
             let exit = Loc.fresh () in
