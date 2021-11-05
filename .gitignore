@@ -5,4 +5,5 @@ run_d1a_experiment
 **/*.dot
 **/*.png
 **/*.jar
+**/*.class
 _bugswarm
