@@ -3,7 +3,11 @@ open Syntax
 open Tree_sitter_java
 
 type edit =
-  | Add_function of { method_id : Method_id.t; method_decl : CST.method_declaration }
+  | Add_function of {
+      method_id : Method_id.t;
+      decl : CST.class_body_declaration;
+      instance_init : CST.program option;
+    }
   | Delete_function of { method_id : Method_id.t }
   | Modify_function of { method_id : Method_id.t; new_header : CST.method_header }
   | Add_statements of { method_id : Method_id.t; at_loc : Cfg.Loc.t; stmts : CST.statement list }
@@ -21,13 +25,16 @@ type edit =
     }
   | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
 
+val method_id_of_edit : edit -> Method_id.t
+
 type t = edit list
 
 val pp : t Import.pp
 
 val btwn : Loc_map.t -> prev:Tree.java_cst -> next:Tree.java_cst -> t
 
-val apply : t -> Loc_map.t -> Cfg.t Cfg.Fn.Map.t -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
+val apply :
+  Class_hierarchy.t -> t -> Loc_map.t -> Cfg.t Cfg.Fn.Map.t -> Loc_map.t * Cfg.t Cfg.Fn.Map.t
 
 type cfg_edit_result = {
   cfg : Cfg.t;

@@ -2,7 +2,7 @@ open Domain
 open Frontend
 open Syntax
 
-(** Higher-order DAIG: per-procedure DAIGs interoperating to perform summary-based interprocedural analysis *)
+(** Demanded Summarization Graph : per-procedure DAIGs interoperating to perform summary-based interprocedural analysis *)
 module Make (Dom : Abstract.Dom) : sig
   module D : Daig.Sig with type absstate := Dom.t
   (** underlying intra-procedural DAIGs *)
@@ -15,14 +15,19 @@ module Make (Dom : Abstract.Dom) : sig
 
   type t
 
-  val apply_edit : diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
-  (** apply a syntactic edit to a HODAIG, updating a Loc_map in the process *)
+  val apply_edit : cha:Class_hierarchy.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
+  (** apply a syntactic edit to a DSG, updating a Loc_map in the process *)
 
   val init : cfgs:Cfg.t Cfg.Fn.Map.t -> t
-  (** construct the initial HODAIG for some collection of procedure CFGs *)
+  (** construct the initial DSG for some collection of procedure CFGs *)
+
+  val add_exn : cfgs:Cfg.t Cfg.Fn.Map.t -> t -> t
+  (** add some new cfgs to this DSG *)
+
+  val fns : t -> Cfg.Fn.t list
 
   val dump_dot : filename:string -> t -> unit
-  (** dump a DOT representation of a HODAIG to [filename] *)
+  (** dump a DOT representation of a DSG to [filename] *)
 
   val query :
     method_id:Method_id.t ->

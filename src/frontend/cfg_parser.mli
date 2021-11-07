@@ -1,3 +1,4 @@
+open Dai.Import
 open Tree_sitter_java
 open Syntax
 
@@ -10,6 +11,14 @@ type prgm_parse_result = {
   cha : Class_hierarchy.t;
 }
 
+val set_parse_result :
+  ?loc_map:Loc_map.t ->
+  ?cfgs:Cfg.t Cfg.Fn.Map.t ->
+  ?fields:Declared_fields.t ->
+  ?cha:Class_hierarchy.t ->
+  prgm_parse_result ->
+  prgm_parse_result
+
 val empty_parse_result : prgm_parse_result
 
 val print_diagnostic_results : unit -> unit
@@ -18,11 +27,17 @@ val of_java_cst : ?diagnostic:bool -> ?acc:prgm_parse_result -> CST.program -> p
 (** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided;
     run in [diagnostic] mode if that flag is set, printing information about our compatibility with the syntax of the given CST rather than failing fast on incompatible syntactic form*)
 
-val of_file_exn : ?acc:prgm_parse_result -> string -> prgm_parse_result
-(** Parse each method in a (java) source file to a CFG, adding to an [acc]umulator parse result if provided *)
+val parse_file_exn : ?acc:prgm_parse_result -> string -> prgm_parse_result
+(** Parse a (java) source file to CFGs, adding to an [acc]umulator parse result if provided *)
 
-val of_files : files:string list -> prgm_parse_result
-(** Parse each method in some (java) source [files] to a CFG *)
+val parse_files_exn : files:string list -> prgm_parse_result
+(** Parse some (java) source [files] to CFGs *)
+
+val parse_tree_exn : ?acc:prgm_parse_result -> string -> Tree.t -> prgm_parse_result
+(** Translate the given tree-sitter parse [tree] to CFGs, adding to an [acc]umulator parse result if provided*)
+
+val parse_trees_exn : trees:(string * Tree.t) list -> prgm_parse_result
+(** Translate the given tree-sitter parse [trees] to CFGs *)
 
 val expr :
   ?exit_loc:Cfg.Loc.t ->
@@ -41,6 +56,14 @@ val expr :
 
 *)
 
+val package_of_cst : CST.program -> string list
+
+val imports_of_cst : ?package:string list -> CST.program -> string list String.Map.t
+(** best-effort local name resolution:
+   * For each "import foo.bar.Baz;", [imports] maps "Baz" to ["foo" ; "bar"]
+   * For each "class Foo { ... }"  in this file, also map "Foo" to its [package] declaration
+   *)
+
 val of_method_decl :
   Loc_map.t ->
   ?package:string list ->
@@ -57,8 +80,15 @@ val of_constructor_decl :
   cha:Class_hierarchy.t ->
   CST.constructor_declarator ->
   CST.constructor_body ->
-  (Loc_map.t * edge list * Cfg.Fn.t) option
+  Loc_map.t * edge list * Cfg.Fn.t
 (** construct a constructor's CFG from its declaration's concrete syntax tree *)
+
+val of_static_init :
+  Loc_map.t ->
+  ?package:string list ->
+  class_name:string ->
+  CST.block ->
+  Loc_map.t * edge list * Cfg.Fn.t
 
 val types_of_formals : CST.formal_parameters -> string list
 (** simpler representation of a formal parameter list, for distinguishing overloading *)

@@ -115,8 +115,8 @@ let deserialize ~fns =
 let%test "procedures example" =
   let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
   let fns =
-    Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/Procedures.java") |> fun { cfgs; _ } ->
-    Map.keys cfgs
+    Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/Procedures.java")
+    |> fun { cfgs; _ } -> Map.keys cfgs
   in
   let cg : t = deserialize ~fns src_file in
   List.length (Map.keys cg) |> Int.equal 3

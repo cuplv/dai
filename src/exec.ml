@@ -2,23 +2,7 @@ open Dai
 open Import
 open Command
 open Command.Let_syntax
-
-let exclusions = [ "test"; "package-info.java"; "module-info.java" ]
-
-let rec java_srcs dir =
-  let open Sys in
-  let open Stdlib.Filename in
-  match is_directory dir with
-  | `No | `Unknown ->
-      failwith (Format.asprintf "can't get java sources from non-directory file %s" dir)
-  | `Yes ->
-      List.bind (ls_dir dir) ~f:(fun f ->
-          if List.mem exclusions f ~equal:String.equal then []
-          else
-            let file = dir ^ dir_sep ^ f in
-            if is_directory_exn file then java_srcs file
-            else if is_file_exn file && String.equal ".java" (extension f) then [ file ]
-            else [])
+module Analysis = Experiment_harness.DSG_wrapper (Domain.Array_bounds)
 
 let analyze =
   basic ~summary:"Interactively analyze a Java program using the DAI framework."
@@ -30,20 +14,52 @@ let analyze =
           ~doc:
             "Run in diagnostic mode, just printing information about frontend compatibility with \
              the given sources"
+      and next_dir =
+        flag "edit-dir" (optional string)
+          ~doc:
+            "<dir> run on two versions of a program for experiments, considering the source in \
+             [src_dir] as the pre-edit and [edit-dir] as the post-edit version"
+      and prev_cg =
+        flag "prev-callgraph" (optional string)
+          ~doc:"<cg> path toserialized callgraph for src_dir program version"
+      and next_cg =
+        flag "next-callgraph" (optional string)
+          ~doc:"<cg> path to serialized callgraph for next_dir program version"
       in
       fun () ->
-        let srcs = java_srcs src_dir in
+        let srcs = Experiment_harness.java_srcs src_dir in
         Format.printf "Initializing DAI; java src_dir: %s\n" src_dir;
-        (* Format.printf "Initializing DAI; java sources found:\n\t%a"
-           (List.pp ~pre:"" ~suf:"\n\n" "\n\t" String.pp)
-           srcs;*)
         let open Frontend in
         let open Result.Monad_infix in
-        List.iter srcs ~f:(fun src ->
-            let file = Src_file.of_file src in
-            Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file
-            >>| Cfg_parser.of_java_cst ~diagnostic
-            |> ignore);
-        if diagnostic then Cfg_parser.print_diagnostic_results () else ()]
+        if diagnostic && Option.is_some next_dir then
+          failwith "diagnostic mode only applies to a single program version"
+        else if diagnostic then (
+          List.iter srcs ~f:(fun src ->
+              let file = Src_file.of_file src in
+              Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file
+              >>| Cfg_parser.of_java_cst ~diagnostic
+              |> ignore);
+          Cfg_parser.print_diagnostic_results ())
+        else
+          match (next_dir, prev_cg, next_cg) with
+          | Some next_dir, Some prev_cg, Some next_cg ->
+              Format.printf
+                "Running basic debugging/testing setup: \n\
+                 \t(1) parse [src_dir] (initial_dsg.dot)\n\
+                 \t(2) issue query at program exit (queried_initial_dsg.dot)\n\
+                 \t(3) apply \"edit\" btwn src_dir/next_dir (edited_dsg.dot)\n\
+                 \t(4) issue query at program exit (queried_edited_dsg.dot)\n";
+              let open Analysis in
+              let initial_state = init src_dir prev_cg in
+              dump_dot initial_state.dsg ~filename:(abs_of_rel_path "initial_dsg.dot");
+              let queried_state = issue_exit_queries initial_state in
+              dump_dot queried_state.dsg ~filename:(abs_of_rel_path "queried_initial_dsg.dot");
+              let edited_state = update next_dir next_cg queried_state in
+              dump_dot edited_state.dsg ~filename:(abs_of_rel_path "edited_dsg.dot");
+              let queried_edited_state = issue_exit_queries edited_state in
+              dump_dot queried_edited_state.dsg ~filename:(abs_of_rel_path "queried_edited_dsg.dot")
+          | _ ->
+              Format.printf
+                "Please either specify diagnostic-mode or supply two program versions and callgraphs\n"]
 
 let () = Command.run ~version:"0.1" analyze

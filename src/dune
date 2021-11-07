@@ -8,7 +8,7 @@
 
 (executable
  (name exec)
- (modules exec)
- (libraries dai frontend)
+ (modules exec experiment_harness)
+ (libraries dai frontend analysis domain)
  (preprocess (pps ppx_let))
 )

@@ -12,6 +12,13 @@ type prgm_parse_result = {
   cha : Class_hierarchy.t;
 }
 
+let set_parse_result ?loc_map ?cfgs ?fields ?cha acc =
+  let loc_map = Option.value loc_map ~default:acc.loc_map in
+  let cfgs = Option.value cfgs ~default:acc.cfgs in
+  let fields = Option.value fields ~default:acc.fields in
+  let cha = Option.value cha ~default:acc.cha in
+  { loc_map; cfgs; fields; cha }
+
 let empty_parse_result =
   {
     loc_map = Loc_map.empty;
@@ -1154,8 +1161,7 @@ let of_method_decl loc_map ?(package = []) ~class_name (md : CST.method_declarat
   | _, (_, _, (`Choice_open _, _, _), _), _ -> None
   | _, _, `SEMI _ -> None
 
-let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
-    ~(cha : Class_hierarchy.t) cd body =
+let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init ~cha cd body =
   match (cd, body) with
   | (_tparams, _, formals), (_, explicit_constructor_invo, stmts, _) ->
       let entry = Loc.fresh () in
@@ -1218,117 +1224,136 @@ let of_constructor_decl loc_map ?(package = []) ~class_name ~instance_init
         | Some (`Choice_prim_exp_DOT_opt_type_args_super _, _, _) ->
             unimplemented "`Choice_prim_exp_DOT_opt_type_args_super" (loc_map, [])
       in
-      Some (loc_map, edges, fn)
+      (loc_map, edges, fn)
+
+let of_static_init loc_map ?(package = []) ~class_name (_, block, _) =
+  let entry = Loc.fresh () in
+  let exit = Loc.fresh () in
+  let exc_exit = Loc.fresh () in
+  let method_id : Method_id.t =
+    { package; class_name; method_name = "<staticinit>"; static = true; arg_types = [] }
+  in
+  let fn : Fn.t = { method_id; formals = []; locals = declarations block; entry; exit; exc_exit } in
+  let loc_map, edges =
+    edge_list_of_stmt_list method_id loc_map ~entry ~exit ~ret:exit ~exc:exc_exit block
+  in
+  (loc_map, edges, fn)
 
 let rec parse_class_decl ?(package = []) ?(containing_class_name = None) ~imports
     ~(acc : prgm_parse_result) : CST.class_declaration -> prgm_parse_result = function
-  | _modifiers, _, (_, class_name), _type_params, superclass, _superinterfaces, (_, decls, _) ->
+  | _modifiers, _, (_, class_name), _, _, _, (_, decls, _) ->
       let class_name =
         match containing_class_name with Some n -> n ^ "$" ^ class_name | None -> class_name
-      in
-      let cha =
-        match superclass with
-        | None -> acc.cha
-        | Some (_, `Unan_type ut) | Some (_, `Anno_type (_, ut)) -> (
-            let superclass_name = string_of_unannotated_type ut in
-            match Map.find imports superclass_name with
-            | Some super_package ->
-                Class_hierarchy.add ~package ~class_name ~super_package ~superclass_name acc.cha
-            | None -> acc.cha)
-      in
-      let fields =
-        let static, instance =
-          List.fold decls ~init:([], []) ~f:(fun (static, instance) -> function
-            | `Field_decl (mods, _, (v, vs), _) ->
-                let decls = List.(map ~f:ident_of_var_declarator (v :: map ~f:snd vs)) in
-                let is_static =
-                  Option.exists mods ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
-                in
-                if is_static then (decls @ static, instance) else (static, decls @ instance)
-            | _ -> (static, instance))
-          |> fun (s, i) -> String.Set.(of_list s, of_list i)
-        in
-        Declared_fields.add ~package ~class_name ~fields:{ static; instance } acc.fields
       in
       let instance_init =
         List.find_map decls ~f:(function `Blk (_, b, _) -> Some b | _ -> None)
       in
-      List.fold decls ~init:{ cfgs = acc.cfgs; fields; cha; loc_map = acc.loc_map } ~f:(fun acc ->
-        function
+      List.fold decls ~init:acc ~f:(fun acc -> function
         | `Meth_decl md -> (
             match of_method_decl acc.loc_map ~package ~class_name md with
             | Some (loc_map, edges, fn) ->
-                { cfgs = add_fn fn ~edges acc.cfgs; loc_map; fields = acc.fields; cha = acc.cha }
+                set_parse_result ~cfgs:(add_fn fn ~edges acc.cfgs) ~loc_map acc
             | None -> acc)
         | `Class_decl cd ->
             parse_class_decl cd ~package ~containing_class_name:(Some class_name) ~imports ~acc
-        | `Cons_decl (_, cd, _, body) -> (
-            match
-              of_constructor_decl acc.loc_map ~package ~class_name ~instance_init ~cha cd body
-            with
-            | Some (loc_map, edges, fn) ->
-                { cfgs = add_fn fn ~edges acc.cfgs; loc_map; fields = acc.fields; cha = acc.cha }
-            | None -> acc)
+        | `Cons_decl (_, cd, _, body) ->
+            let loc_map, edges, fn =
+              of_constructor_decl acc.loc_map ~package ~class_name ~instance_init ~cha:acc.cha cd
+                body
+            in
+            set_parse_result ~cfgs:(add_fn fn ~edges acc.cfgs) ~loc_map acc
         | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ | `Enum_decl _ -> acc
-        | `Static_init (_, (_, block, _)) ->
-            let entry = Loc.fresh () in
-            let exit = Loc.fresh () in
-            let exc_exit = Loc.fresh () in
-            let method_id : Method_id.t =
-              { package; class_name; method_name = "<staticinit>"; static = true; arg_types = [] }
-            in
-            let fn : Fn.t =
-              { method_id; formals = []; locals = declarations block; entry; exit; exc_exit }
-            in
-            let loc_map, edges =
-              edge_list_of_stmt_list method_id acc.loc_map ~entry ~exit ~ret:exit ~exc:exc_exit
-                block
-            in
-            { cfgs = add_fn fn ~edges acc.cfgs; loc_map; fields = acc.fields; cha = acc.cha }
+        | `Static_init (_, block) ->
+            let loc_map, edges, fn = of_static_init acc.loc_map ~package ~class_name block in
+            set_parse_result ~cfgs:(add_fn fn ~edges acc.cfgs) ~loc_map acc
         | `Record_decl _ -> unimplemented "`Record_decl" acc)
+
+let package_of_cst cst =
+  List.find_map cst ~f:(function `Decl (`Pack_decl (_, _, name, _)) -> Some name | _ -> None)
+  |> function
+  | None -> []
+  | Some n ->
+      let rec list_of_name = function
+        | `Id (_, ident) -> [ ident ]
+        | `Choice_open _ -> unimplemented "`Choice_open in package decl" []
+        | `Scoped_id (nm, _dot, (_, ident)) -> list_of_name nm @ [ ident ]
+      in
+      list_of_name n
+
+let imports_of_cst ?package cst : string list String.Map.t =
+  let package = match package with None -> package_of_cst cst | Some p -> p in
+  List.fold ~init:String.Map.empty cst ~f:(fun acc -> function
+    | `Decl (`Import_decl (_, _, nm, None, _)) -> (
+        let rec quals = function
+          | `Id (_, ident) -> [ ident ]
+          | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
+          | `Choice_open _ -> []
+        in
+        match nm with
+        | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
+        | `Scoped_id (q, _, (_, ident)) -> Map.set acc ~key:ident ~data:(List.rev (quals q))
+        | `Choice_open _ -> acc)
+    | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) ->
+        Map.set acc ~key:class_name ~data:package
+    | _ -> acc)
+
+let cha_and_fields_of_cst ?(acc_cha = Class_hierarchy.empty) ?(acc_fields = Declared_fields.empty)
+    ?(containing_class = None) cst =
+  let package = package_of_cst cst in
+  let imports = imports_of_cst ~package cst in
+  let rec impl init containing_class cst =
+    List.fold cst ~init ~f:(fun (acc_cha, acc_fields) -> function
+      | `Decl (`Class_decl (_, _, (_, name), _, superclass, _, (_, body, _))) ->
+          let class_name = match containing_class with Some n -> n ^ "$" ^ name | None -> name in
+          let cha =
+            match superclass with
+            | None -> acc_cha
+            | Some (_, typ) -> (
+                let superclass_name = string_of_type typ in
+                match Map.find imports superclass_name with
+                | Some super_package ->
+                    Class_hierarchy.add ~package ~class_name ~super_package ~superclass_name acc_cha
+                | None -> acc_cha)
+          in
+          let fields =
+            let static, instance =
+              List.fold body ~init:([], []) ~f:(fun (static, instance) -> function
+                | `Field_decl (mods, _, (v, vs), _) ->
+                    let decls = List.(map ~f:ident_of_var_declarator (v :: map ~f:snd vs)) in
+                    let is_static =
+                      Option.exists mods
+                        ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
+                    in
+                    if is_static then (decls @ static, instance) else (static, decls @ instance)
+                | _ -> (static, instance))
+              |> fun (s, i) -> String.Set.(of_list s, of_list i)
+            in
+            Declared_fields.add ~package ~class_name ~fields:{ static; instance } acc_fields
+          in
+          List.fold body ~init:(cha, fields) ~f:(fun acc -> function
+            | `Class_decl _ as cd -> impl acc (Some class_name) [ `Decl cd ] | _ -> acc)
+      | _ -> (acc_cha, acc_fields))
+  in
+  impl (acc_cha, acc_fields) containing_class cst |> fun (cha, fields) ->
+  (cha, Class_hierarchy.compute_closure ~cha ~fields)
 
 let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.program) :
     prgm_parse_result =
   diagnostic_mode := diagnostic;
-  let package =
-    List.find_map cst ~f:(function `Decl (`Pack_decl (_, _, name, _)) -> Some name | _ -> None)
-    |> function
-    | None -> []
-    | Some n ->
-        let rec list_of_name = function
-          | `Id (_, ident) -> [ ident ]
-          | `Choice_open _ -> unimplemented "`Choice_open in package decl" []
-          | `Scoped_id (nm, _dot, (_, ident)) -> list_of_name nm @ [ ident ]
-        in
-        list_of_name n
-  in
-  (* best-effort local name resolution:
-   * For each "import foo.bar.Baz;", [imports] maps "Baz" to ["foo" ; "bar"]
-   * For each "class Foo { ... }"  in this file, also map "Foo" to its [package] declaration
-   *)
-  let imports : string list String.Map.t =
-    List.fold ~init:String.Map.empty cst ~f:(fun acc -> function
-      | `Decl (`Import_decl (_, _, nm, None, _)) -> (
-          let rec quals = function
-            | `Id (_, ident) -> [ ident ]
-            | `Scoped_id (prefix, _, (_, ident)) -> ident :: quals prefix
-            | `Choice_open _ -> []
-          in
-          match nm with
-          | `Id (_, ident) -> Map.set acc ~key:ident ~data:[]
-          | `Scoped_id (q, _, (_, ident)) -> Map.set acc ~key:ident ~data:(List.rev (quals q))
-          | `Choice_open _ -> acc)
-      | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, _)) ->
-          Map.set acc ~key:class_name ~data:package
-      | _ -> acc)
-  in
+  let package = package_of_cst cst in
+  let imports = imports_of_cst ~package cst in
+  let cha, fields = cha_and_fields_of_cst ~acc_cha:acc.cha ~acc_fields:acc.fields cst in
+  let acc = set_parse_result ~cha ~fields acc in
   List.fold cst ~init:acc ~f:(fun acc -> function
     | `Decl (`Class_decl cd) -> parse_class_decl cd ~package ~acc ~imports
-    | `Decl (`Enum_decl _) | `Decl (`Import_decl _) | `Decl (`Inte_decl _) | `Decl (`Pack_decl _) ->
+    | `Decl (`Anno_type_decl _)
+    | `SEMI _
+    | `Decl (`Enum_decl _)
+    | `Decl (`Import_decl _)
+    | `Decl (`Inte_decl _)
+    | `Decl (`Pack_decl _) ->
         acc
     | `Decl (`Module_decl _) -> unimplemented "`Module_decl" acc
-    | `Decl (`Anno_type_decl _) -> acc
-    | `SEMI _ -> acc
     | stmt ->
         let rec first_atom = function
           | Sexp.Atom a -> a
@@ -1337,20 +1362,30 @@ let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.pro
         in
         unimplemented (first_atom (CST.sexp_of_statement stmt) ^ "-at-top-level") acc)
 
-open Result.Monad_infix
-
-let of_file_exn ?(acc = empty_parse_result) filename =
+let parse_file_exn ?(acc = empty_parse_result) filename =
   let file = Src_file.of_file filename in
-  let tree = Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file in
+  let tree = Result.bind (Tree.parse ~old_tree:None ~file) ~f:(Tree.as_java_cst file) in
   match tree with
-  | Ok tree ->
-      let { loc_map; cfgs; fields; cha } = of_java_cst ~acc tree in
-      let fields = Class_hierarchy.compute_closure ~cha ~fields in
-      { loc_map; cfgs; fields; cha }
+  | Ok tree -> of_java_cst ~acc tree
   | Error _e -> failwith @@ "parse error in " ^ filename
 
-let of_files ~files =
-  List.fold files ~init:empty_parse_result ~f:(fun acc file -> of_file_exn ~acc file)
+let parse_tree_exn ?(acc = empty_parse_result) filename tree =
+  let file = Src_file.of_file filename in
+  let cst =
+    match Tree.as_java_cst file tree with
+    | Ok cst -> cst
+    | _ -> failwith ("parse error in " ^ filename)
+  in
+  of_java_cst ~acc cst
+
+let parse_trees_exn ~trees =
+  List.fold trees ~init:empty_parse_result ~f:(fun acc (file, tree) ->
+      parse_tree_exn ~acc file tree)
+
+open Result.Monad_infix
+
+let parse_files_exn ~files =
+  List.fold files ~init:empty_parse_result ~f:(fun acc file -> parse_file_exn ~acc file)
 
 let%test "hello world program" =
   let file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/HelloWorld.java" in

@@ -3,7 +3,11 @@ open Syntax
 open Tree_sitter_java
 
 type edit =
-  | Add_function of { method_id : Method_id.t; method_decl : CST.method_declaration }
+  | Add_function of {
+      method_id : Method_id.t;
+      decl : CST.class_body_declaration;
+      instance_init : CST.program option;
+    }
   | Delete_function of { method_id : Method_id.t }
   | Modify_function of { method_id : Method_id.t; new_header : CST.method_header }
   | Add_statements of { method_id : Method_id.t; at_loc : Cfg.Loc.t; stmts : CST.statement list }
@@ -21,10 +25,20 @@ type edit =
     }
   | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
 
+let method_id_of_edit = function
+  | Add_function { method_id; _ }
+  | Delete_function { method_id; _ }
+  | Modify_function { method_id; _ }
+  | Add_statements { method_id; _ }
+  | Modify_statements { method_id; _ }
+  | Modify_header { method_id; _ }
+  | Delete_statements { method_id; _ } ->
+      method_id
+
 type t = edit list
 
 let pp_edit fs = function
-  | Add_function { method_id; method_decl = _ } ->
+  | Add_function { method_id; decl = _; instance_init = _ } ->
       Format.fprintf fs "(Add function %a)" Method_id.pp method_id
   | Delete_function { method_id } -> Format.fprintf fs "(Delete function %a)" Method_id.pp method_id
   | Modify_function { method_id; new_header = _ } ->
@@ -209,44 +223,101 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
     | Same _ -> acc_edits
     | Unified _ -> failwith "Unrecognized diff type: \"Unified\"")
 
-let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
-  let open List.Monad_infix in
-  let rec method_decls_by_id ?(package = []) ?(parent_class = None) :
-      CST.statement -> (Method_id.t * CST.method_declaration) list =
-    let parent_class_prefix = match parent_class with Some n -> n ^ "#" | None -> "" in
-    function
-    | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, (_, body_decls, _))) ->
-        List.fold body_decls ~init:[] ~f:(fun acc -> function
-          | `Meth_decl ((modifiers, (_, _, (`Id (_, method_name), formals, _), _), _) as md) ->
-              let arg_types = Cfg_parser.types_of_formals formals in
-              let static =
-                Option.exists modifiers
-                  ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
-              in
-              let method_id : Method_id.t =
-                {
-                  package;
-                  class_name = parent_class_prefix ^ class_name;
-                  method_name;
-                  static;
-                  arg_types;
-                }
-              in
-              (method_id, md) :: acc
-          | `Cons_decl _ -> failwith "todo"
-          | `Class_decl _ as cd ->
-              let nested_method_decls =
-                method_decls_by_id
-                  ~parent_class:(Some (parent_class_prefix ^ class_name))
-                  (`Decl cd)
-              in
-              nested_method_decls @ acc
-          | _ -> failwith "unrecognized class body declaration")
-    | `Decl (`Import_decl _) -> []
-    | _ -> failwith "unrecognized top-level definition"
+let rec decls_by_id ?(package = []) ?(parent_class = None) :
+    CST.statement -> (Method_id.t * CST.class_body_declaration) list =
+  let parent_class_prefix = match parent_class with Some n -> n ^ "#" | None -> "" in
+  function
+  | `Decl (`Class_decl (_, _, (_, class_name), _, _, _, (_, body_decls, _))) ->
+      List.fold body_decls ~init:[] ~f:(fun acc -> function
+        | `Meth_decl (modifiers, (_, _, (`Id (_, method_name), formals, _), _), _) as md ->
+            let arg_types = Cfg_parser.types_of_formals formals in
+            let static =
+              Option.exists modifiers
+                ~f:(List.exists ~f:(function `Static _ -> true | _ -> false))
+            in
+            let method_id : Method_id.t =
+              {
+                package;
+                class_name = parent_class_prefix ^ class_name;
+                method_name;
+                static;
+                arg_types;
+              }
+            in
+            (method_id, md) :: acc
+        | `Cons_decl (_, (_, _, formals), _, _) as cd ->
+            let arg_types = Cfg_parser.types_of_formals formals in
+            let method_id : Method_id.t =
+              {
+                package;
+                class_name = parent_class_prefix ^ class_name;
+                method_name = "<init>";
+                static = false;
+                arg_types;
+              }
+            in
+            (method_id, cd) :: acc
+        | `Class_decl _ as cd ->
+            let nested_method_decls =
+              decls_by_id ~package
+                ~parent_class:(Some (parent_class_prefix ^ class_name))
+                (`Decl cd)
+            in
+            nested_method_decls @ acc
+        | `Static_init _ as si ->
+            let method_id : Method_id.t =
+              {
+                package;
+                class_name = parent_class_prefix ^ class_name;
+                method_name = "<staticinit>";
+                static = true;
+                arg_types = [];
+              }
+            in
+            (method_id, si) :: acc
+        | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ | `Enum_decl _ -> acc
+        | _ -> failwith "unrecognized class body declaration")
+  | `Decl (`Anno_type_decl _)
+  | `SEMI _
+  | `Decl (`Enum_decl _)
+  | `Decl (`Import_decl _)
+  | `Decl (`Inte_decl _)
+  | `Decl (`Pack_decl _) ->
+      []
+  | _ -> failwith "unrecognized top-level definition"
+
+let find_instance_init class_name (cst : Tree.java_cst) =
+  (* recursively traverse nested class decls until finding one with [class_name]; at that point, return its instance init block if it exists *)
+  let rec impl containing_class = function
+    | `Decl (`Class_decl (_, _, (_, name), _, _, _, (_, body, _))) :: rest -> (
+        let curr_class_name =
+          match containing_class with Some n -> n ^ "$" ^ name | None -> name
+        in
+        if String.equal class_name curr_class_name then
+          List.find_map body ~f:(function `Blk (_, b, _) -> Some b | _ -> None)
+        else
+          match
+            List.find_map body ~f:(function
+              | `Class_decl _ as cd -> impl (Some curr_class_name) [ `Decl cd ]
+              | _ -> None)
+          with
+          | None -> impl containing_class rest
+          | Some _ as nested_instance_init -> nested_instance_init)
+    | _ :: rest -> impl containing_class rest
+    | [] -> None
   in
-  let prev_decls_by_id = prev >>= method_decls_by_id |> Map.of_alist_exn (module Method_id) in
-  let next_decls_by_id = next >>= method_decls_by_id |> Map.of_alist_exn (module Method_id) in
+  impl None cst
+
+let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
+  let package =
+    let prev_package = Cfg_parser.package_of_cst prev in
+    let next_package = Cfg_parser.package_of_cst next in
+    if (List.equal String.equal) prev_package next_package then prev_package
+    else failwith "todo: deal with package-renaming edit"
+  in
+  let open List.Monad_infix in
+  let prev_decls_by_id = prev >>= decls_by_id ~package |> Map.of_alist_exn (module Method_id) in
+  let next_decls_by_id = next >>= decls_by_id ~package |> Map.of_alist_exn (module Method_id) in
   let prev_ids = Map.keys prev_decls_by_id |> Set.of_list (module Method_id) in
   let next_ids = Map.keys next_decls_by_id |> Set.of_list (module Method_id) in
   let shared_ids = Method_id.Set.inter prev_ids next_ids in
@@ -257,32 +328,45 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   in
   let function_additions =
     List.map added_ids ~f:(fun method_id ->
-        Add_function { method_id; method_decl = Method_id.Map.find_exn next_decls_by_id method_id })
+        let decl = Method_id.Map.find_exn next_decls_by_id method_id in
+        let instance_init =
+          match decl with `Cons_decl _ -> find_instance_init method_id.class_name next | _ -> None
+        in
+        Add_function { method_id; decl; instance_init })
   in
   let function_deletions =
     List.map deleted_ids ~f:(fun method_id -> Delete_function { method_id })
   in
   let function_header_modifications =
     Set.fold shared_ids ~init:[] ~f:(fun acc method_id ->
-        let prev_header = Method_id.Map.find_exn prev_decls_by_id method_id |> snd3 in
-        let next_header = Method_id.Map.find_exn next_decls_by_id method_id |> snd3 in
-        if
-          Sexp.equal (CST.sexp_of_method_header prev_header) (CST.sexp_of_method_header next_header)
-        then acc
-        else Modify_function { method_id; new_header = next_header } :: acc)
+        let prev_decl = Method_id.Map.find_exn prev_decls_by_id method_id in
+        let next_decl = Method_id.Map.find_exn next_decls_by_id method_id in
+        match (prev_decl, next_decl) with
+        | `Meth_decl (_, prev_header, _), `Meth_decl (_, next_header, _) ->
+            if
+              Sexp.equal
+                (CST.sexp_of_method_header prev_header)
+                (CST.sexp_of_method_header next_header)
+            then acc
+            else Modify_function { method_id; new_header = next_header } :: acc
+        | `Static_init _, `Static_init _ -> acc
+        | `Cons_decl _, `Cons_decl _ -> acc
+        | _ -> failwith "mismatched or unrecognized declarations with same method_id")
   in
   let stmt_edits =
+    let stmts_of_decl = function
+      | `Meth_decl (_, _, `Blk (_, stmts, _)) -> stmts
+      | `Meth_decl (_, _, `SEMI _) -> []
+      | `Cons_decl (_, _, _, (_, _, stmts, _)) -> stmts
+      | `Static_init (_, (_, stmts, _)) -> stmts
+      | _ ->
+          failwith
+            "unexpected class body declaration in stmt-diff: not a method, static init block, or \
+             constructor"
+    in
     Set.fold shared_ids ~init:[] ~f:(fun acc method_id ->
-        let prev =
-          Method_id.Map.find_exn prev_decls_by_id method_id |> trd3 |> function
-          | `Blk (_, b, _) -> b
-          | `SEMI _ -> []
-        in
-        let next =
-          Method_id.Map.find_exn next_decls_by_id method_id |> trd3 |> function
-          | `Blk (_, b, _) -> b
-          | `SEMI _ -> []
-        in
+        let prev = Method_id.Map.find_exn prev_decls_by_id method_id |> stmts_of_decl in
+        let next = Method_id.Map.find_exn next_decls_by_id method_id |> stmts_of_decl in
         diff_of_stmt_list method_id loc_map ~prev ~next @ acc)
   in
   stmt_edits @ function_additions @ function_deletions @ function_header_modifications
@@ -462,15 +546,25 @@ let apply_edit edit loc_map cfg ~ret ~exc : cfg_edit_result =
       in
       edit_result cfg loc_map ~deleted_edges ~added_edges ()
 
-let apply diff loc_map cfgs =
+let apply cha diff loc_map cfgs =
   List.fold diff ~init:(loc_map, cfgs) ~f:(fun (lm, cfgs) edit ->
       match edit with
-      | Add_function { method_id = { package; class_name; _ }; method_decl } -> (
-          match Cfg_parser.of_method_decl loc_map ~package ~class_name method_decl with
-          | Some (loc_map, edges, fn) ->
-              let cfgs = Cfg.add_fn fn ~edges cfgs in
-              (loc_map, cfgs)
-          | None -> (loc_map, cfgs))
+      | Add_function { method_id = { package; class_name; _ }; decl; instance_init } -> (
+          match decl with
+          | `Meth_decl md -> (
+              match Cfg_parser.of_method_decl loc_map ~package ~class_name md with
+              | Some (loc_map, edges, fn) -> (loc_map, Cfg.add_fn fn ~edges cfgs)
+              | None -> (loc_map, cfgs))
+          | `Cons_decl (_, cd, _, body) ->
+              let loc_map, edges, fn =
+                Cfg_parser.of_constructor_decl loc_map ~package ~class_name ~cha ~instance_init cd
+                  body
+              in
+              (loc_map, Cfg.add_fn fn ~edges cfgs)
+          | `Static_init (_, blk) ->
+              let loc_map, edges, fn = Cfg_parser.of_static_init loc_map ~package ~class_name blk in
+              (loc_map, Cfg.add_fn fn ~edges cfgs)
+          | _ -> failwith "todo: Add_function with unrecognized class body decl")
       | Delete_function { method_id } ->
           let loc_map = Loc_map.remove_fn loc_map method_id in
           let cfgs = Cfg.remove_fn method_id cfgs in
@@ -640,11 +734,11 @@ let%test "modify condition of conditional" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_java_cst prev_cst
   in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply diff loc_map prev_cfg in
+  let _next_cfg = apply cha diff loc_map prev_cfg in
   match diff with
   | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
       true
@@ -671,11 +765,11 @@ let%test "modify header of for-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_java_cst prev_cst
   in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply diff loc_map prev_cfg in
+  let _next_cfg = apply cha diff loc_map prev_cfg in
   match diff with
   | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = Some _ } ] ->
       true
@@ -702,11 +796,11 @@ let%test "modify header of while-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_java_cst prev_cst
   in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply diff loc_map prev_cfg in
+  let _next_cfg = apply cha diff loc_map prev_cfg in
   match diff with
   | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
       true
@@ -733,11 +827,11 @@ let%test "modify body of while-loop" =
     | Ok cst -> cst
     | Error _ -> failwith "parse error"
   in
-  let ({ loc_map; cfgs = prev_cfg; _ } : Cfg_parser.prgm_parse_result) =
+  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.of_java_cst prev_cst
   in
   let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply diff loc_map prev_cfg in
+  let _next_cfg = apply cha diff loc_map prev_cfg in
   match diff with
   | [ Delete_statements { method_id = _; _ }; Add_statements { method_id = _; _ } ] -> true
   | _ -> false

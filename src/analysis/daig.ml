@@ -361,7 +361,8 @@ module Make (Dom : Abstract.Dom) = struct
       [loop_iteration_ctx] specifies an iteration context to wrap all abstract-state ref-cell names with, to support construction of DAIG snippets within loop bodies.
 *)
   let of_region_cfg ?(extra_back_edges = []) ~(entry_ref : Ref.t) ~(cfg : Cfg.t)
-      ~(entry : Cfg.Loc.t) ~(loop_iteration_ctx : (int * Cfg.Loc.t) list option) () =
+      ~(entry : Cfg.Loc.t) ~(loop_iteration_ctx : (int * Cfg.Loc.t) list option)
+      ?(exit : (Ref.t * Cfg.Loc.t) option) () =
     let open List.Monad_infix in
     let name_of_edge e = Name.Edge (Cfg.src e, Cfg.dst e) in
     (* E_b *)
@@ -417,6 +418,9 @@ module Make (Dom : Abstract.Dom) = struct
       let at_locs =
         Seq.to_list (Cfg.G.nodes cfg) >>| fun l ->
         if Cfg.Loc.equal l entry then entry_ref
+          (* if an exit-location refcell is provided, use it instead of instantiating a new refcell*)
+        else if Option.exists exit ~f:(snd >> Cfg.Loc.equal l) then
+          match exit with Some (refcell, _) -> refcell | _ -> failwith "unreachable"
         else Ref.AState { state = None; name = name_of_loc l }
       and pre_joins =
         join_locs >>= fun l ->
@@ -989,6 +993,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Modify_statements { method_id = _; from_loc; to_loc; new_stmts = _ } ->
         let from_ref = ref_at_loc_exn ~loc:from_loc daig in
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
+        Ref.dirty to_ref;
         let dirtied_daig = dirty_from to_ref daig in
         let removed_region_daig = remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref in
         let cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
@@ -998,7 +1003,7 @@ module Make (Dom : Abstract.Dom) = struct
         let new_daig_segment =
           of_region_cfg ~cfg ~entry_ref:from_ref ~entry:from_loc
             ~loop_iteration_ctx:(Name.iter_ctx (Ref.name from_ref))
-            ~extra_back_edges:[] ()
+            ~extra_back_edges:[] ~exit:(to_ref, to_loc) ()
         in
         Graph.union (module G) new_daig_segment removed_region_daig
     | Modify_header { method_id = _; prev_loc_ctx; next_stmt = _; loop_body_exit = _ } ->
@@ -1066,7 +1071,7 @@ open Frontend
 let%test "build daig, edit, and dump dot: HelloWorld.java" =
   Cfg.Loc.reset ();
   let ({ loc_map; cfgs; _ } : Cfg_parser.prgm_parse_result) =
-    Frontend.Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/HelloWorld.java")
+    Frontend.Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/HelloWorld.java")
   in
   match Map.to_alist cfgs with
   | [ (fn, cfg) ] ->
@@ -1088,7 +1093,7 @@ let%test "build daig, edit, and dump dot: HelloWorld.java" =
 
 let%test "analyze nested loops" =
   let ({ cfgs; _ } : Cfg_parser.prgm_parse_result) =
-    Frontend.Cfg_parser.of_file_exn (abs_of_rel_path "test_cases/java/NestedLoops.java")
+    Frontend.Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/NestedLoops.java")
   in
   Map.to_alist cfgs
   |> List.iter ~f:(fun (fn, cfg) ->
