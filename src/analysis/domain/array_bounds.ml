@@ -431,7 +431,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
           in
           Set.fold static_fields ~init:itv ~f:(fun itv fld ->
               let fld_var = Var.of_string fld in
-              let fld_val = Itv.lookup itv fld_var in
+              let fld_val = Itv.lookup return_itv fld_var in
               if Interval.is_top fld_val then itv
               else Itv.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
         else Fn.id
