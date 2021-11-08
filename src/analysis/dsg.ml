@@ -23,7 +23,7 @@ module Make (Dom : Abstract.Dom) = struct
         else reg_summs := Map.set !reg_summs ~key:fn ~data:summs
     end
 
-    let _add ?(exc = false) fn ~(pre : Dom.t) ~(post : Dom.t) =
+    let add ?(exc = false) fn ~(pre : Dom.t) ~(post : Dom.t) =
       let summs =
         match Map.find (Table.instance exc) fn with
         | None -> Dom.Map.singleton pre post
@@ -136,6 +136,19 @@ module Make (Dom : Abstract.Dom) = struct
     let cfg, daigs = Map.find_exn dsg fn in
     Map.set dsg ~key:fn ~data:(cfg, Map.set daigs ~key:entry_state ~data:daig)
 
+  let _summarize_daig_exn dsg (fn : Cfg.Fn.t) entry_state =
+    let cfg, daigs = Map.find_exn dsg fn in
+    let daig = Map.find_exn daigs entry_state in
+    if D.is_solved fn.exit daig then
+      let post = Option.value_exn (D.read_by_loc fn.exit daig) in
+      Summary.add ~exc:false fn ~pre:entry_state ~post
+    else ();
+    if D.is_solved fn.exc_exit daig then
+      let post = Option.value_exn (D.read_by_loc fn.exc_exit daig) in
+      Summary.add ~exc:true fn ~pre:entry_state ~post
+    else ();
+    Map.set dsg ~key:fn ~data:(cfg, Map.remove daigs entry_state)
+
   let dump_dot ~filename (dsg : t) =
     let daigs : (Cfg.Fn.t * D.t) list =
       Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
@@ -245,13 +258,7 @@ module Make (Dom : Abstract.Dom) = struct
                   else if (* case (4) *)
                           D.is_solved exit_loc daig then
                     let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                    let new_poststate =
-                      match D.get_by_loc exit_loc daig with
-                      | D.Result return_state, _daig ->
-                          Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
-                      | D.Summ_qry _, _daig ->
-                          failwith "unreachable due to preceding [is_solved] check"
-                    in
+                    let new_poststate = Option.value_exn (D.read_by_loc exit_loc daig) in
                     Some (Dom.join acc_poststate new_poststate)
                   else None)
 
