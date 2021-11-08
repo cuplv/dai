@@ -63,7 +63,7 @@ let pp_edit fs = function
       Format.fprintf fs "(Delete statements in range %a->%a in %a)" Cfg.Loc.pp from_loc Cfg.Loc.pp
         to_loc Method_id.pp method_id
 
-let pp = List.pp ~pre:"DIFF:[@[<hv 2>" ~suf:"@]" ";@," pp_edit
+let pp = List.pp ~pre:"DIFF:[@[<hv 2>" ~suf:"@]]" ";@," pp_edit
 
 module Stmt_patdiff = Patience_diff_lib.Patience_diff.Make (struct
   type t = CST.statement [@@deriving sexp_of]
