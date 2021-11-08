@@ -8,9 +8,44 @@ module Make (Dom : Abstract.Dom) = struct
   module D = Daig.Make (Dom)
   module Q = Query.Make (Dom)
 
-  (*module R = Relation.Make (Dom)
-    type summary = {exit_triples : R.Set.t; exc_exit_triples : R.Set.t}*)
-  (* let summary_store : R.Set.t Cfg.Fn.Map.t ref = ref Cfg.Fn.Map.empty *)
+  module Summary = struct
+    module Table = struct
+      type t = Dom.t Dom.Map.t Cfg.Fn.Map.t
+
+      let reg_summs : t ref = ref Cfg.Fn.Map.empty
+
+      let exc_summs : t ref = ref Cfg.Fn.Map.empty
+
+      let instance exc = !(if exc then exc_summs else reg_summs)
+
+      let set ~exc ~fn ~summs =
+        if exc then exc_summs := Map.set !exc_summs ~key:fn ~data:summs
+        else reg_summs := Map.set !reg_summs ~key:fn ~data:summs
+    end
+
+    let _add ?(exc = false) fn ~(pre : Dom.t) ~(post : Dom.t) =
+      let summs =
+        match Map.find (Table.instance exc) fn with
+        | None -> Dom.Map.singleton pre post
+        | Some summs -> Map.add_exn summs ~key:pre ~data:post
+      in
+      Table.set ~exc ~fn ~summs
+
+    let find ?(exc = false) pre fn = Map.find (Table.instance exc) fn >>= flip Map.find pre
+
+    let _find_weakened ?(exc = false) pre fn =
+      match Map.find (Table.instance exc) fn with
+      | None -> Dom.Map.empty
+      | Some summs -> Map.filter_keys summs ~f:(Dom.( <= ) pre)
+
+    let dirty ?exc ?pre fn =
+      match (pre, exc) with
+      | Some pre, Some exc ->
+          Table.set ~exc ~fn ~summs:(Map.remove (Map.find_exn (Table.instance exc) fn) pre)
+      | _ ->
+          Table.set ~exc:true ~fn ~summs:Dom.Map.empty;
+          Table.set ~exc:false ~fn ~summs:Dom.Map.empty
+  end
 
   module Dep = struct
     module T = struct
@@ -42,25 +77,42 @@ module Make (Dom : Abstract.Dom) = struct
       let singleton = Set.singleton (module T_comparator)
     end
 
-    let interproc_deps : Set.t Cfg.Fn.Map.t ref = ref Cfg.Fn.Map.empty
+    (* Maps summaries to callsites that depend upon them; i.e. map callee functions to callee contexts to callers *)
+    let interproc_deps : Set.t Dom.Map.t Cfg.Fn.Map.t ref = ref Cfg.Fn.Map.empty
 
-    let add ~callee ~caller:(nm, fn, ctx, callsite) =
-      let data =
-        { nm; fn; ctx; callsite }
-        |>
-        match Map.find !interproc_deps fn with None -> Set.singleton | Some deps -> Set.add deps
+    let add ~callee ~callee_entry_state ~caller:(nm, fn, ctx, callsite) =
+      let caller = { nm; fn; ctx; callsite } in
+      let new_callee_deps =
+        match Map.find !interproc_deps callee with
+        | None -> Dom.Map.singleton callee_entry_state (Set.singleton caller)
+        | Some callee_deps ->
+            Map.set callee_deps ~key:callee_entry_state
+              ~data:
+                (match Map.find callee_deps callee_entry_state with
+                | None -> Set.singleton caller
+                | Some callers -> Set.add callers caller)
       in
-      interproc_deps := Map.set !interproc_deps ~key:callee ~data
+      interproc_deps := Map.set !interproc_deps ~key:callee ~data:new_callee_deps
 
-    let pop ~fn =
+    (* if [ctx] is provided, pop _only_ dependencies on [fn] in that context; otherwise, pop _all_ dependencies on [fn]*)
+    let pop ~ctx ~fn =
       match Map.find !interproc_deps fn with
       | None -> Set.empty
-      | Some deps ->
-          interproc_deps := Map.set !interproc_deps ~key:fn ~data:Set.empty;
-          deps
+      | Some fn_deps -> (
+          match ctx with
+          | None ->
+              interproc_deps := Map.remove !interproc_deps fn;
+              Map.fold fn_deps ~init:Set.empty ~f:(fun ~key:_ ~data acc -> Set.union acc data)
+          | Some ctx -> (
+              match Map.find fn_deps ctx with
+              | None -> Set.empty
+              | Some fn_ctx_deps ->
+                  let fn_deps = Map.remove fn_deps ctx in
+                  interproc_deps := Map.set !interproc_deps ~key:fn ~data:fn_deps;
+                  fn_ctx_deps))
 
-    let self_loops fn =
-      match Map.find !interproc_deps fn with
+    let self_loops fn ctx =
+      match Map.find !interproc_deps fn >>= flip Map.find ctx with
       | None -> Set.empty
       | Some deps -> Set.filter deps ~f:(fun dep -> Cfg.Fn.equal fn dep.fn)
   end
@@ -83,8 +135,6 @@ module Make (Dom : Abstract.Dom) = struct
   let set_daig dsg daig fn entry_state =
     let cfg, daigs = Map.find_exn dsg fn in
     Map.set dsg ~key:fn ~data:(cfg, Map.set daigs ~key:entry_state ~data:daig)
-
-  let get_daig_exn dsg fn entry_state = Map.find_exn dsg fn |> snd |> flip Map.find_exn entry_state
 
   let dump_dot ~filename (dsg : t) =
     let daigs : (Cfg.Fn.t * D.t) list =
@@ -113,10 +163,21 @@ module Make (Dom : Abstract.Dom) = struct
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
         (daig, Map.set dsg ~key:fn ~data:(cfg, daigs))
 
-  let dirty_interproc_deps dsg fn =
-    Set.fold (Dep.pop ~fn) ~init:dsg ~f:(fun dsg dep ->
-        let daig = D.dirty dep.nm (get_daig_exn dsg dep.fn dep.ctx) in
-        set_daig dsg daig dep.fn dep.ctx)
+  (* dirty [fn] in [dsg], recursively dirtying its dependencies and affected summaries.
+   * [ctx], if provided, restricts dirtying to a particular context
+   *)
+  let rec dirty_interproc_deps ?ctx dsg fn =
+    (match ctx with Some pre -> Summary.dirty ~pre fn | None -> Summary.dirty fn);
+    let deps = Dep.pop ~ctx ~fn in
+    Set.fold deps ~init:dsg ~f:(fun dsg dep ->
+        let dsg =
+          match Map.find dsg dep.fn >>= (snd >> flip Map.find dep.ctx) with
+          | None -> dsg
+          | Some dep_daig ->
+              let dep_daig = D.dirty dep.nm dep_daig in
+              set_daig dsg dep_daig dep.fn dep.ctx
+        in
+        dirty_interproc_deps ~ctx:dep.ctx dsg dep.fn)
 
   let summarize_with_callgraph (dsg : t) fields callgraph (caller : Cfg.Fn.t) caller_entry_state
       ~callsite:(callsite, nm) caller_state =
@@ -167,23 +228,32 @@ module Make (Dom : Abstract.Dom) = struct
                 if is_recursive then Dom.widen caller_entry_state callee_entry_state
                 else callee_entry_state
               in
-              Map.find (snd @@ Map.find_exn dsg callee) callee_entry_state >>= fun daig ->
-              if is_recursive && Dom.equal callee_entry_state caller_entry_state (* case (3) *) then
-                let _ = Dep.add ~callee ~caller:(nm, caller, caller_entry_state, callsite) in
-                match D.read_by_loc exit_loc daig with
-                | Some phi -> Some (Dom.join acc_poststate phi)
-                | None -> acc_result
-              else if (* case (4) *)
-                      D.is_solved exit_loc daig then
-                let _ = Dep.add ~callee ~caller:(nm, caller, caller_entry_state, callsite) in
-                let new_poststate =
-                  match D.get_by_loc exit_loc daig with
-                  | D.Result return_state, _daig ->
-                      Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
-                  | D.Summ_qry _, _daig -> failwith "unreachable due to preceding [is_solved] check"
-                in
-                Some (Dom.join acc_poststate new_poststate)
-              else None)
+              let add_dep = Dep.add ~callee ~callee_entry_state in
+              let summary = if is_exc then None else Summary.find callee_entry_state callee in
+              match summary with
+              | Some poststate ->
+                  let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
+                  Some (Dom.join acc_poststate poststate)
+              | None ->
+                  Map.find (snd @@ Map.find_exn dsg callee) callee_entry_state >>= fun daig ->
+                  if is_recursive && Dom.equal callee_entry_state caller_entry_state (* case (3) *)
+                  then
+                    let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
+                    match D.read_by_loc exit_loc daig with
+                    | Some phi -> Some (Dom.join acc_poststate phi)
+                    | None -> acc_result
+                  else if (* case (4) *)
+                          D.is_solved exit_loc daig then
+                    let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
+                    let new_poststate =
+                      match D.get_by_loc exit_loc daig with
+                      | D.Result return_state, _daig ->
+                          Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
+                      | D.Summ_qry _, _daig ->
+                          failwith "unreachable due to preceding [is_solved] check"
+                    in
+                    Some (Dom.join acc_poststate new_poststate)
+                  else None)
 
   let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_entry_state
       ~callgraph caller_method =
@@ -202,14 +272,16 @@ module Make (Dom : Abstract.Dom) = struct
           if Method_id.equal caller_method callee.method_id then Dom.widen caller_entry_state
           else Fn.id
         in
-        Map.find_exn dsg callee |> snd |> flip Map.find callee_entry_state
-        (* looking here for exactly-matching summaries; could instead find weakly-matching summaries (i.e. with entry state implied by the exact entry state) at the cost of from-scratch consistency *)
-        |>
-        function
-        | Some daig when D.is_solved (if is_exc then callee.exc_exit else callee.exit) daig -> acc
-        | None | Some _ ->
-            let q : Q.t = { fn = callee; is_exc; entry_state = callee_entry_state } in
-            q :: acc)
+        match Summary.find ~exc:is_exc callee_entry_state callee with
+        | Some _ -> acc
+        | None -> (
+            match Map.find_exn dsg callee |> snd |> flip Map.find callee_entry_state with
+            (* looking here for exactly-matching summaries; could instead find weakly-matching summaries (i.e. with entry state implied by the exact entry state) at the cost of from-scratch consistency *)
+            | Some daig when D.is_solved (if is_exc then callee.exc_exit else callee.exit) daig ->
+                acc
+            | None | Some _ ->
+                let q : Q.t = { fn = callee; is_exc; entry_state = callee_entry_state } in
+                q :: acc))
 
   let query ~method_id ~entry_state ~loc ~callgraph ~fields dsg : Dom.t * t =
     let fn =
@@ -262,7 +334,7 @@ module Make (Dom : Abstract.Dom) = struct
               match daig_qry_result with
               | D.Result res ->
                   let recursively_dirtied_daig, needs_requery =
-                    Dep.self_loops qry.fn
+                    Dep.self_loops qry.fn qry.entry_state
                     |> Set.fold ~init:(new_callee_daig, false)
                          ~f:(fun (daig, needs_requery) (recursive_dep : Dep.t) ->
                            match D.read_by_name recursive_dep.nm daig with
@@ -334,7 +406,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Delete_function { method_id } -> (
             let loc_map = Loc_map.remove_fn loc_map method_id in
             match Cfg.Fn.Map.fn_by_method_id method_id dsg with
-            | Some fn -> (loc_map, Map.remove dsg fn)
+            | Some fn -> (loc_map, dirty_interproc_deps (Map.remove dsg fn) fn)
             | None ->
                 failwith
                   (Format.asprintf "Can't remove function %a: does not exist in DAIG" Method_id.pp
