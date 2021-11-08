@@ -6,9 +6,9 @@ include Core
 
 type 'a pp = Formatter.t -> 'a -> unit
 
-let ( >> ) f g x = g (f x)
+let ( >> ) f g = Fn.compose g f
 
-let flip f x y = f y x
+let flip = Fn.flip
 
 let ( $> ) x f =
   f x;
