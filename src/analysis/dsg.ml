@@ -258,7 +258,10 @@ module Make (Dom : Abstract.Dom) = struct
                   else if (* case (4) *)
                           D.is_solved exit_loc daig then
                     let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                    let new_poststate = Option.value_exn (D.read_by_loc exit_loc daig) in
+                    let new_poststate =
+                      let return_state = Option.value_exn (D.read_by_loc exit_loc daig) in
+                      Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
+                    in
                     Some (Dom.join acc_poststate new_poststate)
                   else None)
 
