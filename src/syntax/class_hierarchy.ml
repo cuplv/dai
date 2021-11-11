@@ -6,15 +6,17 @@ type t = G.t
 
 let empty = Graph.create (module G) ()
 
+let class_id_of package class_name = String.concat ~sep:"." package ^ "." ^ class_name
+
 let add ~(package : string list) ~(class_name : string) ~(super_package : string list)
     ~(superclass_name : string) : t -> t =
-  let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
-  let superclass_id = String.(concat ~sep:"." super_package ^ "." ^ superclass_name) in
+  let class_id = class_id_of package class_name in
+  let superclass_id = class_id_of super_package superclass_name in
   G.Edge.(insert (create class_id superclass_id ()))
 
 let get_superclass_name ~(package : string list) ~(class_name : string) : t -> string option =
-  let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
-  G.Node.preds class_id >> Seq.to_list >> function
+  let class_id = class_id_of package class_name in
+  G.Node.succs class_id >> Seq.to_list >> function
   | [] -> None
   | [ superclass_id ] ->
       Some
@@ -26,7 +28,7 @@ let get_superclass_name ~(package : string list) ~(class_name : string) : t -> s
       failwith "multiple inheritance? in _this_ economy???"
 
 let ancestors ~(package : string list) ~(class_name : string) cha : string list =
-  let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
+  let class_id = class_id_of package class_name in
   Graph.fold_reachable (module G) cha class_id ~init:[] ~f:(flip List.cons)
 
 let compute_closure ~(cha : t) ~(fields : Declared_fields.t) : Declared_fields.t =
