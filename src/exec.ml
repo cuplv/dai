@@ -5,10 +5,15 @@ open Command.Let_syntax
 module Analysis = Experiment_harness.DSG_wrapper (Domain.Array_bounds)
 
 let analyze =
-  basic ~summary:"Interactively analyze a Java program using the DAI framework."
+  basic ~summary:"Analyze a program edit using the DAI framework"
     [%map_open
       let src_dir = anon ("src_dir" %: string)
-      and _batch = flag "batch" no_arg ~doc:"Run in batch mode, disabling interactivity"
+      and incr =
+        flag "incremental" no_arg
+          ~doc:"incremental analysis: reuse results across the program edit where possible"
+      and dd =
+        flag "demand" (optional string)
+          ~doc:"<method> demand-driven analysis: analyze only as needed to analyze <method>"
       and diagnostic =
         flag "diagnostic" no_arg
           ~doc:
@@ -25,6 +30,11 @@ let analyze =
       and next_cg =
         flag "next-callgraph" (optional string)
           ~doc:"<cg> path to serialized callgraph for next_dir program version"
+      and entry_class =
+        flag "entry-class" (optional string)
+          ~doc:
+            "<com.example.Baz> fully-qualified Java class name to treat as entrypoint. Defaults to \
+             all \"main\" methods if not provided"
       in
       fun () ->
         let srcs = Experiment_harness.java_srcs src_dir in
@@ -42,22 +52,64 @@ let analyze =
           Cfg_parser.print_diagnostic_results ())
         else
           match (next_dir, prev_cg, next_cg) with
-          | Some next_dir, Some prev_cg, Some next_cg ->
-              Format.printf
-                "Running basic debugging/testing setup: \n\
-                 \t(1) parse [src_dir] (initial_dsg.dot)\n\
-                 \t(2) issue query at program exit (queried_initial_dsg.dot)\n\
-                 \t(3) apply \"edit\" btwn src_dir/next_dir (edited_dsg.dot)\n\
-                 \t(4) issue query at program exit (queried_edited_dsg.dot)\n";
+          | Some next_dir, Some prev_cg, Some next_cg -> (
               let open Analysis in
-              let initial_state = init src_dir prev_cg in
-              dump_dot initial_state.dsg ~filename:(abs_of_rel_path "initial_dsg.dot");
-              let queried_state = issue_exit_queries initial_state in
-              dump_dot queried_state.dsg ~filename:(abs_of_rel_path "queried_initial_dsg.dot");
-              let edited_state = update next_dir next_cg queried_state in
-              dump_dot edited_state.dsg ~filename:(abs_of_rel_path "edited_dsg.dot");
-              let queried_edited_state = issue_exit_queries edited_state in
-              dump_dot queried_edited_state.dsg ~filename:(abs_of_rel_path "queried_edited_dsg.dot")
+              let mode =
+                match (incr, dd) with
+                | true, Some qry_loc -> `Demand_and_incr qry_loc
+                | false, Some qry_loc -> `Demand_only qry_loc
+                | true, None -> `Incr_only
+                | false, None -> `Batch
+              in
+              match mode with
+              | `Batch ->
+                  Format.printf "Running analysis in BATCH mode\n";
+                  Format.printf "Constructing initial state...\n";
+                  let initial_state = init src_dir prev_cg in
+                  let entrypoints = entrypoints entry_class initial_state in
+                  Format.printf "Querying at program exit locations...\n";
+                  let _queried_state = issue_exit_queries entrypoints initial_state in
+                  Format.printf "Constructing edited state...\n";
+                  let edited_state = init next_dir next_cg in
+                  Format.printf "Querying at program exit locations...\n";
+                  let _queried_edited_state = issue_exit_queries entrypoints edited_state in
+                  ()
+              | `Demand_only qry_loc ->
+                  Format.printf "Running analysis in DEMAND-DRIVEN mode\n";
+                  Format.printf "Constructing initial state...\n";
+                  let initial_state = init src_dir prev_cg in
+                  let entrypoints = entrypoints entry_class initial_state in
+                  Format.printf "Querying at demand query location...\n";
+                  let _queried_state = issue_demand_query qry_loc entrypoints initial_state in
+                  Format.printf "Constructing edited state...\n";
+                  let edited_state = init next_dir next_cg in
+                  Format.printf "Querying at demand query locations...\n";
+                  let _queried_edited_state = issue_demand_query qry_loc entrypoints edited_state in
+                  ()
+              | `Incr_only ->
+                  Format.printf "Running analysis in INCREMENTAL mode\n";
+                  Format.printf "Constructing initial state...\n";
+                  let initial_state = init src_dir prev_cg in
+                  let entrypoints = entrypoints entry_class initial_state in
+                  Format.printf "Querying at program exit locations...\n";
+                  let queried_state = issue_exit_queries entrypoints initial_state in
+                  Format.printf "Applying incremental edit...\n";
+                  let edited_state = update next_dir next_cg queried_state in
+                  Format.printf "Querying at program exit locations...\n";
+                  let _queried_edited_state = issue_exit_queries entrypoints edited_state in
+                  ()
+              | `Demand_and_incr qry_loc ->
+                  Format.printf "Running analysis in INCREMENTAL mode\n";
+                  Format.printf "Constructing initial state...\n";
+                  let initial_state = init src_dir prev_cg in
+                  let entrypoints = entrypoints entry_class initial_state in
+                  Format.printf "Querying at demand query location...\n";
+                  let queried_state = issue_demand_query qry_loc entrypoints initial_state in
+                  Format.printf "Applying incremental edit...\n";
+                  let edited_state = update next_dir next_cg queried_state in
+                  Format.printf "Querying at demand query locations...\n";
+                  let _queried_edited_state = issue_demand_query qry_loc entrypoints edited_state in
+                  ())
           | _ ->
               Format.printf
                 "Please either specify diagnostic-mode or supply two program versions and callgraphs\n"]

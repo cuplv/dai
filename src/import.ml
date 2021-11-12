@@ -48,6 +48,16 @@ let abs_of_rel_path rel_path =
       failwith
         "environment variable DAI_ROOT is unset; either use `make` or set manually to project root"
 
+(* "com.example.MyClass.Inner" -> ["com" ; "example"] *)
+let deserialize_package =
+  String.split ~on:'.' >> List.take_while ~f:(flip String.get 0 >> Char.is_lowercase)
+
+(* "com.example.MyClass.Inner" -> "MyClass$Inner" *)
+let deserialize_class =
+  String.split ~on:'.'
+  >> List.drop_while ~f:(flip String.get 0 >> Char.is_lowercase)
+  >> String.concat ~sep:"$"
+
 module Option = struct
   include Base.Option
 

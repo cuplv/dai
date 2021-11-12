@@ -132,6 +132,8 @@ module Make (Dom : Abstract.Dom) = struct
 
   let fns = Cfg.Fn.Map.keys
 
+  let get_cfg_exn dsg fn = fst (Cfg.Fn.Map.find_exn dsg fn)
+
   let set_daig dsg daig fn entry_state =
     let cfg, daigs = Map.find_exn dsg fn in
     Map.set dsg ~key:fn ~data:(cfg, Map.set daigs ~key:entry_state ~data:daig)
@@ -198,7 +200,7 @@ module Make (Dom : Abstract.Dom) = struct
     let callees =
       Callgraph.resolve_with_callgraph ~callsite ~caller_method:caller.method_id ~callgraph
     in
-    if Set.is_empty callees then Some (Dom.approximate_missing_callee ~caller_state ~callsite)
+    if List.is_empty callees then Some (Dom.approximate_missing_callee ~caller_state ~callsite)
     else
       let is_exc =
         match callsite with
@@ -206,7 +208,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Ast.Stmt.Exceptional_call _ -> true
         | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
       in
-      Set.fold
+      List.fold
         ~init:(Some (Dom.bottom ()))
         callees
         ~f:(fun acc_result callee ->
@@ -269,7 +271,7 @@ module Make (Dom : Abstract.Dom) = struct
       ~callgraph caller_method =
     let callees = Callgraph.resolve_with_callgraph ~callsite ~caller_method ~callgraph in
     (* generate a subquery for each possible callee without a compatible summary *)
-    Set.fold callees ~init:[] ~f:(fun acc callee ->
+    List.fold callees ~init:[] ~f:(fun acc callee ->
         let is_exc =
           match callsite with
           | Ast.Stmt.Call _ -> false
@@ -388,6 +390,69 @@ module Make (Dom : Abstract.Dom) = struct
                  "error: solve_subqueries terminated but more summaries are needed to resolve \
                   query for %a in %a"
                  Method_id.pp method_id Dom.pp entry_state))
+
+  let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.bidirectional)
+      ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) : Dom.t list * t =
+    if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
+      let res, dsg =
+        query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~callgraph:cg.forward
+          ~fields
+      in
+      ([ res ], dsg)
+    else
+      let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
+      if List.is_empty callers then (
+        (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
+        Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;
+        let res, dsg =
+          query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~callgraph:cg.forward
+            ~fields
+        in
+        ([ res ], dsg))
+      else
+        let nonrec_callers, rec_callers = List.partition_tf callers ~f:(Cfg.Fn.equal fn) in
+        let entry_states, dsg =
+          List.fold nonrec_callers ~init:(Dom.Set.empty, dsg)
+            ~f:(fun (acc_entry_states, dsg) caller ->
+              let callsite, caller_loc =
+                Sequence.find_exn
+                  (Cfg.G.edges (get_cfg_exn dsg caller))
+                  ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
+                |> fun x -> (Cfg.G.Edge.label x, Cfg.G.Edge.src x)
+              in
+              let caller_states, g =
+                loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
+              in
+              let acc_entry_states =
+                List.fold caller_states ~init:acc_entry_states ~f:(fun acc caller_state ->
+                    Set.add acc (Dom.call ~callee:fn ~callsite ~caller_state ~fields))
+              in
+              (acc_entry_states, g))
+        in
+        match rec_callers with
+        | [] ->
+            (* for non-recursive functions, analyze to [loc] in each reachable [entry_state] *)
+            let results, dsg =
+              Set.fold entry_states ~init:([], dsg) ~f:(fun (rs, dsg) entry_state ->
+                  let r, dsg =
+                    query dsg ~method_id:fn.method_id ~entry_state ~loc ~callgraph:cg.forward
+                      ~fields
+                  in
+                  (r :: rs, dsg))
+            in
+            (results, dsg)
+        | _ ->
+            (* for recursive functions, analyze to the exit in each reachable [entry_state] first, then gather up all the abstract states at [loc]*)
+            let dsg =
+              Set.fold entry_states ~init:dsg ~f:(fun dsg entry_state ->
+                  query dsg ~method_id:fn.method_id ~entry_state ~loc:fn.exit ~callgraph:cg.forward
+                    ~fields
+                  |> snd)
+            in
+            let results =
+              Map.find_exn dsg fn |> snd |> Map.data |> List.filter_map ~f:(D.read_by_loc loc)
+            in
+            (results, dsg)
 
   let apply_edit ~cha ~diff loc_map (dsg : t) =
     List.fold diff ~init:(loc_map, dsg) ~f:(fun (loc_map, dsg) ->

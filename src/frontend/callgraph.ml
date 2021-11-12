@@ -1,49 +1,38 @@
 open Dai.Import
 open Syntax
 
-type t = Cfg.Fn.Set.t Method_id.Map.t
+type t = Cfg.Fn.t list Method_id.Map.t
+
+type reverse_t = Cfg.Fn.t list Method_id.Map.t
+
+type bidirectional = { forward : t; reverse : reverse_t }
 
 (* a callgraph is a map from caller [Method_id]'s to sets of callee [Cfg.Fn]'s *)
 
-let resolve_by_name ~callsite candidates =
-  let compatible_args (fn : Cfg.Fn.t) actuals =
-    let num_formals = List.length fn.formals in
-    let num_actuals = List.length actuals in
-    num_formals = num_actuals
+let is_syntactically_compatible (callsite : Ast.Stmt.t) (callee : Cfg.Fn.t) =
+  let num_formals = List.length callee.formals in
+  let compatible_args actuals =
+    num_formals = List.length actuals
     || (* WALA callgraph output doesn't know about varargs,
           so we conservatively assume any function whose last argument has array type may be variadic *)
-    (num_formals > 0 && String.is_suffix ~suffix:"[]" (List.last_exn fn.method_id.arg_types))
+    (num_formals > 0 && String.is_suffix ~suffix:"[]" (List.last_exn callee.method_id.arg_types))
   in
   match callsite with
   | Ast.Stmt.Call { lhs = _; rcvr; meth = "<init>"; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr; meth = "<init>"; actuals } ->
-      Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
-          String.equal rcvr (String.split candidate.method_id.class_name ~on:'$' |> List.last_exn)
-          && String.equal "<init>" candidate.method_id.method_name
-          && compatible_args candidate actuals)
+      String.equal rcvr (String.split callee.method_id.class_name ~on:'$' |> List.last_exn)
+      && String.equal "<init>" callee.method_id.method_name
+      && compatible_args actuals
   | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals; alloc_site = _ }
   | Ast.Stmt.Exceptional_call { rcvr = _; meth; actuals } ->
-      Set.filter candidates ~f:(fun (candidate : Cfg.Fn.t) ->
-          String.equal meth candidate.method_id.method_name && compatible_args candidate actuals)
-  | s ->
-      failwith
-        (Format.asprintf "can't resolve call targets of non-method-call statement %a" Ast.Stmt.pp s)
+      String.equal meth callee.method_id.method_name && compatible_args actuals
+  | _ -> false
 
-let resolve_with_callgraph ~callsite ~caller_method ~callgraph =
+let resolve_with_callgraph ~callsite ~caller_method ~(callgraph : t) =
   let candidates =
-    match Method_id.Map.find callgraph caller_method with Some cs -> cs | None -> Cfg.Fn.Set.empty
+    match Method_id.Map.find callgraph caller_method with Some cs -> cs | None -> []
   in
-  resolve_by_name ~callsite candidates
-
-(* "com.example.MyClass.Inner" -> ["com" ; "example"] *)
-let deserialize_package =
-  String.split ~on:'.' >> List.take_while ~f:(flip String.get 0 >> Char.is_lowercase)
-
-(* "com.example.MyClass.Inner" -> "MyClass$Inner" *)
-let deserialize_class =
-  String.split ~on:'.'
-  >> List.drop_while ~f:(flip String.get 0 >> Char.is_lowercase)
-  >> String.concat ~sep:"$"
+  List.filter candidates ~f:(is_syntactically_compatible callsite)
 
 let deserialize_method m : Method_id.t =
   let open String in
@@ -85,9 +74,7 @@ let deserialize_method m : Method_id.t =
 *)
 let deserialize ~fns =
   Src_file.lines
-  >> Array.fold
-       ~init:(Map.empty (module Method_id), None)
-       ~f:(fun (acc_cg, curr_caller) line ->
+  >> Array.fold ~init:(Method_id.Map.empty, None) ~f:(fun (acc_cg, curr_caller) line ->
          if String.is_prefix line ~prefix:"CALLER: " then
            let caller = String.chop_prefix_exn ~prefix:"CALLER: " line |> deserialize_method in
            (acc_cg, Some caller)
@@ -106,11 +93,39 @@ let deserialize ~fns =
                  Method_id.Map.set acc_cg ~key:caller
                    ~data:
                      (match Method_id.Map.find acc_cg caller with
-                     | Some callees -> Set.add callees callee
-                     | None -> Cfg.Fn.Set.singleton callee)
+                     | Some callees -> callee :: callees
+                     | None -> [ callee ])
                in
                (cg, curr_caller))
   >> fst
+
+let reverse ~(fns : Cfg.Fn.t list) (cg : t) : reverse_t =
+  Map.fold cg ~init:Method_id.Map.empty ~f:(fun ~key:caller ~data:callees acc ->
+      let caller =
+        List.find_exn fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller)
+      in
+      List.fold callees ~init:acc ~f:(fun acc callee ->
+          Map.update acc callee.method_id ~f:(function
+            | Some callers -> caller :: callers
+            | None -> [ caller ])))
+
+let callers ~callee_method ~reverse_cg =
+  match Map.find reverse_cg callee_method with Some callers -> callers | None -> []
+
+module G = Graph.Make (String) (Unit)
+
+let dump_dot ~filename (cg : t) : unit =
+  let to_graph (cg : t) : G.t =
+    let edges =
+      Map.fold cg ~init:[] ~f:(fun ~key:caller ~data:callees acc ->
+          let caller = Format.asprintf "%a" Method_id.pp caller in
+          List.fold callees ~init:acc ~f:(fun acc callee ->
+              let callee = Format.asprintf "%a" Method_id.pp callee.method_id in
+              (caller, callee, ()) :: acc))
+    in
+    Graph.create (module G) ~edges ()
+  in
+  Graph.to_dot (module G) (to_graph cg) ~filename
 
 let%test "procedures example" =
   let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in

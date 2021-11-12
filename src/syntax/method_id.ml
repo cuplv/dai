@@ -43,6 +43,8 @@ module Map = struct
   include (Map : module type of Map with type ('k, 'v, 'cmp) t := ('k, 'v, 'cmp) Map.t)
 
   type 'v t = 'v Map.M(T_comparator).t
+
+  let empty = Map.empty (module T_comparator)
 end
 
 include T_comparator

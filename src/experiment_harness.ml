@@ -26,6 +26,7 @@ let rec java_srcs dir =
 let relative_java_srcs dir = List.map (java_srcs dir) ~f:(String.chop_prefix_exn ~prefix:(dir / ""))
 
 module DSG_wrapper (Dom : Abstract.Dom) = struct
+  module Dom = Abstract.DomWithDataStructures (Dom)
   module G = Dsg.Make (Dom)
   module D = G.D
 
@@ -37,7 +38,7 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
     cha : Class_hierarchy.t;
   }
 
-  type t = { dsg : G.t; callgraph : Callgraph.t; parse : parse_info }
+  type t = { dsg : G.t; cg : Callgraph.bidirectional; parse : parse_info }
 
   (* Initialize a DSG over src_dir/**/*.java, with the callgraph serialized at [cg] *)
   let init src_dir cg =
@@ -55,15 +56,21 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
       Cfg_parser.parse_trees_exn ~trees
     in
     let dsg = G.init ~cfgs in
-    let callgraph = Callgraph.deserialize ~fns:(Map.keys cfgs) (Src_file.of_file cg) in
+    let fns = G.fns dsg in
+    let cg =
+      Callgraph.(
+        let forward = deserialize ~fns (Src_file.of_file cg) in
+        let reverse = reverse ~fns forward in
+        { forward; reverse })
+    in
     let parse = { src_dir; trees; loc_map; fields; cha } in
-    { dsg; callgraph; parse }
+    { dsg; cg; parse }
 
   (* For the bugswarm experiments, we point the analysis at two side-by-side program versions
    * rather than editing the program in place.
    * This function applies the "edit" between the two program versions to an analysis [state]
    *)
-  let update (next_src_dir : string) (next_callgraph : string) (g : t) : t =
+  let update (next_src_dir : string) (next_cg : string) (g : t) : t =
     let prev_src_dir = g.parse.src_dir in
     let prev_files = String.Map.keys g.parse.trees |> String.Set.of_list in
     let next_files = relative_java_srcs next_src_dir |> String.Set.of_list in
@@ -91,35 +98,65 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
           | Ok res -> res
           | _ -> failwith ("failed to update file: " ^ filename))
     in
-    let ({ cfgs; loc_map; cha; fields } : Cfg_parser.prgm_parse_result) =
+    let open Cfg_parser in
+    let open Result.Monad_infix in
+    let ({ cfgs; loc_map; cha; fields } : prgm_parse_result) =
       let init =
-        Cfg_parser.(
-          set_parse_result ~loc_map ~cha:g.parse.cha ~fields:g.parse.fields empty_parse_result)
+        set_parse_result ~loc_map ~cha:g.parse.cha ~fields:g.parse.fields empty_parse_result
       in
       Set.fold new_files ~init ~f:(fun acc filename ->
           let file = Src_file.of_file (next_src_dir / filename) in
-          Result.Monad_infix.(
-            Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file
-            >>| Cfg_parser.of_java_cst ~acc)
+          Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| Cfg_parser.of_java_cst ~acc
           |> function
           | Ok res -> res
           | _ -> failwith ("error parsing file: " ^ filename))
     in
     let dsg = G.add_exn ~cfgs dsg in
-    let callgraph = Callgraph.deserialize ~fns:(G.fns dsg) (Src_file.of_file next_callgraph) in
+    let cg =
+      Callgraph.(
+        let fns = G.fns dsg in
+        let forward = deserialize ~fns (Src_file.of_file next_cg) in
+        let reverse = reverse ~fns forward in
+        { forward; reverse })
+    in
     (* TODO: handle added fields and CHA edges in edited files; add corresponding Tree_diff.edit's
        and expose functions there to use here to apply diffs to our fields/cha structures *)
     let parse = { src_dir = next_src_dir; trees; loc_map; fields; cha } in
-    { dsg; callgraph; parse }
+    { dsg; cg; parse }
 
   let dump_dot = G.dump_dot
 
-  let issue_exit_queries (g : t) =
-    G.fns g.dsg
-    |> List.filter ~f:(fun (f : Cfg.Fn.t) -> String.equal "main" f.method_id.method_name)
-    |> List.fold ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
-           G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit
-             ~callgraph:g.callgraph ~fields:g.parse.fields
-           |> snd)
-    |> fun dsg -> { dsg; callgraph = g.callgraph; parse = g.parse }
+  let entrypoints entry_class g =
+    let f =
+      match entry_class with
+      | Some cls ->
+          let package = deserialize_package cls in
+          let class_name = deserialize_class cls in
+          fun (f : Cfg.Fn.t) ->
+            String.equal class_name f.method_id.class_name
+            && (List.equal String.equal) package f.method_id.package
+      | None -> fun (f : Cfg.Fn.t) -> String.equal "main" f.method_id.method_name
+    in
+    List.filter (G.fns g.dsg) ~f
+
+  let issue_exit_queries entrypoints (g : t) =
+    List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
+        G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit
+          ~callgraph:g.cg.forward ~fields:g.parse.fields
+        |> snd)
+    |> fun dsg -> { dsg; cg = g.cg; parse = g.parse }
+
+  let issue_demand_query qry entrypoints (g : t) : t =
+    let qry_package = deserialize_package qry in
+    let qry_class_name = deserialize_class qry in
+    match
+      List.find (G.fns g.dsg) ~f:(fun { method_id = { class_name; package; _ }; _ } ->
+          String.equal class_name qry_class_name && (List.equal String.equal) package qry_package)
+    with
+    | None -> failwith ("no procedure found matching demand query " ^ qry)
+    | Some fn ->
+        let _res, dsg =
+          G.loc_only_query g.dsg ~fn ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields ~entrypoints
+        in
+        { dsg; cg = g.cg; parse = g.parse }
 end

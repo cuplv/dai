@@ -37,4 +37,17 @@ module Make (Dom : Abstract.Dom) : sig
     fields:Declared_fields.t ->
     t ->
     Dom.t * t
+  (** query for the abstract state at some [loc] under some [entry_state] precondition *)
+
+  val loc_only_query :
+    fn:Cfg.Fn.t ->
+    loc:Cfg.Loc.t ->
+    cg:Callgraph.bidirectional ->
+    fields:Declared_fields.t ->
+    entrypoints:Cfg.Fn.t list ->
+    t ->
+    Dom.t list * t
+  (** query for the abstract state at some [loc] under _any_ reachable [entry_state] precondition,
+        exploring back to the specified [entrypoints]
+    *)
 end
