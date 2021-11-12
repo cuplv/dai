@@ -13,7 +13,9 @@ let analyze =
           ~doc:"incremental analysis: reuse results across the program edit where possible"
       and dd =
         flag "demand" (optional string)
-          ~doc:"<method> demand-driven analysis: analyze only as needed to analyze <method>"
+          ~doc:
+            "<com.example.Baz#foo(argtypes)> demand-driven analysis: analyze only as needed to \
+             analyze the specified method (in the same format as output by WALA-callgraph)"
       and diagnostic =
         flag "diagnostic" no_arg
           ~doc:
@@ -99,7 +101,7 @@ let analyze =
                   let _queried_edited_state = issue_exit_queries entrypoints edited_state in
                   ()
               | `Demand_and_incr qry_loc ->
-                  Format.printf "Running analysis in INCREMENTAL mode\n";
+                  Format.printf "Running analysis in DEMANDED mode\n";
                   Format.printf "Constructing initial state...\n";
                   let initial_state = init src_dir prev_cg in
                   let entrypoints = entrypoints entry_class initial_state in

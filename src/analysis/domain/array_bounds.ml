@@ -294,7 +294,7 @@ let arrayify_varargs (actuals : Expr.t list) (formals : int) (phi : t) : Expr.t 
 let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
   let caller_am, caller_itv = extend_env_by_uses callsite caller_state in
   match callsite with
-  | Ast.Stmt.Call { rcvr; actuals; alloc_site = _; _ } ->
+  | Ast.Stmt.Call { rcvr; actuals; _ } | Ast.Stmt.Exceptional_call { rcvr; actuals; _ } ->
       let actuals, (caller_am, caller_itv) =
         if List.(length actuals = length callee.formals) then (actuals, (caller_am, caller_itv))
         else arrayify_varargs actuals (List.length callee.formals) (caller_am, caller_itv)

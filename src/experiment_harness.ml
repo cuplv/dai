@@ -147,12 +147,8 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
     |> fun dsg -> { dsg; cg = g.cg; parse = g.parse }
 
   let issue_demand_query qry entrypoints (g : t) : t =
-    let qry_package = deserialize_package qry in
-    let qry_class_name = deserialize_class qry in
-    match
-      List.find (G.fns g.dsg) ~f:(fun { method_id = { class_name; package; _ }; _ } ->
-          String.equal class_name qry_class_name && (List.equal String.equal) package qry_package)
-    with
+    let method_id = Method_id.deserialize qry in
+    match List.find (G.fns g.dsg) ~f:(fun fn -> Method_id.equal method_id fn.method_id) with
     | None -> failwith ("no procedure found matching demand query " ^ qry)
     | Some fn ->
         let _res, dsg =

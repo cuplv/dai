@@ -410,24 +410,27 @@ module Make (Dom : Abstract.Dom) = struct
         in
         ([ res ], dsg))
       else
-        let nonrec_callers, rec_callers = List.partition_tf callers ~f:(Cfg.Fn.equal fn) in
+        let rec_callers, nonrec_callers = List.partition_tf callers ~f:(Cfg.Fn.equal fn) in
         let entry_states, dsg =
           List.fold nonrec_callers ~init:(Dom.Set.empty, dsg)
             ~f:(fun (acc_entry_states, dsg) caller ->
-              let callsite, caller_loc =
-                Sequence.find_exn
+              let calledges =
+                Sequence.filter
                   (Cfg.G.edges (get_cfg_exn dsg caller))
                   ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
-                |> fun x -> (Cfg.G.Edge.label x, Cfg.G.Edge.src x)
               in
-              let caller_states, g =
-                loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
-              in
-              let acc_entry_states =
-                List.fold caller_states ~init:acc_entry_states ~f:(fun acc caller_state ->
-                    Set.add acc (Dom.call ~callee:fn ~callsite ~caller_state ~fields))
-              in
-              (acc_entry_states, g))
+              Sequence.fold calledges ~init:(acc_entry_states, dsg)
+                ~f:(fun (acc_entry_states, dsg) calledge ->
+                  let caller_loc = Cfg.G.Edge.src calledge in
+                  let callsite = Cfg.G.Edge.label calledge in
+                  let caller_states, dsg =
+                    loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
+                  in
+                  let acc_entry_states =
+                    List.fold caller_states ~init:acc_entry_states ~f:(fun acc caller_state ->
+                        Set.add acc (Dom.call ~callee:fn ~callsite ~caller_state ~fields))
+                  in
+                  (acc_entry_states, dsg)))
         in
         match rec_callers with
         | [] ->

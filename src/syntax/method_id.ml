@@ -48,3 +48,35 @@ module Map = struct
 end
 
 include T_comparator
+
+let deserialize m : t =
+  let open String in
+  let static, rest_of_m =
+    if is_prefix m ~prefix:"static " then (true, drop_prefix m 7) else (false, m)
+  in
+  let pkg_and_class_str, rest_of_m =
+    match split rest_of_m ~on:'#' with
+    | [ before; after ] -> (before, after)
+    | _ -> failwith "malformed serialized method: %s"
+  in
+  let package = deserialize_package pkg_and_class_str in
+  let class_name = deserialize_class pkg_and_class_str in
+  let method_name, arg_types =
+    match split rest_of_m ~on:'(' with
+    | [ meth; args_and_close_paren ] ->
+        let args =
+          sub args_and_close_paren ~pos:0 ~len:(length args_and_close_paren - 1)
+          |> split ~on:','
+          |> List.filter ~f:(String.is_empty >> not)
+        in
+        let arg_types =
+          List.map args ~f:(fun arg_type ->
+              let last_dot_idx = rindex arg_type '.' in
+              match last_dot_idx with
+              | Some idx -> drop_prefix arg_type (idx + 1)
+              | None -> arg_type)
+        in
+        (meth, arg_types)
+    | _ -> failwith ("malformed serialized method: " ^ m)
+  in
+  { package; class_name; method_name; static; arg_types }
