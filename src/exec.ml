@@ -37,6 +37,9 @@ let analyze =
           ~doc:
             "<com.example.Baz> fully-qualified Java class name to treat as entrypoint. Defaults to \
              all \"main\" methods if not provided"
+      and cg_to_dot =
+        flag "cg-to-dot" (optional string)
+          ~doc:"<cg> deserialize callgraph for <src_dir>, dump to ./cg.dot, and exit"
       in
       fun () ->
         let srcs = Experiment_harness.java_srcs src_dir in
@@ -45,6 +48,11 @@ let analyze =
         let open Result.Monad_infix in
         if diagnostic && Option.is_some next_dir then
           failwith "diagnostic mode only applies to a single program version"
+        else if Option.is_some cg_to_dot then
+          let cg_path = Option.value_exn cg_to_dot in
+          let _ = Format.printf "Dumping DOT representation of %s at ./cg.dot\n" cg_path in
+          let state = Analysis.init src_dir cg_path in
+          Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") state.cg.forward
         else if diagnostic then (
           List.iter srcs ~f:(fun src ->
               let file = Src_file.of_file src in

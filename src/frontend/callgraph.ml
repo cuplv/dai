@@ -93,7 +93,7 @@ let dump_dot ~filename (cg : t) : unit =
     in
     Graph.create (module G) ~edges ()
   in
-  Graph.to_dot (module G) (to_graph cg) ~filename
+  Graph.to_dot (module G) (to_graph cg) ~filename ~string_of_node:(Format.asprintf "\"%s\"")
 
 let%test "procedures example" =
   let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
