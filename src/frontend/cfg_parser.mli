@@ -21,20 +21,20 @@ val set_parse_result :
 
 val empty_parse_result : prgm_parse_result
 
-val print_diagnostic_results : unit -> unit
+val set_diagnostic : bool -> unit
 
-val of_java_cst : ?diagnostic:bool -> ?acc:prgm_parse_result -> CST.program -> prgm_parse_result
-(** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided;
-    run in [diagnostic] mode if that flag is set, printing information about our compatibility with the syntax of the given CST rather than failing fast on incompatible syntactic form*)
+(* run in [diagnostic] mode if set, gathering information about our compatibility with the syntax of the given CST rather than failing fast on incompatible syntactic form*)
+val print_diagnostic_results : unit -> unit
+(* print information about unimplemented syntax encountered *)
+
+val of_java_cst : ?acc:prgm_parse_result -> CST.program -> prgm_parse_result
+(** Parse each method in a (java) tree-sitter concrete syntax tree to a CFG, adding to an [acc]umulator parse result if provided*)
 
 val parse_file_exn : ?acc:prgm_parse_result -> string -> prgm_parse_result
 (** Parse a (java) source file to CFGs, adding to an [acc]umulator parse result if provided *)
 
 val parse_files_exn : files:string list -> prgm_parse_result
 (** Parse some (java) source [files] to CFGs *)
-
-val parse_tree_exn : ?acc:prgm_parse_result -> string -> Tree.t -> prgm_parse_result
-(** Translate the given tree-sitter parse [tree] to CFGs, adding to an [acc]umulator parse result if provided*)
 
 val parse_trees_exn : trees:(string * Tree.t) list -> prgm_parse_result
 (** Translate the given tree-sitter parse [trees] to CFGs *)

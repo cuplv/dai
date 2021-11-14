@@ -46,23 +46,22 @@ let analyze =
           ~doc:"use the unit domain (defaults to array-bounds-checking interval domain otherwise)"
       in
       fun () ->
-        let srcs = Experiment_harness.java_srcs src_dir in
         Format.printf "Initializing DAI; java src_dir: %s\n" src_dir;
         let open Frontend in
-        let open Result.Monad_infix in
-        if diagnostic && Option.is_some next_dir then
-          failwith "diagnostic mode only applies to a single program version"
-        else if Option.is_some cg_to_dot then
-          let cg_path = Option.value_exn cg_to_dot in
-          let _ = Format.printf "Dumping DOT representation of %s at ./cg.dot\n" cg_path in
-          let state = Analysis.init src_dir cg_path in
+        if Option.is_some cg_to_dot then
+          let cg = Option.value_exn cg_to_dot in
+          let _ = Format.printf "Dumping DOT representation of %s at ./cg.dot\n" cg in
+          let state = Analysis.init ~cg src_dir in
           Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") (Analysis.cg state)
         else if diagnostic then (
-          List.iter srcs ~f:(fun src ->
-              let file = Src_file.of_file src in
-              Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file
-              >>| Cfg_parser.of_java_cst ~diagnostic
-              |> ignore);
+          Format.printf "RUNNING DIAGNOSTIC MODE: PARSING\n";
+          Cfg_parser.set_diagnostic true;
+          let state = Analysis.init src_dir in
+          (match next_dir with
+          | Some next_dir ->
+              Format.printf "RUNNING DIAGNOSTIC MODE: EDITING\n";
+              ignore @@ Analysis.update ~next_dir state
+          | None -> ());
           Cfg_parser.print_diagnostic_results ())
         else
           match (next_dir, prev_cg, next_cg) with
@@ -83,24 +82,24 @@ let analyze =
               | `Batch ->
                   Format.printf "Running analysis in BATCH mode\n";
                   Format.printf "Constructing initial state...\n";
-                  let initial_state = init src_dir prev_cg in
+                  let initial_state = init ~cg:prev_cg src_dir in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at program exit locations...\n";
                   let _queried_state = issue_exit_queries entrypoints initial_state in
                   Format.printf "Constructing edited state...\n";
-                  let edited_state = init next_dir next_cg in
+                  let edited_state = init ~cg:next_cg next_dir in
                   Format.printf "Querying at program exit locations...\n";
                   let _queried_edited_state = issue_exit_queries entrypoints edited_state in
                   ()
               | `Demand_only qry_loc ->
                   Format.printf "Running analysis in DEMAND-DRIVEN mode\n";
                   Format.printf "Constructing initial state...\n";
-                  let initial_state = init src_dir prev_cg in
+                  let initial_state = init ~cg:prev_cg src_dir in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at demand query location...\n";
                   let _queried_state = issue_demand_query ~qry_loc entrypoints initial_state in
                   Format.printf "Constructing edited state...\n";
-                  let edited_state = init next_dir next_cg in
+                  let edited_state = init ~cg:next_cg next_dir in
                   Format.printf "Querying at demand query locations...\n";
                   let _queried_edited_state =
                     issue_demand_query ~qry_loc entrypoints edited_state
@@ -109,24 +108,24 @@ let analyze =
               | `Incr_only ->
                   Format.printf "Running analysis in INCREMENTAL mode\n";
                   Format.printf "Constructing initial state...\n";
-                  let initial_state = init src_dir prev_cg in
+                  let initial_state = init ~cg:prev_cg src_dir in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at program exit locations...\n";
                   let queried_state = issue_exit_queries entrypoints initial_state in
                   Format.printf "Applying incremental edit...\n";
-                  let edited_state = update next_dir next_cg queried_state in
+                  let edited_state = update ~next_dir ~cg:next_cg queried_state in
                   Format.printf "Querying at program exit locations...\n";
                   let _queried_edited_state = issue_exit_queries entrypoints edited_state in
                   ()
               | `Demand_and_incr qry_loc ->
                   Format.printf "Running analysis in DEMANDED mode\n";
                   Format.printf "Constructing initial state...\n";
-                  let initial_state = init src_dir prev_cg in
+                  let initial_state = init ~cg:prev_cg src_dir in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at demand query location...\n";
                   let queried_state = issue_demand_query ~qry_loc entrypoints initial_state in
                   Format.printf "Applying incremental edit...\n";
-                  let edited_state = update next_dir next_cg queried_state in
+                  let edited_state = update ~next_dir ~cg:next_cg queried_state in
                   Format.printf "Querying at demand query locations...\n";
                   let _queried_edited_state =
                     issue_demand_query ~qry_loc entrypoints edited_state

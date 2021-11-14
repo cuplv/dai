@@ -36,9 +36,9 @@ module type S = sig
 
   val cg : t -> Callgraph.t
 
-  val init : string -> string -> t
+  val init : ?cg:string -> string -> t
 
-  val update : string -> string -> t -> t
+  val update : ?cg:string -> next_dir:string -> t -> t
 
   val entrypoints : string option -> t -> Cfg.Fn.t list
 
@@ -65,7 +65,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
   let cg x = x.cg.forward
 
   (* Initialize a DSG over src_dir/**/*.java, with the callgraph serialized at [cg] *)
-  let init src_dir cg =
+  let init ?cg src_dir =
+    let cg = match cg with Some cg -> cg | None -> "/dev/null" in
     let trees =
       List.fold (java_srcs src_dir) ~init:String.Map.empty ~f:(fun trees src ->
           let file = Src_file.of_file src in
@@ -94,22 +95,31 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
    * rather than editing the program in place.
    * This function applies the "edit" between the two program versions to an analysis [state]
    *)
-  let update (next_src_dir : string) (next_cg : string) (g : t) : t =
+  let update ?(cg = "/dev/null") ~(next_dir : string) (g : t) : t =
     let prev_src_dir = g.parse.src_dir in
     let prev_files = String.Map.keys g.parse.trees |> String.Set.of_list in
-    let next_files = relative_java_srcs next_src_dir |> String.Set.of_list in
+    let next_files = relative_java_srcs next_dir |> String.Set.of_list in
     let shared_files, new_files = Set.(partition_tf next_files ~f:(mem prev_files)) in
     let changed_files =
       Set.filter shared_files ~f:(fun file ->
-          Sys.command (Format.asprintf "cmp %s %s" (prev_src_dir / file) (next_src_dir / file))
+          let file = String.substr_replace_all ~pattern:"$" ~with_:"\\$" file in
+          Sys.command (Format.asprintf "cmp %s %s" (prev_src_dir / file) (next_dir / file))
           |> (Int.equal 0 >> not))
     in
+    Format.printf
+      "prev_files:    %i\n\
+       next_files:    %i\n\
+       shared_files:  %i\n\
+       new_files:     %i\n\
+       changed_files: %a\n"
+      (Set.length prev_files) (Set.length next_files) (Set.length shared_files)
+      (Set.length new_files) (Set.pp String.pp) changed_files;
     let init = (g.parse.trees, g.dsg, g.parse.loc_map) in
     let trees, dsg, loc_map =
       Set.fold changed_files ~init ~f:(fun (trees, dsg, lm) filename ->
           let prev_tree = String.Map.find_exn g.parse.trees filename in
           let prev_file = Src_file.of_file (prev_src_dir / filename) in
-          let next_file = Src_file.of_file (next_src_dir / filename) in
+          let next_file = Src_file.of_file (next_dir / filename) in
           Result.Let_syntax.(
             let%bind prev = Tree.as_java_cst prev_file prev_tree in
             let%bind tree = Tree.parse ~old_tree:(Some prev_tree) ~file:next_file in
@@ -129,7 +139,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
         set_parse_result ~loc_map ~cha:g.parse.cha ~fields:g.parse.fields empty_parse_result
       in
       Set.fold new_files ~init ~f:(fun acc filename ->
-          let file = Src_file.of_file (next_src_dir / filename) in
+          let file = Src_file.of_file (next_dir / filename) in
           Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| Cfg_parser.of_java_cst ~acc
           |> function
           | Ok res -> res
@@ -139,13 +149,13 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let cg =
       Callgraph.(
         let fns = G.fns dsg in
-        let forward = deserialize ~fns (Src_file.of_file next_cg) in
+        let forward = deserialize ~fns (Src_file.of_file cg) in
         let reverse = reverse ~fns forward in
         { forward; reverse })
     in
     (* TODO: handle added fields and CHA edges in edited files; add corresponding Tree_diff.edit's
        and expose functions there to use here to apply diffs to our fields/cha structures *)
-    let parse = { src_dir = next_src_dir; trees; loc_map; fields; cha } in
+    let parse = { src_dir = next_dir; trees; loc_map; fields; cha } in
     { dsg; cg; parse }
 
   let entrypoints entry_class g =

@@ -31,6 +31,8 @@ let tmp_var_counter = ref 0
 
 let diagnostic_mode = ref false
 
+let set_diagnostic b = diagnostic_mode := b
+
 let unimplemented_syntax : int String.Map.t ref = ref String.Map.empty
 
 (* when in [diagnostic_mode], accumulate a count of appearances of unimplemented syntactic forms *)
@@ -1337,9 +1339,7 @@ let cha_and_fields_of_cst ?(acc_cha = Class_hierarchy.empty) ?(acc_fields = Decl
   impl (acc_cha, acc_fields) containing_class cst |> fun (cha, fields) ->
   (cha, Class_hierarchy.compute_closure ~cha ~fields)
 
-let of_java_cst ?(diagnostic = false) ?(acc = empty_parse_result) (cst : CST.program) :
-    prgm_parse_result =
-  diagnostic_mode := diagnostic;
+let of_java_cst ?(acc = empty_parse_result) (cst : CST.program) : prgm_parse_result =
   let package = package_of_cst cst in
   let imports = imports_of_cst ~package cst in
   let cha, fields = cha_and_fields_of_cst ~acc_cha:acc.cha ~acc_fields:acc.fields cst in
