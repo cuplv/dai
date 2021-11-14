@@ -59,11 +59,17 @@ let analyze =
         else if diagnostic then (
           Format.printf "RUNNING DIAGNOSTIC MODE: PARSING\n";
           Cfg_parser.set_diagnostic true;
-          let state = Harness.init src_dir in
+          let state =
+            match prev_cg with Some cg -> Harness.init ~cg src_dir | _ -> Harness.init src_dir
+          in
           (match next_dir with
-          | Some next_dir ->
+          | Some next_dir -> (
               Format.printf "RUNNING DIAGNOSTIC MODE: EDITING\n";
-              ignore @@ Harness.update ~next_dir state
+              ignore
+              @@
+              match next_cg with
+              | Some cg -> Harness.update ~cg ~next_dir state
+              | _ -> Harness.update ~next_dir state)
           | None -> ());
           Cfg_parser.print_diagnostic_results ())
         else
