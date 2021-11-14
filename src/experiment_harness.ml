@@ -9,7 +9,92 @@ let ( / ) pre post = pre ^ Stdlib.Filename.dir_sep ^ post
 let base_exclusions =
   [ "test"; "package-info.java"; "module-info.java"; "annotations"; "annotation"; ".m2" ]
 
-let experiment_exclusions = [ "HashCodeAndEqualsPlugin.java"; "ToStringPlugin.java" ]
+let experiment_exclusions =
+  [
+    "AbstractAnnotationDescriptionTest.java";
+    "AbstractAnnotationListTest.java";
+    "AbstractAttributeAppenderTest.java";
+    "AbstractDynamicTypeBuilderForInliningTest.java";
+    "AbstractDynamicTypeBuilderTest.java";
+    "AbstractEnumerationDescriptionTest.java";
+    "AbstractFieldDescriptionTest.java";
+    "AbstractMethodDescriptionTest.java";
+    "AbstractTypeDescriptionTest.java";
+    "AccessControllerPlugin.java";
+    "AccessControllerRule.java";
+    "Advice.java";
+    "AdviceCustomAnnotationOnFieldTest.java";
+    "AdviceCustomAnnotationOnParameterTest.java";
+    "AdviceInconsistentStackSizeTest.java";
+    "AdviceTest.java";
+    "AdviceTypeTest.java";
+    "AgentAttachmentRule.java";
+    "AllArguments.java";
+    "AnnotationAppenderDefaultTest.java";
+    "AnnotationDescriptionAnnotationInvocationHandlerTest.java";
+    "AnnotationDescriptionBuilderTest.java";
+    "AnnotationDescriptionForLoadedAnnotationTest.java";
+    "AnnotationValueSortTest.java";
+    "Argument.java";
+    "AuxiliaryType.java";
+    "BindingPriority.java";
+    "ByteBuddyTutorialExamplesTest.java";
+    "CachedReturnPlugin.java";
+    "ClassJnaInjectionAvailableRule.java";
+    "ClassReflectionInjectionAvailableRule.java";
+    "ClassUnsafeInjectionAvailableRule.java";
+    "CompileClasspath.java";
+    "DecoratingDynamicTypeBuilderTest.java";
+    "Default.java";
+    "DefaultCall.java";
+    "DefaultMethod.java";
+    "ElementMatchersTest.java";
+    "Empty.java";
+    "FieldAttributeAppenderForAnnotationsTest.java";
+    "FieldProxy.java";
+    "FieldValue.java";
+    "GradleType.java";
+    "HashCodeAndEqualsPlugin.java";
+    "IgnoreForBinding.java";
+    "Incremental.java";
+    "InstrumentedTypeDefaultTest.java";
+    "IntegrationRule.java";
+    "Internal.java";
+    "JavaConstant$MethodHandle.class matches";
+    "JavaConstant.java";
+    "JavaDispatcher.java";
+    "JavaVersionRule.java";
+    "MemberAttributeExtensionTest.java";
+    "MethodAttributeAppenderExplicitTest.java";
+    "Morph.java";
+    "NativeSampleRule.java";
+    "Origin.java";
+    "OtherTypeAnnotation.java";
+    "PackageAnnotation.java";
+    "Pipe.java";
+    "Plugin.java";
+    "RebaseDynamicTypeBuilderTest.java";
+    "RecordComponentAttributeAppenderForAnnotationsTest.java";
+    "RepeatedAnnotationPlugin.java";
+    "RepeatedAnnotationPluginTest.java";
+    "RuntimeType.java";
+    "StubValue.java";
+    "SubclassDynamicTypeBuilderTest.java";
+    "Substitution.java";
+    "Super.java";
+    "SuperCall.java";
+    "SuperMethod.java";
+    "TargetMethodAnnotationDrivenBinderTest.java";
+    "TargetMethodAnnotationDriverBinderParameterBinderForFixedValueOfConstantOtherTest.java";
+    "TargetMethodAnnotationDriverBinderParameterBinderForFixedValueOfConstantTest.java";
+    "This.java";
+    "ToStringPlugin.java";
+    "TypeAnnotation.java";
+    "TypeAttributeAppenderExplicitTest.java";
+    "TypeDescriptionGenericVisitorAnnotationStripperTest.java";
+    "TypeReferenceAdjustmentTest.java";
+    "TypeWriterDefaultTest.java";
+  ]
 (* files containing "@interface" annotations that crash tree sitter *)
 
 let exclusions = experiment_exclusions @ base_exclusions
