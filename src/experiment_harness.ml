@@ -258,19 +258,25 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     List.filter (G.fns g.dsg) ~f
 
   let issue_exit_queries entrypoints (g : t) =
-    List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
-        G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit
-          ~callgraph:g.cg.forward ~fields:g.parse.fields
-        |> snd)
-    |> fun dsg -> { dsg; cg = g.cg; parse = g.parse }
+    let st = systime () in
+    let dsg =
+      List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
+          G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit
+            ~callgraph:g.cg.forward ~fields:g.parse.fields
+          |> snd)
+    in
+    Format.printf "[EXPERIMENT] batch analysis took: %.3f\n" (1000. *. (systime () -. st));
+    { dsg; cg = g.cg; parse = g.parse }
 
   let issue_demand_query ~qry_loc entrypoints (g : t) : t =
     let method_id = Method_id.deserialize qry_loc in
     match List.find (G.fns g.dsg) ~f:(fun fn -> Method_id.equal method_id fn.method_id) with
     | None -> failwith ("no procedure found matching demand query " ^ qry_loc)
     | Some fn ->
+        let st = systime () in
         let _res, dsg =
           G.loc_only_query g.dsg ~fn ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields ~entrypoints
         in
+        Format.printf "[EXPERIMENT] demand query took: %.3f\n" (1000. *. (systime () -. st));
         { dsg; cg = g.cg; parse = g.parse }
 end
