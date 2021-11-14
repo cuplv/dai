@@ -2,8 +2,6 @@ open Dai
 open Import
 open Command
 open Command.Let_syntax
-module Analysis = Experiment_harness.DSG_wrapper (Domain.Array_bounds)
-module UnitAnalysis = Experiment_harness.DSG_wrapper (Domain.Unit_dom)
 
 let analyze =
   basic ~summary:"Analyze a program edit using the DAI framework"
@@ -48,28 +46,29 @@ let analyze =
       fun () ->
         Format.printf "Initializing DAI; java src_dir: %s\n" src_dir;
         let open Frontend in
+        let (module Harness : Experiment_harness.S) =
+          if unit_dom then
+            (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
+          else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
+        in
         if Option.is_some cg_to_dot then
           let cg = Option.value_exn cg_to_dot in
           let _ = Format.printf "Dumping DOT representation of %s at ./cg.dot\n" cg in
-          let state = Analysis.init ~cg src_dir in
-          Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") (Analysis.cg state)
+          let state = Harness.init ~cg src_dir in
+          Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") (Harness.cg state)
         else if diagnostic then (
           Format.printf "RUNNING DIAGNOSTIC MODE: PARSING\n";
           Cfg_parser.set_diagnostic true;
-          let state = Analysis.init src_dir in
+          let state = Harness.init src_dir in
           (match next_dir with
           | Some next_dir ->
               Format.printf "RUNNING DIAGNOSTIC MODE: EDITING\n";
-              ignore @@ Analysis.update ~next_dir state
+              ignore @@ Harness.update ~next_dir state
           | None -> ());
           Cfg_parser.print_diagnostic_results ())
         else
           match (next_dir, prev_cg, next_cg) with
           | Some next_dir, Some prev_cg, Some next_cg -> (
-              let (module Harness : Experiment_harness.S) =
-                if unit_dom then (module UnitAnalysis : Experiment_harness.S)
-                else (module Analysis : Experiment_harness.S)
-              in
               let open Harness in
               let mode =
                 match (incr, dd) with
