@@ -7,7 +7,7 @@ open Syntax
 let ( / ) pre post = pre ^ Stdlib.Filename.dir_sep ^ post
 
 let base_exclusions =
-  [ "test"; "package-info.java"; "module-info.java"; "annotations"; "annotation" ]
+  [ "test"; "package-info.java"; "module-info.java"; "annotations"; "annotation"; ".m2" ]
 
 let experiment_exclusions = [ "HashCodeAndEqualsPlugin.java"; "ToStringPlugin.java" ]
 (* files containing "@interface" annotations that crash tree sitter *)
@@ -103,7 +103,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let changed_files =
       Set.filter shared_files ~f:(fun file ->
           let file = String.substr_replace_all ~pattern:"$" ~with_:"\\$" file in
-          Sys.command (Format.asprintf "cmp %s %s" (prev_src_dir / file) (next_dir / file))
+          Sys.command (Format.asprintf "cmp %s %s >/dev/null" (prev_src_dir / file) (next_dir / file))
           |> (Int.equal 0 >> not))
     in
     Format.printf
