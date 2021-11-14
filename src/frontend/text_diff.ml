@@ -56,9 +56,9 @@ let btwn ~prev ~next =
              in
              failwith
                (Format.asprintf
-                  "With ~context:0, patdiff should always yield 3-range hunks of form (Same [||]) \
-                   :: r :: (Same [||]) :: []; got %a instead"
-                  (List.pp "/" String.pp)
+                  "With ~context:0, patdiff should always yield hunks of form [Same] or \
+                   [Same,r,Same]; got %a instead"
+                  (List.pp ~pre:"[" ~suf:"]" "," String.pp)
                   (List.map ranges ~f:string_of_range)))
 
 let%test "adding adjacent lines" =
