@@ -34,6 +34,8 @@ module type Sig = sig
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
+  exception Ref_not_found of Cfg.Loc.t
+
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
   val get_by_name : ?summarizer:summarizer -> Name.t -> t -> absstate or_summary_query * t
@@ -557,6 +559,8 @@ module Make (Dom : Abstract.Dom) = struct
     let entry_ref = Ref.AState { state = Some entry_state; name = Name.Loc fn.entry } in
     of_region_cfg ~entry_ref ~cfg ~entry:fn.entry ~loop_iteration_ctx:None ()
 
+  exception Ref_not_found of Cfg.Loc.t
+
   let ref_at_loc_exn ~loc =
     G.nodes
     >> Seq.filter ~f:(function
@@ -567,7 +571,7 @@ module Make (Dom : Abstract.Dom) = struct
     >> Seq.to_list
     >> function
     | [ r ] -> r
-    | [] -> failwith "error: no refs found at given location"
+    | [] -> raise (Ref_not_found loc)
     | [ r1; r2 ] -> (
         match Ref.(name r1, name r2) with
         | Name.Loc _, Name.Iterate _ -> r1
@@ -821,9 +825,14 @@ module Make (Dom : Abstract.Dom) = struct
                       in
                       (res, daig)
                   | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi)), daig))
-              | _ ->
+              | preds ->
+                  dump_dot daig ~filename:(abs_of_rel_path "debug.dot");
                   failwith
-                    "malformed DCG: transfer function must have one Stmt and one AState input")
+                    (Format.asprintf
+                       "malformed DCG: transfer function must have one Stmt and one AState input, \
+                        instead have (dot dumped at debug.dot): \n\
+                        \t%a\n"
+                       (List.pp "\n\t" Ref.pp) preds))
           | `Join -> (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.join), daig)
           | `Widen ->
               (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.widen), daig)

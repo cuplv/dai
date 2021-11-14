@@ -41,6 +41,8 @@ module type Sig = sig
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
+  exception Ref_not_found of Cfg.Loc.t
+
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
   val get_by_name : ?summarizer:summarizer -> Name.t -> t -> absstate or_summary_query * t
