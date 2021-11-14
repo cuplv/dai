@@ -275,8 +275,7 @@ let rec decls_by_id ?(package = []) ?(parent_class = None) :
               }
             in
             (method_id, si) :: acc
-        | `Field_decl _ | `Inte_decl _ | `Anno_type_decl _ | `SEMI _ | `Blk _ | `Enum_decl _ -> acc
-        | _ -> failwith "unrecognized class body declaration")
+        | _ -> acc)
   | `Decl (`Anno_type_decl _)
   | `SEMI _
   | `Decl (`Enum_decl _)

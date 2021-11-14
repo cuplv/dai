@@ -103,7 +103,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let changed_files =
       Set.filter shared_files ~f:(fun file ->
           let file = String.substr_replace_all ~pattern:"$" ~with_:"\\$" file in
-          Sys.command (Format.asprintf "cmp %s %s >/dev/null" (prev_src_dir / file) (next_dir / file))
+          Sys.command
+            (Format.asprintf "cmp %s %s >/dev/null" (prev_src_dir / file) (next_dir / file))
           |> (Int.equal 0 >> not))
     in
     Format.printf
