@@ -25,6 +25,13 @@ let btwn ~prev ~next =
   Patdiff.get_hunks ~transform:(fun x -> x) ~context:0 ~big_enough:3 ~prev ~next
   |> List.map ~f:(fun hunk ->
          match Hunk.ranges hunk with
+         | [ Same _ ] ->
+             {
+               prev_start_line = Hunk.prev_start hunk;
+               prev_length = Hunk.prev_size hunk;
+               next_start_line = Hunk.next_start hunk;
+               new_lines = [||];
+             }
          | [ Same [||]; r; Same [||] ] ->
              let new_lines =
                match r with
@@ -39,10 +46,20 @@ let btwn ~prev ~next =
                next_start_line = Hunk.next_start hunk;
                new_lines;
              }
-         | _ ->
+         | ranges ->
+             let string_of_range : 'a Patience_diff_lib.Patience_diff.Range.t -> string = function
+               | Prev _ -> "Prev"
+               | Next _ -> "Next"
+               | Replace _ -> "Replace"
+               | Same _ -> "Same"
+               | Unified _ -> "Unified"
+             in
              failwith
-               "With ~context:0, patdiff should always yield 3-range hunks of form (Same [||]) :: \
-                r :: (Same [||]) :: []")
+               (Format.asprintf
+                  "With ~context:0, patdiff should always yield 3-range hunks of form (Same [||]) \
+                   :: r :: (Same [||]) :: []; got %a instead"
+                  (List.pp "/" String.pp)
+                  (List.map ranges ~f:string_of_range)))
 
 let%test "adding adjacent lines" =
   let prev =
