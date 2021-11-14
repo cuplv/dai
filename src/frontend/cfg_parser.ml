@@ -994,6 +994,14 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           ~brk:(Some exit, snd brk)
           ~cont body
       in
+      let body =
+        if List.count body ~f:(snd3 >> Loc.equal entry) > 1 then
+          let pre_exit_loc = Loc.fresh () in
+          (pre_exit_loc, entry, Stmt.Skip)
+          :: List.map body ~f:(fun (src, dst, lbl) ->
+                 (src, (if Loc.equal dst entry then pre_exit_loc else dst), lbl))
+        else body
+      in
       (intermediate_loc, body_entry, Stmt.Assume cond)
       :: (intermediate_loc, exit, Stmt.Assume cond_neg)
       :: body

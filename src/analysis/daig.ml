@@ -1104,3 +1104,18 @@ let%test "analyze nested loops" =
            ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ ".dot"))
            analyzed_daig);
   true
+
+let%test "analyze conditional at end of loop body" =
+  let ({ cfgs; _ } : Cfg_parser.prgm_parse_result) =
+    Frontend.Cfg_parser.parse_file_exn
+      (abs_of_rel_path "test_cases/java/ConditionalAtLoopExit.java")
+  in
+  Map.to_alist cfgs
+  |> List.iter ~f:(fun (fn, cfg) ->
+         let daig = Daig.of_cfg ~entry_state:(Dom.init ()) ~cfg ~fn in
+         Daig.dump_dot ~filename:(abs_of_rel_path (fn.method_id.method_name ^ ".dot")) daig;
+         let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
+         Daig.dump_dot
+           ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ ".dot"))
+           analyzed_daig);
+  true
