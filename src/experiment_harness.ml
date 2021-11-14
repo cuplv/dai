@@ -6,7 +6,12 @@ open Syntax
 
 let ( / ) pre post = pre ^ Stdlib.Filename.dir_sep ^ post
 
-let exclusions = [ "test"; "package-info.java"; "module-info.java" ]
+let base_exclusions = [ "test"; "package-info.java"; "module-info.java"; "annotations" ]
+
+let experiment_exclusions = [ "HashCodeAndEqualsPlugin.java"; "ToStringPlugin.java" ]
+(* files containing "@interface" annotations that crash tree sitter *)
+
+let exclusions = experiment_exclusions @ base_exclusions
 
 let rec java_srcs dir =
   let open Sys in
