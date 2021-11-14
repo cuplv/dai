@@ -69,13 +69,13 @@ let deserialize ~fns =
 
 let reverse ~(fns : Cfg.Fn.t list) (cg : t) : reverse_t =
   Map.fold cg ~init:Method_id.Map.empty ~f:(fun ~key:caller ~data:callees acc ->
-      let caller =
-        List.find_exn fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller)
-      in
-      List.fold callees ~init:acc ~f:(fun acc callee ->
-          Map.update acc callee.method_id ~f:(function
-            | Some callers -> caller :: callers
-            | None -> [ caller ])))
+      match List.find fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller) with
+      | Some caller_fn ->
+          List.fold callees ~init:acc ~f:(fun acc callee ->
+              Map.update acc callee.method_id ~f:(function
+                | Some callers -> caller_fn :: callers
+                | None -> [ caller_fn ]))
+      | None -> acc)
 
 let callers ~callee_method ~reverse_cg =
   match Map.find reverse_cg callee_method with Some callers -> callers | None -> []
