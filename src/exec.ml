@@ -3,6 +3,7 @@ open Import
 open Command
 open Command.Let_syntax
 module Analysis = Experiment_harness.DSG_wrapper (Domain.Array_bounds)
+module UnitAnalysis = Experiment_harness.DSG_wrapper (Domain.Unit_dom)
 
 let analyze =
   basic ~summary:"Analyze a program edit using the DAI framework"
@@ -40,6 +41,9 @@ let analyze =
       and cg_to_dot =
         flag "cg-to-dot" (optional string)
           ~doc:"<cg> deserialize callgraph for <src_dir>, dump to ./cg.dot, and exit"
+      and unit_dom =
+        flag "unit-dom" no_arg
+          ~doc:"use the unit domain (defaults to array-bounds-checking interval domain otherwise)"
       in
       fun () ->
         let srcs = Experiment_harness.java_srcs src_dir in
@@ -52,7 +56,7 @@ let analyze =
           let cg_path = Option.value_exn cg_to_dot in
           let _ = Format.printf "Dumping DOT representation of %s at ./cg.dot\n" cg_path in
           let state = Analysis.init src_dir cg_path in
-          Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") state.cg.forward
+          Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") (Analysis.cg state)
         else if diagnostic then (
           List.iter srcs ~f:(fun src ->
               let file = Src_file.of_file src in
@@ -63,7 +67,11 @@ let analyze =
         else
           match (next_dir, prev_cg, next_cg) with
           | Some next_dir, Some prev_cg, Some next_cg -> (
-              let open Analysis in
+              let (module Harness : Experiment_harness.S) =
+                if unit_dom then (module UnitAnalysis : Experiment_harness.S)
+                else (module Analysis : Experiment_harness.S)
+              in
+              let open Harness in
               let mode =
                 match (incr, dd) with
                 | true, Some qry_loc -> `Demand_and_incr qry_loc
@@ -90,11 +98,13 @@ let analyze =
                   let initial_state = init src_dir prev_cg in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at demand query location...\n";
-                  let _queried_state = issue_demand_query qry_loc entrypoints initial_state in
+                  let _queried_state = issue_demand_query ~qry_loc entrypoints initial_state in
                   Format.printf "Constructing edited state...\n";
                   let edited_state = init next_dir next_cg in
                   Format.printf "Querying at demand query locations...\n";
-                  let _queried_edited_state = issue_demand_query qry_loc entrypoints edited_state in
+                  let _queried_edited_state =
+                    issue_demand_query ~qry_loc entrypoints edited_state
+                  in
                   ()
               | `Incr_only ->
                   Format.printf "Running analysis in INCREMENTAL mode\n";
@@ -114,11 +124,13 @@ let analyze =
                   let initial_state = init src_dir prev_cg in
                   let entrypoints = entrypoints entry_class initial_state in
                   Format.printf "Querying at demand query location...\n";
-                  let queried_state = issue_demand_query qry_loc entrypoints initial_state in
+                  let queried_state = issue_demand_query ~qry_loc entrypoints initial_state in
                   Format.printf "Applying incremental edit...\n";
                   let edited_state = update next_dir next_cg queried_state in
                   Format.printf "Querying at demand query locations...\n";
-                  let _queried_edited_state = issue_demand_query qry_loc entrypoints edited_state in
+                  let _queried_edited_state =
+                    issue_demand_query ~qry_loc entrypoints edited_state
+                  in
                   ())
           | _ ->
               Format.printf

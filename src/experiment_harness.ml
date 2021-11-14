@@ -31,7 +31,23 @@ let rec java_srcs dir =
 
 let relative_java_srcs dir = List.map (java_srcs dir) ~f:(String.chop_prefix_exn ~prefix:(dir / ""))
 
-module DSG_wrapper (Dom : Abstract.Dom) = struct
+module type S = sig
+  type t
+
+  val cg : t -> Callgraph.t
+
+  val init : string -> string -> t
+
+  val update : string -> string -> t -> t
+
+  val entrypoints : string option -> t -> Cfg.Fn.t list
+
+  val issue_exit_queries : Cfg.Fn.t list -> t -> t
+
+  val issue_demand_query : qry_loc:string -> Cfg.Fn.t list -> t -> t
+end
+
+module DSG_wrapper (Dom : Abstract.Dom) : S = struct
   module Dom = Abstract.DomWithDataStructures (Dom)
   module G = Dsg.Make (Dom)
   module D = G.D
@@ -45,6 +61,8 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
   }
 
   type t = { dsg : G.t; cg : Callgraph.bidirectional; parse : parse_info }
+
+  let cg x = x.cg.forward
 
   (* Initialize a DSG over src_dir/**/*.java, with the callgraph serialized at [cg] *)
   let init src_dir cg =
@@ -130,8 +148,6 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
     let parse = { src_dir = next_src_dir; trees; loc_map; fields; cha } in
     { dsg; cg; parse }
 
-  let dump_dot = G.dump_dot
-
   let entrypoints entry_class g =
     let f =
       match entry_class with
@@ -152,10 +168,10 @@ module DSG_wrapper (Dom : Abstract.Dom) = struct
         |> snd)
     |> fun dsg -> { dsg; cg = g.cg; parse = g.parse }
 
-  let issue_demand_query qry entrypoints (g : t) : t =
-    let method_id = Method_id.deserialize qry in
+  let issue_demand_query ~qry_loc entrypoints (g : t) : t =
+    let method_id = Method_id.deserialize qry_loc in
     match List.find (G.fns g.dsg) ~f:(fun fn -> Method_id.equal method_id fn.method_id) with
-    | None -> failwith ("no procedure found matching demand query " ^ qry)
+    | None -> failwith ("no procedure found matching demand query " ^ qry_loc)
     | Some fn ->
         let _res, dsg =
           G.loc_only_query g.dsg ~fn ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields ~entrypoints
