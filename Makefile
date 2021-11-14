@@ -7,6 +7,7 @@ default: build
 .PHONY: build
 build: fmt
 	dune build
+	cp _build/default/src/exec.exe ./dai
 
 .PHONY: test
 test: build
