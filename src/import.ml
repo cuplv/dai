@@ -51,13 +51,13 @@ let abs_of_rel_path rel_path =
 (* "com.example.MyClass.Inner" -> ["com" ; "example"] *)
 let deserialize_package =
   String.split ~on:'.'
-  >> List.filter ~f:(String.length >> ( > ) 0)
+  >> List.filter ~f:(String.length >> ( <> ) 0)
   >> List.take_while ~f:(flip String.get 0 >> Char.is_lowercase)
 
 (* "com.example.MyClass.Inner" -> "MyClass$Inner" *)
 let deserialize_class =
   String.split ~on:'.'
-  >> List.filter ~f:(String.length >> ( > ) 0)
+  >> List.filter ~f:(String.length >> ( <> ) 0)
   >> List.drop_while ~f:(flip String.get 0 >> Char.is_lowercase)
   >> String.concat ~sep:"$"
 
