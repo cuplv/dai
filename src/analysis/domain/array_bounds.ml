@@ -31,6 +31,10 @@ module Addr_map = struct
 
   let set ~key ~aaddr amap = Map.set amap ~key ~data:aaddr
 
+  let get_addrs (vars : string list) amap =
+    let vars = String.Set.of_list vars in
+    Map.filter_keys amap ~f:(Set.mem vars) |> Map.data |> List.bind ~f:Set.to_list
+
   let forget vars amap = List.fold vars ~init:amap ~f:Map.remove
 end
 
@@ -74,20 +78,23 @@ let project_fields itv addrs =
            ~f:(String.take_while ~f:Char.is_digit >> Int.of_string >> Addr.of_int >> Set.mem addrs)
       )
 
-let forget_used_tmp_vars stmt (am, itv) =
-  let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
+let forget_vars vars (am, itv) =
   let new_am =
-    let vars_to_forget = Map.keys am |> List.filter ~f:(Set.mem used_tmps) in
+    let vars_to_forget = Map.keys am |> List.filter ~f:(Set.mem vars) in
     Addr_map.forget vars_to_forget am
   in
   let new_itv =
     let vars_to_forget =
       Abstract1.env itv |> Environment.vars |> snd
-      |> Array.filter ~f:(Var.to_string >> Set.mem used_tmps)
+      |> Array.filter ~f:(Var.to_string >> fun v -> Set.mem vars v)
     in
     Itv.forget vars_to_forget itv
   in
   (new_am, new_itv)
+
+let forget_used_tmp_vars stmt state =
+  let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
+  forget_vars used_tmps state
 
 let texpr_of_expr (am, itv) expr =
   let man = Itv.get_man () in
@@ -208,24 +215,48 @@ let interpret stmt phi =
       *)
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
-      let env = Abstract1.env itv in
-      let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
-      in
-      let itv_new_env = Abstract1.change_environment man itv new_env true in
       match texpr_of_expr (am, itv) rhs with
-      | Some rhs_texpr ->
-          (am, Abstract1.assign_texpr man itv_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None)
+      | Some texpr -> (am, Itv.assign itv lhs texpr)
       | None ->
-          if Environment.mem_var env lhs then
+          if Environment.mem_var (Abstract1.env itv) lhs then
             (* lhs was constrained, quantify that out *)
             (am, Abstract1.forget_array man itv [| lhs |] false)
           else (* lhs was unconstrained, treat as a `skip`*) (am, itv))
+  (* let new_env =
+       if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
+     in
+     let itv_new_env = Abstract1.change_environment man itv new_env true in
+     match texpr_of_expr (am, itv) rhs with
+     | Some rhs_texpr ->
+         (am, Abstract1.assign_texpr man itv_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None)
+     | None ->
+         if Environment.mem_var env lhs then
+           (* lhs was constrained, quantify that out *)
+           (am, Abstract1.forget_array man itv [| lhs |] false)
+         else (* lhs was unconstrained, treat as a `skip`*) (am, itv)*)
   | Assume e ->
       (am, Itv.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr (am, itv) e) itv e)
   | Skip -> (am, itv)
-  | Expr _ | Write _ | Array_write _ | Call _ | Exceptional_call _ ->
-      failwith "todo: Array_bounds#interpret"
+  | Expr _ -> failwith "todo: Array_bounds#interpret Expr"
+  | Write { rcvr; field; rhs } ->
+      let itv =
+        match Map.find am rcvr with
+        | None -> itv
+        | Some aaddr ->
+            Set.fold aaddr ~init:itv ~f:(fun itv addr ->
+                let v = apron_var_of_field addr field in
+                match texpr_of_expr (am, itv) rhs with
+                | Some texpr -> Itv.weak_assign itv v texpr
+                | None ->
+                    if Environment.mem_var (Abstract1.env itv) v then
+                      (* lhs was constrained, quantify that out *)
+                      Abstract1.forget_array man itv [| v |] false
+                    else (* lhs was unconstrained, treat as a `skip`*) itv)
+      in
+
+      (am, itv)
+  | Array_write _ -> failwith "todo: Array_bounds#interpret Array_write"
+  | Call _ | Exceptional_call _ -> failwith "unreachable, calls interpreted by [call] instead"
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
   let rec expr_derefs = function
@@ -457,7 +488,18 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
   | Ast.Stmt.Exceptional_call _ -> failwith "todo: exceptional Array_bounds#return"
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-let noop_library_methods : String.Set.t = String.Set.of_list [ "toString"; "hashCode"; "println" ]
+let noop_library_methods : String.Set.t =
+  String.Set.of_list [ "toString"; "hashCode"; "println"; "print"; "printf"; "log"; "debug" ]
+
+let is_getter meth =
+  match String.chop_prefix ~prefix:"get" meth with
+  | Some fld when String.length fld > 0 && Char.is_uppercase (String.get fld 0) -> true
+  | _ -> false
+
+let is_setter meth =
+  match String.chop_prefix ~prefix:"set" meth with
+  | Some fld when String.length fld > 0 && Char.is_uppercase (String.get fld 0) -> true
+  | _ -> false
 
 let approximate_missing_callee ~caller_state ~callsite =
   Format.(fprintf std_formatter)
@@ -477,8 +519,44 @@ let approximate_missing_callee ~caller_state ~callsite =
   | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals = _; alloc_site = _ }
     when Set.mem noop_library_methods meth ->
       caller_state
-  | Ast.Stmt.Call { lhs = _; rcvr = _; meth = _; actuals = _; alloc_site = _ } ->
-      failwith "todo: approximate_missing_callee"
+  | Ast.Stmt.Call { lhs = Some lhs; rcvr; meth; actuals = []; alloc_site = None }
+    when is_getter meth ->
+      (* we (unsoundly) treat a call `x = o.getFoo()` method as equivalent to `x = o.foo` *)
+      let field = String.uncapitalize (String.chop_prefix_exn meth ~prefix:"get") in
+      interpret Ast.(Stmt.Assign { lhs; rhs = Expr.Deref { rcvr; field } }) caller_state
+  | Ast.Stmt.Call { lhs = _; rcvr; meth; actuals = [ rhs ]; alloc_site = None } when is_setter meth
+    ->
+      (* we (unsoundly) assume that any call `o.setFoo(x)` method is equivalent to `o.foo = x` *)
+      let field = String.uncapitalize (String.chop_prefix_exn meth ~prefix:"set") in
+      interpret Ast.(Stmt.Write { rcvr; field; rhs }) caller_state
+  | Ast.Stmt.Call { lhs; rcvr; meth = _; actuals; alloc_site = None } ->
+      (* for a call to an unknown function `x = o.foo(y1,y2,,...)`, we forget any constraints on:
+         (1) fields of rcvr o
+         (2) fields of actuals y_i
+         (3) address or value of lhs
+         conservatively assuming that receiver and actual fields are modified by the call
+      *)
+      let caller_am, caller_itv = caller_state in
+      let affected_vars =
+        rcvr :: List.filter_map actuals ~f:(function Expr.Var v -> Some v | _ -> None)
+      in
+      let affected_addrs =
+        Addr_map.get_addrs affected_vars caller_am
+        |> List.map ~f:(Format.asprintf "__dai_%a" Addr.pp)
+      in
+      let am = Addr_map.forget (Option.to_list lhs) caller_am in
+      let itv =
+        let vars_to_forget =
+          Abstract1.env caller_itv |> Environment.vars |> snd
+          |> Array.filter
+               ~f:
+                 ( Var.to_string >> fun v ->
+                   Option.exists lhs ~f:(String.equal v)
+                   || List.exists affected_addrs ~f:(fun prefix -> String.is_prefix v ~prefix) )
+        in
+        Itv.forget vars_to_forget caller_itv
+      in
+      (am, itv)
   | Ast.Stmt.Exceptional_call _ ->
       failwith "todo: approximate exceptional control flow through missing procedure"
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)

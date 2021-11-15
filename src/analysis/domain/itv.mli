@@ -19,6 +19,8 @@ val filter_env : t -> f:(string -> bool) -> t
 
 val assign : t -> Var.t -> Texpr1.expr -> t
 
+val weak_assign : t -> Var.t -> Texpr1.expr -> t
+
 val lookup : t -> Var.t -> Interval.t
 
 val forget : Var.t array -> t -> t
