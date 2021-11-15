@@ -1,0 +1,1 @@
+_build/default/src/exec.exe -unit -diag _bugswarm2/$1/pass -edit _bugswarm2/$1/fail > diagnostic_results/$1
