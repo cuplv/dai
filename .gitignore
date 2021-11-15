@@ -6,4 +6,5 @@ run_d1a_experiment
 **/*.png
 **/*.jar
 **/*.class
-_bugswarm
+_bugswarm*
+diagnostic*
