@@ -325,26 +325,37 @@ let forget vars itv =
   let new_env = Environment.remove (Abstract1.env itv) vars in
   Abstract1.change_environment (get_man ()) itv new_env false
 
-let assign itv var texpr =
-  let man = get_man () in
-  let env =
-    Abstract1.env itv |> fun env ->
-    Environment.(if mem_var env var then env else add env [||] [| var |])
-  in
-  let itv = Abstract1.change_environment man itv env false in
-  Abstract1.assign_texpr man itv var Texpr1.(of_expr env texpr) None
-
 let lookup itv var =
   let man = get_man () in
   if Environment.mem_var (Abstract1.env itv) var then Abstract1.bound_variable man itv var
   else Interval.top
 
+let assign itv var texpr =
+  let man = get_man () in
+  let env =
+    let old_env = Abstract1.env itv in
+    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
+  in
+  let itv = Abstract1.change_environment man itv env false in
+  Abstract1.assign_texpr man itv var Texpr1.(of_expr env texpr) None
+
+let weak_assign itv var texpr =
+  let man = get_man () in
+  let env =
+    let old_env = Abstract1.env itv in
+    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
+  in
+  let itv = Abstract1.change_environment man itv env true in
+  Abstract1.join man itv (assign itv var texpr)
+
 let interpret stmt itv =
   let man = get_man () in
   let itv = extend_env_by_uses stmt itv in
   match stmt with
-  | Array_write _ | Exceptional_call _ -> failwith "todo: Itv#interpret"
-  | Write _ | Skip | Expr _ | Call _ -> itv
+  | Array_write _ | Write _ ->
+      failwith
+        "base interval domain does not understand arrays or fields, use array_bounds.ml instead"
+  | Skip | Expr _ -> itv
   | Assume e -> meet_with_constraint itv e
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
@@ -355,6 +366,7 @@ let interpret stmt itv =
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man itv [| lhs |] false
           else (* lhs was unconstrained, treat as a `skip`*) itv)
+  | Call _ | Exceptional_call _ -> failwith "unreachable, calls interpreted by [call] instead"
 
 let sanitize itv = itv
 

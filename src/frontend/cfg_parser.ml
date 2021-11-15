@@ -974,7 +974,8 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
         in
         if Option.is_some opt_finally && (has_uncaught_exc try_edges || has_uncaught_exc catch_edges)
         then [ (f_blk_exit, exit, Stmt.Skip); (f_blk_exit, exc, Stmt.Skip) ]
-        else [ (f_blk_exit, exit, Stmt.Skip) ]
+        else if Option.is_some opt_finally then [ (f_blk_exit, exit, Stmt.Skip) ]
+        else []
       in
       ( loc_map,
         List.concat
