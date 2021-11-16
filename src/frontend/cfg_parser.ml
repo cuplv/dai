@@ -691,12 +691,22 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           | None -> snd cont
           | Some label -> String.Map.set (snd cont) ~key:label ~data:cond_entry )
       in
-      let loc_map', body_intermediate_stmts =
+      let loc_map', body_stmts =
         edge_list_of_stmt method_id loc_map body_entry cond_entry ret exc
           ~brk:(Some exit, snd brk)
           ~cont body
       in
-      (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_intermediate_stmts)
+      (* add a dummy location and skip edge if there are multiple back edges to cond_entry *)
+      let body_stmts =
+        if List.count body_stmts ~f:(snd3 >> Loc.equal cond_entry) > 1 then
+          let pre_exit_loc = Loc.fresh () in
+          (pre_exit_loc, cond_entry, Stmt.Skip)
+          :: List.map body_stmts ~f:(fun (src, dst, lbl) ->
+                 (src, (if Loc.equal dst cond_entry then pre_exit_loc else dst), lbl))
+        else body_stmts
+      in
+
+      (loc_map', for_logic_stmts @ expr_intermediate_stmts @ body_stmts)
   | `Enha_for_stmt (_, _, _mods, _type, (`Id (_, _var), Some _dims), _, _exp, _, _body) ->
       unimplemented "`Enha_for_stmt var with dims" (loc_map, [])
   | `Enha_for_stmt _ -> unimplemented "`Enha_for_stmt alt form" (loc_map, [])
@@ -723,6 +733,16 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           ~brk:(Some exit, snd brk)
           ~cont body
       in
+      (* add a dummy location and skip edge if there are multiple back edges to cond_entry *)
+      let body =
+        if List.count body ~f:(snd3 >> Loc.equal body_exit) > 1 then
+          let pre_exit_loc = Loc.fresh () in
+          (pre_exit_loc, body_exit, Stmt.Skip)
+          :: List.map body ~f:(fun (src, dst, lbl) ->
+                 (src, (if Loc.equal dst body_exit then pre_exit_loc else dst), lbl))
+        else body
+      in
+
       (loc_map, header @ body)
   | `If_stmt (_, (_, cond, _), t_branch, f_branch_opt) ->
       let t_branch_entry = Loc.fresh () in
