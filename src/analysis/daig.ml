@@ -1,5 +1,6 @@
 open Dai.Import
 open Domain
+open Frontend
 open Syntax
 
 module type Sig = sig
@@ -16,11 +17,7 @@ module type Sig = sig
   val of_cfg : entry_state:absstate -> cfg:Cfg.t -> fn:Cfg.Fn.t -> t
 
   val apply_edit :
-    daig:t ->
-    cfg_edit:Frontend.Tree_diff.cfg_edit_result ->
-    fn:Cfg.Fn.t ->
-    Frontend.Tree_diff.edit ->
-    t
+    daig:t -> cfg_edit:Tree_diff.cfg_edit_result -> fn:Cfg.Fn.t -> Tree_diff.edit -> t
 
   val dirty : Name.t -> t -> t
 
@@ -46,6 +43,8 @@ module type Sig = sig
 
   val write_by_name : Name.t -> absstate -> t -> t
 
+  val write_by_loc : Cfg.Loc.t -> absstate -> t -> t
+
   val pred_state_exn : Name.t -> t -> absstate
 
   val assert_wf : t -> unit
@@ -53,6 +52,9 @@ module type Sig = sig
   val total_astate_refs : t -> int
 
   val nonempty_astate_refs : t -> int
+
+  val recursive_call_return_sites :
+    t -> cg:Frontend.Callgraph.t -> self:Cfg.Fn.t -> (Ast.Stmt.t * Name.t) list
 end
 
 module Make (Dom : Abstract.Dom) = struct
@@ -1048,6 +1050,14 @@ module Make (Dom : Abstract.Dom) = struct
         daig
     | _ -> failwith (Format.asprintf "can't write to non-absstate ref-cell %a" Name.pp nm)
 
+  let write_by_loc loc absstate daig =
+    match ref_at_loc_exn ~loc daig with
+    | Ref.AState phi as r ->
+        let daig = dirty_from r daig in
+        phi.state <- Some absstate;
+        daig
+    | _ -> failwith "malformed DAIG: loc-named ref cell holds stmt"
+
   let pred_state_exn nm daig =
     let r = ref_by_name_exn nm daig in
     G.Node.preds r daig |> Seq.filter ~f:Ref.is_astate |> Seq.to_list |> function
@@ -1055,6 +1065,22 @@ module Make (Dom : Abstract.Dom) = struct
     | _ ->
         dump_dot daig ~filename:(abs_of_rel_path "nopred.dot");
         failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
+
+  let recursive_call_return_sites daig ~(cg : Callgraph.t) ~(self : Cfg.Fn.t) =
+    Sequence.bind (G.nodes daig) ~f:(function
+      | Ref.AState _ -> Seq.empty
+      | Ref.Stmt { stmt; _ } when not @@ Ast.Stmt.is_call stmt -> Seq.empty
+      | Ref.Stmt { stmt = callsite; _ } as stmt_ref ->
+          G.Node.succs stmt_ref daig
+          |> Seq.filter ~f:(fun ret_site ->
+                 (not (Ref.is_empty ret_site))
+                 &&
+                 let callees =
+                   Frontend.Callgraph.callees ~callsite ~cg:cg.forward ~caller_method:self.method_id
+                 in
+                 List.mem callees self ~equal:Cfg.Fn.equal)
+          |> Seq.map ~f:(Ref.name >> pair callsite))
+    |> Sequence.to_list
 
   let apply_edit ~daig ~(cfg_edit : Frontend.Tree_diff.cfg_edit_result) ~(fn : Cfg.Fn.t) =
     let open Frontend.Tree_diff in

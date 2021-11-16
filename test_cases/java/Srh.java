@@ -2,8 +2,9 @@ package foo.bar;
 // Example adapated from Sagiv,Reps,Horwitz '96
 // "Precise interprocedural dataflow analysis with applications to constant propagation"
 public class Srh {
-    static int x = 0;
+    static int x;
     public static void main(String[] args) {
+	x = 0;
 	p(3);
 	System.out.println(x);
     }

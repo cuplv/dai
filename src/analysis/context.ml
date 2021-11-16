@@ -1,6 +1,5 @@
 open Dai.Import
 open Syntax
-open Domain
 
 (** Get the callee [f] of a callsite [stmt] of the form `y = f(x_1,...,x_k)`*)
 let get_callee_unsafe stmt =
@@ -8,109 +7,88 @@ let get_callee_unsafe stmt =
   | Ast.Stmt.Call { meth; _ } -> meth
   | _ -> failwith "can't get callee of non-call statement"
 
-module type CtxFunctor = functor (Dom : Abstract.Dom) -> sig
-  include Abstract.CtxSensitiveDom with type t := Dom.t
+module type Sig = sig
+  type t [@@deriving compare, equal, sexp_of]
 
-  type t = Dom.t
-end
+  type ctx = t
 
-module MakeInsensitive (Dom : Abstract.Dom) : sig
-  include Abstract.CtxSensitiveDom with type t := Dom.t
+  val pp : t pp
 
-  type t = Dom.t
-end = struct
-  include Dom
+  val init : unit -> t
 
-  module Ctx = struct
-    type dom = t
+  val callee_ctx : callsite:Ast.Stmt.t -> caller_ctx:t -> t
 
-    type t = unit [@@deriving compare, equal, hash, sexp_of]
+  include Comparator.S with type t := t
 
-    let pp fs () = Format.fprintf fs "()"
+  module Map : sig
+    type 'v t = (ctx, 'v, comparator_witness) Map.t
 
-    let sanitize () = ()
+    val empty : 'v t
 
-    let show () = "()"
-
-    let hash = seeded_hash
-
-    let init = ()
-
-    let callee_ctx ~caller_state:_ ~callsite:_ ~ctx:() = ()
-
-    let is_feasible_callchain _ _ = true
+    val singleton : ctx -> 'v -> 'v t
   end
 end
 
-module Make1CFA (Dom : Abstract.Dom) : sig
-  include Abstract.CtxSensitiveDom with type t := Dom.t
+module ZeroCFA : Sig = struct
+  module T = struct
+    type t = unit [@@deriving compare, equal, sexp_of]
 
-  type t = Dom.t
-end = struct
-  include Dom
+    type ctx = t
 
-  module Ctx = struct
-    type dom = t
+    let init () = ()
 
-    type t = Ast.Stmt.t option [@@deriving compare, equal, hash, sexp_of]
+    let pp fs () = Format.fprintf fs "()"
+
+    let callee_ctx ~callsite:_ ~caller_ctx:_ = ()
+  end
+
+  module T_comp = struct
+    include Comparator.Make (T)
+    include T
+  end
+
+  include T_comp
+
+  module Map = struct
+    include (Map : module type of Map with type ('k, 'v, 'cmp) t := ('k, 'v, 'cmp) Map.t)
+
+    type 'v t = 'v Map.M(T_comp).t
+
+    let empty = Map.empty (module T_comp)
+
+    let singleton k v = Map.of_alist_exn (module T_comp) [ (k, v) ]
+  end
+end
+
+module OneCFA : Sig = struct
+  module T = struct
+    type t = Ast.Stmt.t option [@@deriving compare, equal, sexp_of]
+
+    type ctx = t
+
+    let init () = None
 
     let pp fs = function
       | Some caller -> Format.fprintf fs "[%a]" Ast.Stmt.pp caller
       | None -> Format.fprintf fs "[]"
 
-    let sanitize x = x
-
-    let show = Format.asprintf "%a" pp
-
-    let hash = seeded_hash
-
-    let init = None
-
-    let callee_ctx ~caller_state:_ ~callsite ~ctx:_ = Some callsite
-
-    let is_feasible_callchain ctx chain =
-      match (ctx, chain) with
-      | None, [] -> true
-      | Some ctx_caller, chain_caller :: _ -> Ast.Stmt.equal ctx_caller chain_caller
-      | _ -> false
+    let callee_ctx ~callsite ~caller_ctx:_ = Some callsite
   end
-end
 
-module Make2CFA (Dom : Abstract.Dom) : sig
-  include Abstract.CtxSensitiveDom with type t := Dom.t
+  module T_comp = struct
+    include Comparator.Make (T)
+    include T
+  end
 
-  type t = Dom.t
-end = struct
-  include Dom
+  include T_comp
 
-  module Ctx = struct
-    type dom = t
+  module Map = struct
+    include (Map : module type of Map with type ('k, 'v, 'cmp) t := ('k, 'v, 'cmp) Map.t)
 
-    type t = Ast.Stmt.t list [@@deriving compare, equal, hash, sexp_of]
+    type 'v t = 'v Map.M(T_comp).t
 
-    let pp fs = function
-      | [] -> Format.fprintf fs "[]"
-      | [ caller ] -> Format.fprintf fs "[%a]" Ast.Stmt.pp caller
-      | [ caller; callers_caller ] ->
-          Format.fprintf fs "[%a :: %a]" Ast.Stmt.pp caller Ast.Stmt.pp callers_caller
-      | _ -> failwith "callstring length capped at 2"
+    let empty = Map.empty (module T_comp)
 
-    let sanitize x = x
-
-    let show = Format.asprintf "%a" pp
-
-    let hash = seeded_hash
-
-    let init = []
-
-    let callee_ctx ~caller_state:_ ~callsite ~ctx =
-      match ctx with [] -> [ callsite ] | caller :: _ -> [ callsite; caller ]
-
-    let is_feasible_callchain ctx chain =
-      match (ctx, chain) with
-      | [], [] -> true
-      | [ ctx_caller ], [ chain_caller ] -> Ast.Stmt.equal ctx_caller chain_caller
-      | [ ctx1; ctx2 ], chain1 :: chain2 :: _ -> Ast.Stmt.(equal ctx1 chain1 && equal ctx2 chain2)
-      | _ -> false
+    let singleton k v = Map.of_alist_exn (module T_comp) [ (k, v) ]
   end
 end

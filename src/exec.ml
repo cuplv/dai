@@ -49,12 +49,16 @@ let analyze =
              which source is available in SRC_DIR, writing to stdout"
       in
       fun () ->
-        Format.(fprintf err_formatter) "[EXEC] Initializing DAI; java src_dir: %s\n" src_dir;
+        Format.(fprintf err_formatter)
+          "[EXEC] Initializing DAI in CALLSTRINGS MODE; java src_dir: %s\n" src_dir;
         let open Frontend in
         let (module Harness : Experiment_harness.S) =
           if unit_dom then
-            (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
-          else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
+            (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) (Analysis.Context.ZeroCFA)
+            : Experiment_harness.S)
+          else
+            (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) (Analysis.Context.OneCFA)
+            : Experiment_harness.S)
         in
         if Option.is_some filter_cg then
           let fns = Harness.(init src_dir |> fns) in

@@ -35,9 +35,9 @@ module Make (L : Abstract.Dom) (R : Abstract.Dom) : Abstract.Dom = struct
 
   let is_bot (l, r) = L.is_bot l || R.is_bot r
 
-  let call ~callee ~callsite ~caller_state:(l, r) ~fields =
-    ( L.call ~callee ~callsite ~caller_state:l ~fields,
-      R.call ~callee ~callsite ~caller_state:r ~fields )
+  let call ~callee ~caller ~callsite ~caller_state:(l, r) ~fields =
+    ( L.call ~callee ~caller ~callsite ~caller_state:l ~fields,
+      R.call ~callee ~caller ~callsite ~caller_state:r ~fields )
 
   let return ~callee ~caller ~callsite ~caller_state ~return_state ~fields =
     ( L.return ~callee ~caller ~callsite ~caller_state:(fst caller_state)

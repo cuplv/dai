@@ -387,7 +387,7 @@ let hash seed itv = seeded_hash seed @@ Abstract1.hash (get_man ()) itv
 
 let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
 
-let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
+let call ~(callee : Cfg.Fn.t) ~caller:_ ~callsite ~caller_state ~fields:_ =
   match callsite with
   | Ast.Stmt.Call { actuals; _ } | Ast.Stmt.Exceptional_call { actuals; _ } ->
       if is_bot caller_state then caller_state

@@ -4,15 +4,9 @@ open Frontend
 open Syntax
 
 (** Demanded Summarization Graph : per-procedure DAIGs interoperating to perform summary-based interprocedural analysis *)
-module Make (Dom : Abstract.Dom) : sig
+module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) : sig
   module D : Daig.Sig with type absstate := Dom.t
   (** underlying intra-procedural DAIGs *)
-
-  module Q : Query.Sig with type state := Dom.t
-  (** summary queries *)
-
-  (*module R : Relation.Sig with type state := Dom.t*)
-  (** relations over abstract states, representing summaries *)
 
   type t
 
@@ -34,6 +28,7 @@ module Make (Dom : Abstract.Dom) : sig
 
   val query :
     fn:Cfg.Fn.t ->
+    ctx:Ctx.t ->
     entry_state:Dom.t ->
     loc:Cfg.Loc.t ->
     cg:Callgraph.t ->
@@ -49,7 +44,7 @@ module Make (Dom : Abstract.Dom) : sig
     fields:Declared_fields.t ->
     entrypoints:Cfg.Fn.t list ->
     t ->
-    Dom.t list * t
+    (Dom.t * Ctx.t) list * t
   (** query for the abstract state at some [loc] under _any_ reachable [entry_state] precondition,
         exploring back to the specified [entrypoints]
     *)

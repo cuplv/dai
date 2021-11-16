@@ -54,6 +54,8 @@ module type Sig = sig
   (** READ functions return the current contents of the requested cell, performing no analysis computation*)
 
   val write_by_name : Name.t -> absstate -> t -> t
+
+  val write_by_loc : Cfg.Loc.t -> absstate -> t -> t
   (** WRITE functions write the given [absstate] to the cell named by the given [Name.t], dirtying any forward dependencies *)
 
   val pred_state_exn : Name.t -> t -> absstate
@@ -64,6 +66,9 @@ module type Sig = sig
   val total_astate_refs : t -> int
 
   val nonempty_astate_refs : t -> int
+
+  val recursive_call_return_sites :
+    t -> cg:Frontend.Callgraph.t -> self:Cfg.Fn.t -> (Ast.Stmt.t * Name.t) list
 end
 
 module Make (Dom : Abstract.Dom) : Sig with type absstate := Dom.t

@@ -220,4 +220,6 @@ module Stmt = struct
   let skip = Skip
 
   let is_exc = function Exceptional_call _ -> true | _ -> false
+
+  let is_call = function Call _ | Exceptional_call _ -> true | _ -> false
 end

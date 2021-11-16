@@ -59,7 +59,12 @@ module type Dom = sig
   val is_bot : t -> bool
 
   val call :
-    callee:Cfg.Fn.t -> callsite:Ast.Stmt.t -> caller_state:t -> fields:Declared_fields.t -> t
+    callee:Cfg.Fn.t ->
+    caller:Cfg.Fn.t ->
+    callsite:Ast.Stmt.t ->
+    caller_state:t ->
+    fields:Declared_fields.t ->
+    t
 
   val return :
     callee:Cfg.Fn.t ->

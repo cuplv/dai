@@ -51,9 +51,9 @@ module type S = sig
   val dump_dot : t -> filename:string -> unit
 end
 
-module DSG_wrapper (Dom : Abstract.Dom) : S = struct
+module DSG_wrapper (Dom : Abstract.Dom) (Ctx : Context.Sig) : S = struct
   module Dom = Abstract.DomWithDataStructures (Dom)
-  module G = Dsg.Make (Dom)
+  module G = Dsg.Make (Dom) (Ctx)
   module D = G.D
 
   type parse_info = {
@@ -178,7 +178,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let st = systime () in
     let dsg =
       List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
-          G.query dsg ~fn ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields
+          G.query dsg ~fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg
+            ~fields:g.parse.fields
           |> snd)
     in
     Format.(fprintf std_formatter)

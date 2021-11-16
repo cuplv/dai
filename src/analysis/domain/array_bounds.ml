@@ -371,7 +371,7 @@ let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
   let phi' = interpret arrayify phi in
   (List.take actuals (formals - 1) @ [ Expr.Var tmp_var ], phi')
 
-let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
+let call ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~caller_state ~fields =
   let caller_am, caller_itv = extend_env_by_uses callsite caller_state in
   match callsite with
   | Ast.Stmt.Call { rcvr; actuals; _ } | Ast.Stmt.Exceptional_call { rcvr; actuals; _ } ->
@@ -427,7 +427,20 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
                        (Var.of_string fld_name, Itv.lookup caller_itv var) :: acc
                    | _ -> acc)
         in
-        List.fold ~init:params_itv rcvr_field_bindings ~f:(fun itv (var, value) ->
+        (* add static field bindings as well *)
+        let field_bindings =
+          if Cfg.Fn.is_same_class callee caller then
+            let static_fields =
+              Declared_fields.lookup_static fields ~package:callee.method_id.package
+                ~class_name:callee.method_id.class_name
+            in
+            Set.fold static_fields ~init:rcvr_field_bindings ~f:(fun acc fld ->
+                let fld_var = Var.of_string fld in
+                let fld_val = Itv.lookup caller_itv fld_var in
+                if Interval.is_top fld_val then acc else (fld_var, fld_val) :: acc)
+          else []
+        in
+        List.fold ~init:params_itv field_bindings ~f:(fun itv (var, value) ->
             Itv.assign itv var Texpr1.(Cst (Coeff.Interval value)))
       in
       (callee_am, callee_itv)
