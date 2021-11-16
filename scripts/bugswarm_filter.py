@@ -3,7 +3,7 @@ import sys
 import os
 
 # This script queries BugSwarm for suitable pass/fail program pairs and pulls their source, into directory structure of the form:
-# ./_bugswarm2/<image_tag>/{pass, fail}/<srcs>
+# ./_bugswarm/<image_tag>/{pass, fail}/<srcs>
 # where <image_tag> is a unique identifier of each pass/fail program pair in the BugSwarm DB
 
 if len(sys.argv) < 2:
@@ -26,9 +26,9 @@ artifacts = bugswarmapi.filter_artifacts(api_filter)
 
 print("found artifacts: " + str(len(artifacts)))
 
-if not os.path.isdir("_bugswarm2/"):
-    print("_bugswarm2 directory does not exist, attempting to create")
-    os.mkdir("_bugswarm2")
+if not os.path.isdir("_bugswarm/"):
+    print("_bugswarm directory does not exist, attempting to create")
+    os.mkdir("_bugswarm")
 
 #import pprint
 #pp = pprint.PrettyPrinter(indent=2,width=120)
@@ -39,7 +39,7 @@ for a in artifacts:
     print("PULLING SOURCES...")
     try:
         # underscore prefix prevents dune from searching these repos for dune config files 
-        image_dir = "_bugswarm2/" + a["image_tag"]
+        image_dir = "_bugswarm/" + a["image_tag"]
         os.mkdir(image_dir)
         # Pull a shallow (origin/master@HEAD only) copy of the repo to the `pass` directory
         os.system("git clone git@github.com:{}.git {}/pass --depth=1 2> /dev/null".format(a["repo"], image_dir))
