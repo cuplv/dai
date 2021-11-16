@@ -345,8 +345,11 @@ let rec expr ?exit_loc ~(curr_loc : Loc.t) ~(exc : Loc.t) (cst : CST.expression)
           let outermost_dim_size, (curr_loc, intermediate_stmts) =
             expr ~curr_loc ~exc outermost_dim_expr
           in
-          let e = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
-          (e, (curr_loc, intermediate_stmts)))
+          let tmp = fresh_tmp_var () in
+          let next_loc = match exit_loc with Some l -> l | None -> Loc.fresh () in
+          let array = Ast.Expr.Array_create { elt_type; size = outermost_dim_size; alloc_site } in
+          let stmt = (curr_loc, next_loc, Stmt.Assign { lhs = tmp; rhs = array }) in
+          (Expr.Var tmp, (next_loc, stmt :: intermediate_stmts)))
   | `Switch_exp (_, (_, _matching_exp, _), (_, cases_block, _)) -> (
       match cases_block with
       | `Rep_switch_blk_stmt_group _cases ->
@@ -479,6 +482,8 @@ and array_lit ~(curr_loc : Loc.t) ~(exc : Loc.t) (lit : CST.array_initializer) :
   let expr_of_var_initializer curr_loc (vi : CST.variable_initializer) =
     match vi with `Exp e -> expr ~curr_loc ~exc e | `Array_init ai -> array_lit ~curr_loc ~exc ai
   in
+  let tmp = fresh_tmp_var () in
+  let next_loc = Loc.fresh () in
   match lit with
   | _, Some (first, rest), _, _ ->
       let first_elt, aux = expr_of_var_initializer curr_loc first in
@@ -489,9 +494,13 @@ and array_lit ~(curr_loc : Loc.t) ~(exc : Loc.t) (lit : CST.array_initializer) :
             let elt, (curr_loc, curr_intermediates) = expr_of_var_initializer curr_loc (snd curr) in
             (elt :: elts, (curr_loc, curr_intermediates @ intermediate_stmts)))
       in
-      (Ast.Expr.Array_literal { elts; alloc_site = Alloc_site.fresh () }, (curr_loc, intermediates))
+      let lit = Ast.Expr.Array_literal { elts; alloc_site = Alloc_site.fresh () } in
+      let stmt = (curr_loc, next_loc, Ast.Stmt.Assign { lhs = tmp; rhs = lit }) in
+      (Ast.Expr.Var tmp, (next_loc, stmt :: intermediates))
   | _, None, _, _ ->
-      (Ast.Expr.Array_literal { elts = []; alloc_site = Alloc_site.fresh () }, (curr_loc, []))
+      let lit = Ast.Expr.Array_literal { elts = []; alloc_site = Alloc_site.fresh () } in
+      let stmt = (curr_loc, next_loc, Ast.Stmt.Assign { lhs = tmp; rhs = lit }) in
+      (Ast.Expr.Var tmp, (next_loc, [ stmt ]))
 
 (** lift [expr] to non-empty lists of expressions, according to Java semantics: i.e. throwing away value of all but last *)
 let rec expr_of_nonempty_list ~(curr_loc : Loc.t) ~(exc : Loc.t) :
