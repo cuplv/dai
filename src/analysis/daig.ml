@@ -34,7 +34,7 @@ module type Sig = sig
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
-  exception Ref_not_found of Cfg.Loc.t
+  exception Ref_not_found of [ `By_loc of Cfg.Loc.t | `By_name of Name.t ]
 
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
@@ -47,6 +47,8 @@ module type Sig = sig
   val write_by_name : Name.t -> absstate -> t -> t
 
   val pred_state_exn : Name.t -> t -> absstate
+
+  val assert_wf : t -> unit
 end
 
 module Make (Dom : Abstract.Dom) = struct
@@ -73,7 +75,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Loc of Cfg.Loc.t
         | Edge of Cfg.Loc.t * Cfg.Loc.t
         | Idx of int
-        (* Iteration context is a list of loop-head / iteration-count pairs, tracking the abstract iteration count of each nested loop *)
+        (* Iteration context is a map from loop-heads to iteration-counts, tracking the abstract iteration count of each nested loop *)
         | Iterate of (int * Cfg.Loc.t) list * t
         | Prod of t * t
       [@@deriving compare, equal, hash, sexp_of]
@@ -111,10 +113,22 @@ module Make (Dom : Abstract.Dom) = struct
 
       let iter_ctx = function Iterate (ic, _) -> Some ic | _ -> None
 
-      let wrap_iterate i loop_head = function
+      let wrap_iterate i loop_head =
+        let rec wrap_ic (i, lh) = function
+          | [] -> [ (i, lh) ]
+          | ((_, l) as lc) :: rest -> (
+              match Cfg.Loc.compare l lh with
+              | x when x < 0 -> lc :: wrap_ic (i, lh) rest
+              | x when x > 0 -> (i, lh) :: lc :: rest
+              | _ ->
+                  failwith
+                    (Format.asprintf "can't wrap iteration context already containing loop-head %a"
+                       Cfg.Loc.pp lh))
+        in
+        function
         | Iterate (iter_ctx, n) ->
             assert (not @@ List.exists iter_ctx ~f:(snd >> Cfg.Loc.equal loop_head));
-            Iterate ((i, loop_head) :: iter_ctx, n)
+            Iterate (wrap_ic (i, loop_head) iter_ctx, n)
         | n -> Iterate ([ (i, loop_head) ], n)
 
       let set_iterate i loop_head = function
@@ -129,6 +143,17 @@ module Make (Dom : Abstract.Dom) = struct
             in
             Iterate (set_ic i loop_head iter_ctx, n)
         | n -> failwith (Format.asprintf "can't set_iterate on non-Iterate name %a" pp n)
+
+      let get_iterate lh nm =
+        let iterate_of_ic =
+          List.find_map ~f:(fun (i, l) -> Option.some_if (Cfg.Loc.equal l lh) i)
+        in
+        match nm with
+        | Iterate (ic, _) | Prod (Idx _, Iterate (ic, _)) -> iterate_of_ic ic
+        | Prod (Iterate (ic1, _), Iterate (ic2, _)) ->
+            iterate_of_ic ic1 >>= fun iter1 ->
+            iterate_of_ic ic2 >>= fun iter2 -> if iter1 = iter2 then Some iter1 else None
+        | _ -> None
 
       let unset_iterate loop_head = function
         | Iterate (iter_ctx, n) -> (
@@ -198,7 +223,7 @@ module Make (Dom : Abstract.Dom) = struct
         | AState { state = Some s; name } -> Format.fprintf fs "%a[%a]" Name.pp name Dom.pp s
         | AState { state = None; name } -> Format.fprintf fs "%a[???]" Name.pp name
 
-      let to_string r =
+      let _to_string r =
         pp Format.str_formatter r;
         Format.flush_str_formatter ()
 
@@ -262,6 +287,33 @@ module Make (Dom : Abstract.Dom) = struct
 
   type t = G.t
 
+  let dump_dot ~filename ?(loc_labeller = fun _ -> None) daig =
+    let output_fd = Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null" in
+    let grey = 0xdedede in
+    let green = 0xaaffaa in
+    let blue = 0xaaaaff in
+    let string_of_node = function
+      (* | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
+           let label_prefix = Option.value_exn (loc_labeller l) in
+           "\"" ^ label_prefix ^ Ref.to_string r ^ "\""
+         | r -> "\"" ^ Ref.to_string r ^ "\""*)
+      | r ->
+          let _ = loc_labeller in
+          "\"" ^ Name.to_string (Ref.name r) ^ "\""
+    in
+    Graph.to_dot
+      (module G)
+      daig ~filename
+      ~channel:(Unix.out_channel_of_descr output_fd)
+      ~string_of_node ~string_of_edge:(G.Edge.label >> Comp.to_string)
+      ~node_attrs:(function
+        | Ref.AState _ as n
+          when Seq.exists (G.Node.outputs n daig) ~f:(G.Edge.label >> Comp.equal `Fix) ->
+            [ `Color blue; `Shape `Box ]
+        | Ref.AState { state = Some _; name = _ } -> [ `Color green; `Shape `Box ]
+        | Ref.AState { state = None; name = _ } -> [ `Shape `Box; `Style `Dashed ]
+        | Ref.Stmt _ -> [ `Color grey ])
+
   type 'a or_summary_query =
     | Result of 'a
     | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
@@ -281,6 +333,8 @@ module Make (Dom : Abstract.Dom) = struct
         | (Summ_qry _ as sq), daig -> (sq, daig)
     end
   end
+
+  exception Ref_not_found of [ `By_loc of Cfg.Loc.t | `By_name of Name.t ]
 
   let _edges_btwn (daig : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
     let rec edges_btwn_impl (frontier : G.node list) (accum : G.Edge.Set.t) =
@@ -331,31 +385,9 @@ module Make (Dom : Abstract.Dom) = struct
   let ref_by_name_exn nm g =
     match ref_by_name nm g with
     | Some r -> r
-    | None -> failwith (Format.asprintf "No reference exists with name: %s" (Name.to_string nm))
-
-  let dump_dot ~filename ?(loc_labeller = fun _ -> None) daig =
-    let output_fd = Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null" in
-    let grey = 0xdedede in
-    let green = 0xaaffaa in
-    let blue = 0xaaaaff in
-    let string_of_node = function
-      | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
-          let label_prefix = Option.value_exn (loc_labeller l) in
-          "\"" ^ label_prefix ^ Ref.to_string r ^ "\""
-      | r -> "\"" ^ Ref.to_string r ^ "\""
-    in
-    Graph.to_dot
-      (module G)
-      daig ~filename
-      ~channel:(Unix.out_channel_of_descr output_fd)
-      ~string_of_node ~string_of_edge:(G.Edge.label >> Comp.to_string)
-      ~node_attrs:(function
-        | Ref.AState _ as n
-          when Seq.exists (G.Node.outputs n daig) ~f:(G.Edge.label >> Comp.equal `Fix) ->
-            [ `Color blue; `Shape `Box ]
-        | Ref.AState { state = Some _; name = _ } -> [ `Color green; `Shape `Box ]
-        | Ref.AState { state = None; name = _ } -> [ `Shape `Box; `Style `Dashed ]
-        | Ref.Stmt _ -> [ `Color grey ])
+    | None ->
+        dump_dot ~filename:(abs_of_rel_path "missingname.dot") g;
+        raise (Ref_not_found (`By_name nm))
 
   (** Directly implements the DAIG Encoding procedure of PLDI'21; OCaml variables are labelled by LaTeX equivalents where applicable
       [extra_back_edges] and [loop_iteration_ctx] are extensions to support DAIG construction for partial programs;
@@ -386,12 +418,13 @@ module Make (Dom : Abstract.Dom) = struct
       (match (loop_iteration_ctx, Map.find loop_head_map l) with
       | None, None -> Name.Loc l
       | None, Some loopheads ->
-          let ic = List.map loopheads ~f:(pair 0) in
+          let ic = List.sort loopheads ~compare:Cfg.Loc.compare |> List.map ~f:(pair 0) in
           Name.(Iterate (ic, Loc l))
       | Some ic, None -> Name.(Iterate (ic, Loc l))
       | Some ic, Some loopheads ->
-          let ic = List.fold loopheads ~init:ic ~f:(fun acc curr -> (0, curr) :: acc) in
-          Name.(Iterate (ic, Loc l)))
+          List.fold loopheads
+            ~init:Name.(Iterate (ic, Loc l))
+            ~f:(fun acc curr -> Name.wrap_iterate 0 curr acc))
       |> fun n ->
       if dst && List.mem loop_heads l ~equal:Cfg.Loc.equal then Name.wrap_iterate 0 l n else n
     in
@@ -559,8 +592,6 @@ module Make (Dom : Abstract.Dom) = struct
     let entry_ref = Ref.AState { state = Some entry_state; name = Name.Loc fn.entry } in
     of_region_cfg ~entry_ref ~cfg ~entry:fn.entry ~loop_iteration_ctx:None ()
 
-  exception Ref_not_found of Cfg.Loc.t
-
   let ref_at_loc_exn ~loc =
     G.nodes
     >> Seq.filter ~f:(function
@@ -571,7 +602,7 @@ module Make (Dom : Abstract.Dom) = struct
     >> Seq.to_list
     >> function
     | [ r ] -> r
-    | [] -> raise (Ref_not_found loc)
+    | [] -> raise (Ref_not_found (`By_loc loc))
     | [ r1; r2 ] -> (
         match Ref.(name r1, name r2) with
         | Name.Loc _, Name.Iterate _ -> r1
@@ -596,6 +627,8 @@ module Make (Dom : Abstract.Dom) = struct
         (* validate that this is a properly constructed-pre-widen name before incrementing its indices *)
         assert (Name.equal n n_prime);
         Name.Prod (Name.Iterate (incr_iter_ctx ic, n), Name.Iterate (incr_iter_ctx ic_prime, n))
+    | Name.Prod ((Name.Idx _ as idx), Name.Iterate (ic, n)) ->
+        Name.Prod (idx, Name.Iterate (incr_iter_ctx ic, n))
     | n -> n
 
   (* Transform the DAIG [g] by unrolling one step further the loop whose current abstract iterate is at [curr_iter] *)
@@ -638,6 +671,47 @@ module Make (Dom : Abstract.Dom) = struct
 
     let curr_iter_loop_nodes, curr_iter_loop_edges = get_loop init_frontier init_nodes init_edges in
 
+    (* deal with dangling DAIG region (i.e. those not backward-reachable from exit but still in the loop body, e.g. because they short-circuit out via break or return) *)
+    let curr_iter_loop_nodes, curr_iter_loop_edges =
+      Set.fold curr_iter_loop_nodes ~init:(curr_iter_loop_nodes, curr_iter_loop_edges)
+        ~f:(fun (acc_nodes, acc_edges) node ->
+          match Ref.name node with
+          | Name.(Iterate (_, Loc l)) as n
+            when Option.exists (Name.get_iterate l n) ~f:(Int.equal 0) ->
+              let rec get_dangling_loop_region frontier nodes edges =
+                if Set.is_empty frontier then (nodes, edges)
+                else
+                  let process_node acc n =
+                    Seq.fold (G.Node.outputs n daig) ~init:acc ~f:(fun (f, ns, es) e ->
+                        let succ = G.Edge.dst e in
+                        let is_in_loop_ctx =
+                          Name.get_iterate loop_head (Ref.name succ)
+                          |> Option.exists ~f:(Int.equal (curr_idx - 1))
+                        in
+                        if is_in_loop_ctx && not (Set.mem ns succ) then
+                          let stmt_edge =
+                            Sequence.find
+                              (G.Node.inputs (G.Edge.dst e) daig)
+                              ~f:(G.Edge.src >> Ref.is_stmt)
+                          in
+                          let es = Option.fold stmt_edge ~init:es ~f:Set.add in
+                          (Set.add f succ, Set.add ns succ, Set.add es e)
+                        else if
+                          let lbl = G.Edge.label e in
+                          Comp.equal lbl `Widen || Comp.equal lbl `Fix
+                        then (f, ns, Set.add es e)
+                        else (f, ns, es))
+                  in
+                  (uncurry3 get_dangling_loop_region)
+                    (Set.fold frontier ~init:(Ref.Set.empty, nodes, edges) ~f:process_node)
+              in
+              let dangling_nodes, dangling_edges =
+                get_dangling_loop_region (Ref.Set.singleton node) Ref.Set.empty G.Edge.Set.empty
+              in
+              (Set.union acc_nodes dangling_nodes, Set.union acc_edges dangling_edges)
+          | _ -> (acc_nodes, acc_edges))
+    in
+
     (* Then, construct a copy of those nodes and edges, incrementing the loop iteration for AState refs and reusing Stmt refs. *)
     let new_fix_and_widen_edges =
       [
@@ -651,18 +725,29 @@ module Make (Dom : Abstract.Dom) = struct
     let all_new_refs =
       Set.fold curr_iter_loop_nodes ~init:[ next_iter; next_pre_widen ] ~f:(fun acc -> function
         | Ref.AState { state = _; name } ->
-            Ref.AState { state = None; name = increment_iteration loop_head name } :: acc
+            let new_name = increment_iteration loop_head name in
+            let r =
+              match ref_by_name new_name daig with
+              | Some r -> r
+              | None -> Ref.AState { state = None; name = increment_iteration loop_head name }
+            in
+            (* Format.printf "\tADDING NEW REF: %a\n" Name.pp (Ref.name r);
+               Format.printf "\tHAVE EXISTING REF WITH NAME? %b\n"
+                 (G.nodes daig |> Sequence.exists ~f:(Ref.equal r));*)
+            r :: acc
         | _ -> acc)
     in
-    let ref_of_name n = List.find_exn all_new_refs ~f:(Ref.name >> Name.equal n) in
-
+    let ref_of_name n =
+      try List.find_exn all_new_refs ~f:(Ref.name >> Name.equal n)
+      with _ -> failwith (Format.asprintf "no ref found with name %a" Name.pp n)
+    in
     let daig = List.fold all_new_refs ~init:daig ~f:(fun acc n -> G.Node.insert n acc) in
 
+    let prev_iter_name = Ref.name prev_iter in
     let all_new_edges =
       Set.fold curr_iter_loop_edges ~init:new_fix_and_widen_edges ~f:(fun acc e ->
           let dst = G.Edge.dst e |> Ref.name |> increment_iteration loop_head |> ref_of_name in
           let src =
-            let prev_iter_name = Ref.name prev_iter in
             match G.Edge.src e with
             | Ref.Stmt _ as src -> src
             | Ref.AState { state = _; name } ->
@@ -678,24 +763,20 @@ module Make (Dom : Abstract.Dom) = struct
     List.fold all_new_edges ~init:daig_without_fix_edges ~f:(flip G.Edge.insert)
 
   let dirty_from (r : Ref.t) (daig : t) =
+    dump_dot daig ~filename:(abs_of_rel_path "predirty.dot");
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n daig in
-      if Seq.is_empty outgoing_edges then (
+      if Seq.is_empty outgoing_edges then
         match Ref.name n with
         | Name.Loc _ -> (* procedure exit, all done*) acc
-        | Name.Iterate (_, l) ->
-            (* this is a hack -- graphlib doesn't seem to actually remove edges/nodes sometimes,
-               so just jump to the loop head if we somehow end up in a dangling unrolling *)
-            let lh_fp = ref_by_name_exn l daig in
-            let f, lh_fps, sc_edges = acc in
-            (lh_fp :: f, lh_fp :: lh_fps, sc_edges)
-        | x ->
-            dump_dot ~filename:"malformed.dot" daig;
-            failwith
-              (Format.asprintf
-                 "outdegree-0 refs must be abstract state for a function or program exit location; \
-                  [%a] is neither"
-                 Name.pp x))
+        | Name.Iterate (_, l) -> (
+            (* If we reach a dangling loop-head fixed point, keep track of it to reset fix edges after dirtying*)
+            match ref_by_name l daig with
+            | None -> acc
+            | Some lh_fp ->
+                let f, lh_fps, sc_edges = acc in
+                (lh_fp :: f, lh_fp :: lh_fps, sc_edges))
+        | x -> failwith (Format.asprintf "Malformed DAIG with outdegree-0 ref [%a]" Name.pp x)
       else
         Seq.fold outgoing_edges ~init:acc ~f:(fun (frontier, lh_fps, sc_edges) e ->
             let succ = G.Edge.dst e in
@@ -707,26 +788,9 @@ module Make (Dom : Abstract.Dom) = struct
               Comp.equal `Fix (G.Edge.label e) && (not @@ List.mem lh_fps succ ~equal:Ref.equal)
             then
               match Ref.name succ with
-              | Name.Loc l | Name.(Iterate (_, Loc l)) -> (
-                  (* find the all-zero-iteration-context at this loop-head location, to dirty from there *)
-                  let loop_head_ref =
-                    Sequence.find_exn (G.nodes daig)
-                      ~f:
-                        (Ref.name >> function
-                         | Name.(Iterate (ic, Loc l_prime)) when Cfg.Loc.equal l l_prime ->
-                             List.for_all ic ~f:(fst >> Int.equal 0)
-                             && List.exists ic ~f:(snd >> Cfg.Loc.equal l)
-                         | _ -> false)
-                  in
-                  (* dirty from there iff it's non-empty *)
-                  match loop_head_ref with
-                  | Ref.AState { state = Some _; name = _ } as lh ->
-                      Ref.dirty succ;
-
-                      (lh :: succ :: frontier, succ :: lh_fps, sc_edges)
-                  | _ ->
-                      Ref.dirty succ;
-                      (succ :: frontier, succ :: lh_fps, sc_edges))
+              | Name.Loc _l | Name.(Iterate (_, Loc _l)) ->
+                  Ref.dirty succ;
+                  (succ :: frontier, succ :: lh_fps, sc_edges)
               | _ ->
                   failwith
                     "malformed DAIG -- the destination of a `Fix edge is always the loop fixpoint"
@@ -745,46 +809,61 @@ module Make (Dom : Abstract.Dom) = struct
     let loop_head_fixpoints, loop_shortcircuit_edges = change_prop [ r ] [] [] in
     (* remove all edges that short-circuit loops, to be re-added after fixpoint computations are reset *)
     let daig = List.fold loop_shortcircuit_edges ~init:daig ~f:(flip G.Edge.remove) in
-    (* For each encountered (and therefore dirtied) loop fixpoint, reset its fix edges to the 0th and 1st iterates,
-       then remove any dangling unrollings *)
+    (* For each encountered (and therefore dirtied) loop fixpoint,
+       (1) find the least i such that the ith abstract iterate is empty,
+       (2) remove any unrollings beyond that point, and
+       (3) reset the fix edges to be from the ith and (i-1)th iterates
+       (4) re-add removed shortcircuit-ing edges
+    *)
     List.fold loop_head_fixpoints ~init:daig ~f:(fun daig -> function
       | (Ref.AState { state = _; name = Name.Loc l as name } as loop_fp)
-      | (Ref.AState { state = _; name = Name.(Iterate (_, Loc l)) as name } as loop_fp) -> (
-          let n0, n1 = Name.(wrap_iterate 0 l name, wrap_iterate 1 l name) in
-          let iter0 = ref_by_name_exn n0 daig in
-          let iter1 = ref_by_name_exn n1 daig in
+      | (Ref.AState { state = _; name = Name.(Iterate (_, Loc l)) as name } as loop_fp) ->
+          (* (1) *)
+          let i =
+            let rec first_empty_iterate idx =
+              match ref_by_name Name.(wrap_iterate idx l name) daig with
+              | Some (Ref.AState { state = None; _ }) -> idx
+              | Some (Ref.AState { state = Some _; _ }) -> first_empty_iterate (idx + 1)
+              | _ -> failwith "no empty abstract iterates found for dirtied loop-head fixed point"
+            in
+            first_empty_iterate 1
+          in
+          let n_i, n_i_minus1 = Name.(wrap_iterate i l name, wrap_iterate (i - 1) l name) in
+          let iter_i = ref_by_name_exn n_i daig in
+          let iter_i_minus1 = ref_by_name_exn n_i_minus1 daig in
+          (* (2) *)
           let daig =
             Seq.fold (G.Node.inputs loop_fp daig) ~init:daig ~f:(flip G.Edge.remove)
-            |> G.Edge.insert (G.Edge.create iter0 loop_fp `Fix)
-            |> G.Edge.insert (G.Edge.create iter1 loop_fp `Fix)
+            |> flip
+                 (Graph.fold_reachable
+                    (module G)
+                    ~init:daig
+                    ~f:(fun daig r -> if Ref.equal r iter_i then daig else G.Node.remove r daig))
+                 iter_i
           in
-          match Seq.find (G.Node.succs iter1 daig) ~f:(Ref.name >> Name.equal n1) with
-          | Some root_of_dangling_unrollings ->
-              Graph.fold_reachable
-                (module G)
-                daig root_of_dangling_unrollings ~init:daig
-                ~f:(fun daig n ->
-                  Ref.dirty n;
-                  Seq.fold ~init:daig ~f:(flip G.Edge.remove) (G.Node.inputs n daig)
-                  |> G.Node.remove n)
-          | _ -> daig)
+          (* (3) *)
+          let daig =
+            G.Edge.(
+              insert (create iter_i loop_fp `Fix) daig |> insert (create iter_i_minus1 loop_fp `Fix))
+          in
+          (* (4) *)
+          List.fold ~init:daig loop_shortcircuit_edges ~f:(fun daig edge ->
+              let lbl = G.Edge.label edge in
+              let loop_head =
+                match lbl with
+                | `Transfer_after_fix l -> l
+                | _ -> failwith "malformed loop-shortcircuiting edge"
+              in
+              if not Cfg.Loc.(equal loop_head l) then daig
+              else
+                let src_name = Ref.name (G.Edge.src edge) in
+                let reset_src_name = Name.set_iterate (i - 1) loop_head src_name in
+                let new_src =
+                  Seq.find_exn (G.nodes daig) ~f:(Ref.name >> Name.(equal reset_src_name))
+                in
+                G.Edge.(insert (create new_src (G.Edge.dst edge) lbl) daig))
       | _ ->
           failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
-    |> fun daig ->
-    List.fold loop_shortcircuit_edges ~init:daig ~f:(fun daig edge ->
-        let loop_head =
-          match G.Edge.label edge with
-          | `Transfer_after_fix l -> l
-          | _ -> failwith "malformed short-circuiting edge"
-        in
-        let new_src_name =
-          match Ref.name (G.Edge.src edge) with
-          | Name.Iterate _ as n -> Name.set_iterate 0 loop_head n
-          | _ -> failwith "malformed short-ciruiting edge"
-        in
-        match ref_by_name new_src_name daig with
-        | Some src_ref -> G.Edge.(insert (create src_ref (dst edge) (label edge))) daig
-        | None -> daig)
 
   let dirty (nm : Name.t) (daig : t) = dirty_from (ref_by_name_exn nm daig) daig
 
@@ -798,7 +877,8 @@ module Make (Dom : Abstract.Dom) = struct
     | Stmt _ -> (Result r, daig)
     | AState { state = Some _; _ } -> (Result r, daig)
     | AState { state = None; _ } when Seq.is_empty (G.Node.inputs r daig) ->
-        failwith "malformed DAIG: all empty cells have in-degree > 0"
+        failwith
+          (Format.asprintf "malformed DAIG: empty cell %a with in-degree 0" Name.pp (Ref.name r))
     | AState phi ->
         (* recursively [get] all predecessors (or a summary query) *)
         ( Seq.fold (G.Node.preds r daig) ~init:(Result [], daig) ~f:(fun (acc, g) pred ->
@@ -829,10 +909,10 @@ module Make (Dom : Abstract.Dom) = struct
                   dump_dot daig ~filename:(abs_of_rel_path "debug.dot");
                   failwith
                     (Format.asprintf
-                       "malformed DCG: transfer function must have one Stmt and one AState input, \
-                        instead have (dot dumped at debug.dot): \n\
+                       "malformed DCG: transfer function for %a must have one Stmt and one AState \
+                        input, instead have (dot dumped at debug.dot): \n\
                         \t%a\n"
-                       (List.pp "\n\t" Ref.pp) preds))
+                       Name.pp (Ref.name r) (List.pp "\n\t" Ref.pp) preds))
           | `Join -> (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.join), daig)
           | `Widen ->
               (Result (List.map preds ~f:Ref.astate_exn |> List.reduce_exn ~f:Dom.widen), daig)
@@ -844,7 +924,10 @@ module Make (Dom : Abstract.Dom) = struct
                   (* If fixpoint reached, return it.  Otherwise, unroll the loop and continue. *)
                   if Dom.equal iter1 iter2 then (Result iter1, daig)
                   else unroll_loop daig p2 |> get r summarizer >>| Ref.astate_exn
-              | _ -> failwith "fix always has two inputs (by construction)")
+              | _ ->
+                  failwith
+                    (Format.asprintf "fix always has two inputs (by construction); got: %a <- (%a)"
+                       Name.pp (Ref.name r) (List.pp ", " Name.pp) (List.map ~f:Ref.name preds)))
           | `Transfer_after_fix loop_head -> (
               match preds with
               | [ s; phi ] ->
@@ -875,9 +958,9 @@ module Make (Dom : Abstract.Dom) = struct
         in
         get loop_head_fp summarize daig >>= fun lh_fp daig ->
         match G.Node.preds lh_fp daig |> Sequence.to_list |> List.map ~f:Ref.name with
-        | [ Name.Iterate (ic1, _); Name.Iterate (ic2, _) ] ->
-            let ic1_wrt_lh = List.find_exn ic1 ~f:(snd >> Cfg.Loc.equal loop_head) |> fst in
-            let ic2_wrt_lh = List.find_exn ic2 ~f:(snd >> Cfg.Loc.equal loop_head) |> fst in
+        | [ (Name.Iterate (ic1, _) as nm1); (Name.Iterate (ic2, _) as nm2) ] ->
+            let ic1_wrt_lh = Name.get_iterate loop_head nm1 in
+            let ic2_wrt_lh = Name.get_iterate loop_head nm2 in
             let ic = if ic1_wrt_lh < ic2_wrt_lh then ic1 else ic2 in
             let ref_cell_fp = ref_by_name_exn Name.(Iterate (ic, l)) daig in
             get ref_cell_fp summarize daig
@@ -928,9 +1011,11 @@ module Make (Dom : Abstract.Dom) = struct
     let r = ref_by_name_exn nm daig in
     G.Node.preds r daig |> Seq.filter ~f:Ref.is_astate |> Seq.to_list |> function
     | [ Ref.AState { state = Some phi; _ } ] -> phi
-    | _ -> failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
+    | _ ->
+        dump_dot daig ~filename:(abs_of_rel_path "nopred.dot");
+        failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
 
-  let apply_edit ~daig ~cfg_edit ~(fn : Cfg.Fn.t) =
+  let apply_edit ~daig ~(cfg_edit : Frontend.Tree_diff.cfg_edit_result) ~(fn : Cfg.Fn.t) =
     let open Frontend.Tree_diff in
     function
     | Add_function _ | Delete_function _ | Modify_function _ ->
@@ -1071,12 +1156,26 @@ module Make (Dom : Abstract.Dom) = struct
           List.fold new_succ_edges ~init:d ~f:(flip G.Edge.insert)
         in
         List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt
+
+  let assert_wf g =
+    let is_wf = ref true in
+    Sequence.iter (G.nodes g) ~f:(fun rc ->
+        if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
+          Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
+          is_wf := false)
+        else if
+          not @@ (Ref.is_empty rc || Sequence.for_all (G.Node.preds rc g) ~f:(Ref.is_empty >> not))
+        then (
+          Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
+          is_wf := false);
+        assert !is_wf)
 end
 
 module Dom = Domain.Unit_dom
 module Daig = Make (Dom)
 open Frontend
 
+(*
 let%test "build daig, edit, and dump dot: HelloWorld.java" =
   Cfg.Loc.reset ();
   let ({ loc_map; cfgs; _ } : Cfg_parser.prgm_parse_result) =
@@ -1126,5 +1225,26 @@ let%test "analyze conditional at end of loop body" =
          let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
          Daig.dump_dot
            ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ ".dot"))
+           analyzed_daig);
+  true
+  *)
+let%test "debug: analyze specific file" =
+  let ({ cfgs; _ } : Cfg_parser.prgm_parse_result) =
+    Frontend.Cfg_parser.parse_file_exn
+      (abs_of_rel_path
+         "_bugswarm/SpigotMC-BungeeCord-130330788/pass/proxy/src/main/java/net/md_5/bungee/BungeeCord.java")
+  in
+  Map.to_alist cfgs
+  |> List.iter ~f:(fun ((fn : Cfg.Fn.t), cfg) ->
+         let _ =
+           Cfg.dump_dot_intraproc
+             ~filename:(abs_of_rel_path (Format.asprintf "%a.CFG.dot" Method_id.pp fn.method_id))
+             cfg
+         in
+         let daig = Daig.of_cfg ~entry_state:(Dom.init ()) ~cfg ~fn in
+         Daig.dump_dot ~filename:(abs_of_rel_path (fn.method_id.method_name ^ ".DEBUG.dot")) daig;
+         let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
+         Daig.dump_dot
+           ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ "DEBUG.dot"))
            analyzed_daig);
   true

@@ -41,7 +41,7 @@ module type Sig = sig
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
-  exception Ref_not_found of Cfg.Loc.t
+  exception Ref_not_found of [ `By_loc of Cfg.Loc.t | `By_name of Name.t ]
 
   val get_by_loc : ?summarizer:summarizer -> Cfg.Loc.t -> t -> absstate or_summary_query * t
 
@@ -58,6 +58,8 @@ module type Sig = sig
 
   val pred_state_exn : Name.t -> t -> absstate
   (** returns the predecessor absstate of the cell named by the given [Name.t], if there is exactly one *)
+
+  val assert_wf : t -> unit
 end
 
 module Make (Dom : Abstract.Dom) : Sig with type absstate := Dom.t

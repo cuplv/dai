@@ -174,7 +174,12 @@ module Make (Dom : Abstract.Dom) = struct
     match Map.find daigs entry_state with
     | Some daig -> (daig, dsg)
     | None ->
-        let (daig as data) = D.of_cfg ~entry_state ~cfg ~fn in
+        Format.print_flush ();
+        let (daig as data) =
+          try D.of_cfg ~entry_state ~cfg ~fn
+          with _ -> failwith (Format.asprintf "caught failure in D.of_cfg: %a" Cfg.Fn.pp fn)
+        in
+        (*D.assert_wf daig;*)
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
         (daig, Map.set dsg ~key:fn ~data:(cfg, daigs))
 
@@ -190,6 +195,7 @@ module Make (Dom : Abstract.Dom) = struct
           | None -> dsg
           | Some dep_daig ->
               let dep_daig = D.dirty dep.nm dep_daig in
+              (*D.assert_wf dep_daig;*)
               set_daig dsg dep_daig dep.fn dep.ctx
         in
         dirty_interproc_deps ~ctx:dep.ctx dsg dep.fn)
@@ -308,6 +314,7 @@ module Make (Dom : Abstract.Dom) = struct
       let res, d =
         D.get_by_loc ~summarizer:(summarize_with_callgraph h fields callgraph fn entry_state) loc d
       in
+      (*D.assert_wf d;*)
       (res, set_daig h d fn entry_state)
     in
     (* try getting state at loc directly from sub-DAIG; return if success; process generated summary queries otherwise *)
@@ -333,6 +340,7 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.is_empty new_qrys then dsg else solve_subqueries dsg new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
+              (*Format.(fprintf err_formatter) "[INFO] processing qry: %a\n" Q.pp qry;*)
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
@@ -341,6 +349,7 @@ module Make (Dom : Abstract.Dom) = struct
                       (summarize_with_callgraph dsg fields callgraph qry.fn qry.entry_state)
                     (Q.exit_loc qry) callee_daig
                 in
+                (*D.assert_wf new_callee_daig;*)
                 (res, set_daig dsg new_callee_daig qry.fn qry.entry_state, new_callee_daig)
               in
               match daig_qry_result with
@@ -350,7 +359,7 @@ module Make (Dom : Abstract.Dom) = struct
                     |> Set.fold ~init:(new_callee_daig, false)
                          ~f:(fun (daig, needs_requery) (recursive_dep : Dep.t) ->
                            match D.read_by_name recursive_dep.nm daig with
-                           | None -> (daig, needs_requery)
+                           | None | (exception D.Ref_not_found (`By_name _)) -> (daig, needs_requery)
                            | Some return_state ->
                                let new_return_state =
                                  Dom.return ~return_state:res ~fields ~callee:qry.fn ~caller:qry.fn
@@ -363,6 +372,7 @@ module Make (Dom : Abstract.Dom) = struct
                                  let daig =
                                    D.write_by_name recursive_dep.nm new_return_state daig
                                  in
+                                 (*D.assert_wf daig;*)
                                  (daig, true))
                   in
                   let dsg = set_daig dsg recursively_dirtied_daig qry.fn qry.entry_state in
@@ -521,6 +531,7 @@ module Make (Dom : Abstract.Dom) = struct
                 let new_daigs =
                   Map.map daigs ~f:(fun daig -> D.apply_edit ~daig ~cfg_edit ~fn edit)
                 in
+                (*Map.iter new_daigs ~f:D.assert_wf;*)
                 (cfg_edit.new_loc_map, Map.set dsg ~key:fn ~data:(cfg_edit.cfg, new_daigs))))
 end
 
