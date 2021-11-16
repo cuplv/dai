@@ -68,6 +68,13 @@ let equal l r =
   let l, r = combine_envs l r in
   Abstract1.is_eq (get_man ()) l r
 
+let compare (l : t) (r : t) =
+  let l, r = combine_envs l r in
+  let man = get_man () in
+  try Abstract1.(if is_eq man l r then 0 else if is_leq man l r then -1 else 1)
+  with Apron.Manager.Error { exn = _; funid = _; msg } ->
+    failwith ("Apron.Manager.Error in Itv#compare: " ^ msg)
+
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let is_bot itv = Abstract1.is_bottom (get_man ()) itv
 
@@ -160,7 +167,7 @@ let mk_tcons env op l r =
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
 (* abstractly evaluate boolean binary operation [l op r] at interval [itv] by translating it to [(l - r) op 0]
-    (since apron can only solve booleran constraints of that form), and intersecting the result with [itv].
+    (since apron can only solve boolean constraints of that form), and intersecting the result with [itv].
     If that intersection is  ...
       ... bottom then expression is false
       ... equal to [itv] then expression is true
@@ -207,6 +214,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
       | Ge -> mk_bool_binop itv Tcons0.SUPEQ l r
       | Lt -> mk_bool_binop itv Tcons0.SUP r l
       | Le -> mk_bool_binop itv Tcons0.SUPEQ r l
+      | And | Or -> Some (Texpr1.Cst (Coeff.i_of_float 0. 1.))
       | BAnd | BOr | BXor ->
           (* sending bitwise arihmetic to top because APRON does not support it *)
           Some (Texpr1.Cst (Coeff.Interval Interval.top))
@@ -375,12 +383,6 @@ let show itv =
   Format.flush_str_formatter ()
 
 let hash seed itv = seeded_hash seed @@ Abstract1.hash (get_man ()) itv
-
-let compare (l : t) (r : t) =
-  let open Abstract1 in
-  let man = get_man () in
-  try if is_eq man l r then 0 else if is_leq man l r then -1 else 1
-  with Apron.Manager.Error _ -> failwith "Apron.Manager.Error in Itv#compare"
 
 let hash_fold_t h itv = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 itv)
 
