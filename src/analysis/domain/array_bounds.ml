@@ -63,8 +63,8 @@ let show x =
 
 let hash = seeded_hash
 
-let _apron_var_of_array_cell addr idx =
-  Var.of_string (Format.asprintf "__dai_%a.%i" Addr.pp addr idx)
+let apron_var_of_array_cell addr idx =
+  Var.of_string (Format.asprintf "__dai_%a.%a" Addr.pp addr Int64.pp idx)
 
 let apron_var_of_field addr field = Var.of_string (Format.asprintf "__dai_%a.%s" Addr.pp addr field)
 
@@ -149,7 +149,16 @@ let texpr_of_expr (am, itv) expr =
     | Ast.Expr.Array_literal { elts = _; alloc_site = _ } ->
         failwith
           "Unreachable by construction; array literals only occur at top level of assignment."
-    | Ast.Expr.Array_access _ -> failwith "todo: texpr_of_expr array_access"
+    | Ast.(Expr.Array_access { rcvr = Expr.Var rcvr; idx = Expr.Lit (Lit.Int idx) }) -> (
+        match Map.find am rcvr with
+        | None -> None
+        | Some aaddr ->
+            Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
+                let v = apron_var_of_array_cell addr idx in
+                if Environment.mem_var (Abstract1.env itv) v then
+                  join_intervals acc (Itv.lookup itv v)
+                else acc)
+            |> fun v -> Some (Texpr1.Cst (Coeff.Interval v)))
     | Ast.Expr.Array_create _ -> failwith "todo: texpr_of_expr array_create"
     | _ -> None
   in
@@ -183,6 +192,7 @@ let interpret stmt phi =
   | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
       (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
   | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } ->
+      let _ = failwith "found an array literal" in
       let am = Addr_map.add am ~key:lhs ~addr:alloc_site in
       let len = List.length elts in
       let itv =

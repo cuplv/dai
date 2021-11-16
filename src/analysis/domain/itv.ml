@@ -193,8 +193,7 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) itv =
   function
   | Expr.Var v ->
       let av = Var.of_string v in
-      if Environment.mem_var (Abstract1.env itv) av then Some (Texpr1.Var (Var.of_string v))
-      else None
+      if Environment.mem_var (Abstract1.env itv) av then Some (Texpr1.Var av) else None
   | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int64 i)))
   | Expr.Lit (Float f) -> Some (Texpr1.Cst (Coeff.s_of_float f))
   | Expr.Lit (Bool b) -> Some (Texpr1.Cst (Coeff.s_of_float (if b then 1. else 0.)))
