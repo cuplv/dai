@@ -340,7 +340,9 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.is_empty new_qrys then dsg else solve_subqueries dsg new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
-              (*Format.(fprintf err_formatter) "[INFO] processing qry: %a\n" Q.pp qry;*)
+              (*Format.(fprintf err_formatter)
+                "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a)\n" Q.pp qry Cfg.Loc.pp
+                qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit;*)
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
@@ -349,6 +351,7 @@ module Make (Dom : Abstract.Dom) = struct
                       (summarize_with_callgraph dsg fields callgraph qry.fn qry.entry_state)
                     (Q.exit_loc qry) callee_daig
                 in
+
                 (*D.assert_wf new_callee_daig;*)
                 (res, set_daig dsg new_callee_daig qry.fn qry.entry_state, new_callee_daig)
               in

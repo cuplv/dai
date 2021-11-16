@@ -192,7 +192,6 @@ let interpret stmt phi =
   | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
       (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
   | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } ->
-      let _ = failwith "found an array literal" in
       let am = Addr_map.add am ~key:lhs ~addr:alloc_site in
       let len = List.length elts in
       let itv =
@@ -200,29 +199,23 @@ let interpret stmt phi =
           (apron_var_of_array_len alloc_site)
           Texpr1.(Cst (Coeff.Scalar (Scalar.of_int len)))
       in
-      (am, itv)
-      (* the below snippet tracks actual array contents; just tracking lengths for now though
-         If tracking of contents is enabled, should also write a case for Ast.Stmt.Write, currently treated as skip.
-      *)
-      (*
-      Some
-        ( am,
-          List.foldi elts ~init:([], []) ~f:(fun i (acc_vs, acc_itvs) elt ->
-              match texpr_of_expr elt (am, itv) >>| Itv.eval_texpr itv with
-              | Some elt_itv ->
-                  let v = apron_var_of_array_cell addr i in
-                  (v :: acc_vs, elt_itv :: acc_itvs)
-              | _ -> (acc_vs, acc_itvs))
-          |> fun (vs, itvs) ->
-          let vs = Array.of_list vs in
-          let itvs = Array.of_list itvs in
 
-          let new_env = Environment.make [||] vs in
-          let old_env = Abstract1.env itv in
-          let env = Environment.lce old_env new_env in
-          let itv = Abstract1.change_environment man itv env false in
-          Abstract1.meet man itv @@ Abstract1.of_box man env vs itvs )
-      *)
+      ( am,
+        List.foldi elts ~init:([], []) ~f:(fun i (acc_vs, acc_itvs) elt ->
+            match texpr_of_expr (am, itv) elt >>| Itv.eval_texpr itv with
+            | Some elt_itv ->
+                let v = apron_var_of_array_cell alloc_site (Int64.of_int i) in
+                (v :: acc_vs, elt_itv :: acc_itvs)
+            | _ -> (acc_vs, acc_itvs))
+        |> fun (vs, itvs) ->
+        let vs = Array.of_list vs in
+        let itvs = Array.of_list itvs in
+
+        let new_env = Environment.make [||] vs in
+        let old_env = Abstract1.env itv in
+        let env = Environment.lce old_env new_env in
+        let itv = Abstract1.change_environment man itv env false in
+        Abstract1.meet man itv @@ Abstract1.of_box man env vs itvs )
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
       match texpr_of_expr (am, itv) rhs with
