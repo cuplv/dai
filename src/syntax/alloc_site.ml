@@ -16,6 +16,8 @@ module T : sig
   val pp : t pp
 
   val of_int : int -> t
+
+  val of_varargs : Method_id.t -> t
 end = struct
   type t = int [@@deriving equal, compare, hash, sexp]
 
@@ -40,6 +42,16 @@ end = struct
       flush_str_formatter ())
 
   let of_int = Fn.id
+
+  let varargs_alloc_sites : t Method_id.Map.t ref = ref Method_id.Map.empty
+
+  let of_varargs method_ =
+    match Map.find !varargs_alloc_sites method_ with
+    | Some alloc_site -> alloc_site
+    | None ->
+        let alloc_site = fresh () in
+        varargs_alloc_sites := Map.add_exn !varargs_alloc_sites ~key:method_ ~data:alloc_site;
+        alloc_site
 end
 
 module T_comparator = struct

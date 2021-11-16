@@ -309,14 +309,15 @@ let is_safe (var : string) (idx : Ast.Expr.t) ((am, itv) : t) =
     |> List.reduce_exn ~f:(fun x y ->
            match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
 
-let arrayify_varargs (actuals : Expr.t list) (formals : int) (phi : t) : Expr.t list * t =
+let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
   let tmp_var = "__DAI_array_for_varargs" in
   let varargs = List.drop actuals (formals - 1) in
   let arrayify =
     Stmt.Assign
       {
         lhs = tmp_var;
-        rhs = Expr.Array_literal { elts = varargs; alloc_site = Alloc_site.fresh () };
+        rhs =
+          Expr.Array_literal { elts = varargs; alloc_site = Alloc_site.of_varargs callee.method_id };
       }
   in
   let phi' = interpret arrayify phi in
@@ -328,7 +329,7 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
   | Ast.Stmt.Call { rcvr; actuals; _ } | Ast.Stmt.Exceptional_call { rcvr; actuals; _ } ->
       let actuals, (caller_am, caller_itv) =
         if List.(length actuals = length callee.formals) then (actuals, (caller_am, caller_itv))
-        else arrayify_varargs actuals (List.length callee.formals) (caller_am, caller_itv)
+        else arrayify_varargs callee actuals (List.length callee.formals) (caller_am, caller_itv)
       in
       (* re-scope the address map to include only the formal parameters *)
       let callee_am =
@@ -400,16 +401,10 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
         if callee.method_id.static then `Static
         else if String.equal rcvr "this" then `This
         else
-          `AAddr
-            (match alloc_site with
-            | Some a -> Addr.Abstract.of_alloc_site a
-            | None -> (
-                match Map.find caller_amap rcvr with
-                | Some aaddr -> aaddr
-                | None ->
-                    failwith
-                      (Format.asprintf "error: no materialized address for receiver of callsite %a"
-                         Ast.Stmt.pp callsite)))
+          match alloc_site with
+          | Some a -> `AAddr (Addr.Abstract.of_alloc_site a)
+          | None -> (
+              match Map.find caller_amap rcvr with Some aaddr -> `AAddr aaddr | None -> `None)
       in
       let callee_instance_fields =
         if callee.method_id.static then String.Set.empty
@@ -451,7 +446,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
                   Set.fold aaddr ~init:itv ~f:(fun itv addr ->
                       Itv.assign itv (apron_var_of_field addr fld)
                         Texpr1.(Cst (Coeff.Interval fld_val)))
-              | `Static -> itv
+              | `Static | `None -> itv
             else itv)
         (* (3) *)
         |>
@@ -472,7 +467,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
       let amap =
         (* (1) *)
         (match rcvr_aaddr with
-        | `This | `Static -> caller_amap
+        | `This | `Static | `None -> caller_amap
         | `AAddr rcvr_aaddr ->
             if String.equal "<init>" meth && Option.is_some lhs then
               Addr_map.set caller_amap ~key:(Option.value_exn lhs) ~aaddr:rcvr_aaddr
@@ -485,7 +480,57 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
         | _ -> Fn.id
       in
       (amap, itv)
-  | Ast.Stmt.Exceptional_call _ -> failwith "todo: exceptional Array_bounds#return"
+  | Ast.Stmt.Exceptional_call { rcvr; meth = _; actuals = _ } ->
+      (* [rcvr_aaddr] is one of:
+         * [`This], indicating an absent or "this" receiver;
+         * [`AAddr aaddr], indicating a receiver with abstract address [aaddr]; or
+         * [`Static], indicating a static call
+      *)
+      let rcvr_aaddr =
+        if callee.method_id.static then `Static
+        else if String.equal rcvr "this" then `This
+        else match Map.find caller_amap rcvr with Some aaddr -> `AAddr aaddr | None -> `None
+      in
+      let callee_instance_fields =
+        if callee.method_id.static then String.Set.empty
+        else
+          Declared_fields.lookup_instance fields ~package:callee.method_id.package
+            ~class_name:callee.method_id.class_name
+      in
+      (* transfer any exceptional-return-value address binding*)
+      let amap =
+        match Map.find return_amap Cfg.exc_retvar with
+        | Some aaddr -> Addr_map.set caller_amap ~key:Cfg.exc_retvar ~aaddr
+        | _ -> caller_amap
+      in
+      let itv =
+        Set.fold callee_instance_fields ~init:caller_itv ~f:(fun itv fld ->
+            let fld_var = Var.of_string fld in
+            if Environment.mem_var (Abstract1.env return_itv) fld_var then
+              let fld_val = Itv.lookup return_itv fld_var in
+              match rcvr_aaddr with
+              | `This -> Itv.assign itv (Var.of_string fld) Texpr1.(Cst (Coeff.Interval fld_val))
+              | `AAddr aaddr ->
+                  Set.fold aaddr ~init:itv ~f:(fun itv addr ->
+                      Itv.assign itv (apron_var_of_field addr fld)
+                        Texpr1.(Cst (Coeff.Interval fld_val)))
+              | `Static | `None -> itv
+            else itv)
+        (* (3) *)
+        |>
+        if Cfg.Fn.is_same_class callee caller then fun itv ->
+          let static_fields =
+            Declared_fields.lookup_static fields ~package:callee.method_id.package
+              ~class_name:callee.method_id.class_name
+          in
+          Set.fold static_fields ~init:itv ~f:(fun itv fld ->
+              let fld_var = Var.of_string fld in
+              let fld_val = Itv.lookup return_itv fld_var in
+              if Interval.is_top fld_val then itv
+              else Itv.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
+        else Fn.id
+      in
+      (amap, itv)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 let noop_library_methods : String.Set.t =
@@ -502,8 +547,6 @@ let is_setter meth =
   | _ -> false
 
 let approximate_missing_callee ~caller_state ~callsite =
-  Format.(fprintf std_formatter)
-    "WARNING: missing callee code for callsite %a\n" Ast.Stmt.pp callsite;
   (* as described in [interpret] above, forget used tmp vars after they are used *)
   forget_used_tmp_vars callsite
   @@
@@ -557,8 +600,7 @@ let approximate_missing_callee ~caller_state ~callsite =
         Itv.forget vars_to_forget caller_itv
       in
       (am, itv)
-  | Ast.Stmt.Exceptional_call _ ->
-      failwith "todo: approximate exceptional control flow through missing procedure"
+  | Ast.Stmt.Exceptional_call _ -> caller_state
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 (** deferred to end of this file to avoid colliding with Dai.Import.(<=) *)
