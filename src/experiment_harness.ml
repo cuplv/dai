@@ -180,7 +180,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
             ~callgraph:g.cg.forward ~fields:g.parse.fields
           |> snd)
     in
-    Format.printf "[EXPERIMENT] batch analysis took: %.3f\n" (1000. *. (systime () -. st));
+    Format.printf "[EXPERIMENT] exhaustive analysis took: %.3f\n" (1000. *. (systime () -. st));
     { dsg; cg = g.cg; parse = g.parse }
 
   let issue_demand_query ~qry_loc entrypoints (g : t) : t =
