@@ -590,6 +590,13 @@ module Make (Dom : Abstract.Dom) = struct
 
   let of_cfg ~(entry_state : absstate) ~(cfg : Cfg.t) ~(fn : Cfg.Fn.t) : t =
     let entry_ref = Ref.AState { state = Some entry_state; name = Name.Loc fn.entry } in
+    let cfg =
+      (* if the CFG has no edge to its exceptional exit, add one from entry with [assume false] *)
+      if Seq.exists (Cfg.G.nodes cfg) ~f:(Cfg.Loc.equal fn.exc_exit) then cfg
+      else
+        Cfg.G.Edge.(
+          insert (create fn.entry fn.exc_exit Ast.(Stmt.Assume (Expr.Lit (Lit.Bool false)))) cfg)
+    in
     of_region_cfg ~entry_ref ~cfg ~entry:fn.entry ~loop_iteration_ctx:None ()
 
   let ref_at_loc_exn ~loc =
