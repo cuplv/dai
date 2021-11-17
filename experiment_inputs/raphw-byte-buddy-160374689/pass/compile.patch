@@ -1,0 +1,13 @@
+diff --git a/pom.xml b/pom.xml
+index bfec215..7bff1cf 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -43,7 +43,7 @@
+         <module>byte-buddy-agent</module>
+         <module>byte-buddy-android</module>
+         <module>byte-buddy-maven-plugin</module>
+-        <module>byte-buddy-gradle-plugin</module>
++        <!-- <module>byte-buddy-gradle-plugin</module> -->
+     </modules>
+ 
+     <properties>
