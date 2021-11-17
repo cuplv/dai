@@ -926,9 +926,26 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
         build_catch_cfg catch_clauses loc_map method_id ~exit:f_blk_entry ~ret ~exc:f_blk_entry
           ~brk:(None, String.Map.empty) ~cont:(None, String.Map.empty)
       in
+      let has_catch_return, catch_edges =
+        let catch_return_edges, catch_edges =
+          List.partition_tf catch_edges ~f:(snd3 >> Loc.equal ret)
+        in
+        match catch_return_edges with
+        | [] -> (false, catch_edges)
+        | c_r_edges ->
+            ( true,
+              List.map c_r_edges ~f:(fun (src, _, lbl) -> (src, f_blk_entry, lbl)) @ catch_edges )
+      in
       let loc_map, try_edges =
         edge_list_of_stmt_list method_id loc_map ~entry ~exit:f_blk_entry ~ret ~exc:catch_loc
           try_block
+      in
+      let has_try_return, try_edges =
+        let try_return_edges, try_edges = List.partition_tf try_edges ~f:(snd3 >> Loc.equal ret) in
+        match try_return_edges with
+        | [] -> (false, try_edges)
+        | t_r_edges ->
+            (true, List.map t_r_edges ~f:(fun (src, _, lbl) -> (src, f_blk_entry, lbl)) @ try_edges)
       in
       let loc_map, finally_edges =
         edge_list_of_stmt_list method_id loc_map ~entry:f_blk_entry ~exit:f_blk_exit ~ret ~exc ~brk
@@ -940,9 +957,12 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
             | _, dst, Stmt.Assign { lhs; rhs = _ } -> Loc.equal dst f_blk_entry && lhs = exc_retvar
             | _ -> false)
         in
-        if has_uncaught_exc try_edges || has_uncaught_exc catch_edges then
-          [ (f_blk_exit, exit, Stmt.Skip); (f_blk_exit, exc, Stmt.Skip) ]
-        else [ (f_blk_exit, exit, Stmt.Skip) ]
+        ( [ (f_blk_exit, exit, Stmt.Skip) ] |> fun es ->
+          if has_uncaught_exc try_edges || has_uncaught_exc catch_edges then
+            (f_blk_exit, exc, Stmt.Skip) :: es
+          else es )
+        |> fun es ->
+        if has_try_return || has_catch_return then (f_blk_exit, ret, Stmt.Skip) :: es else es
       in
       (loc_map, List.concat [ f_blk_egress_edges; try_edges; catch_edges; finally_edges ])
   | `Try_with_resous_stmt (_, resource_spec, (_, blk, _), catches, opt_finally) ->
