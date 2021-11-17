@@ -174,7 +174,7 @@ module Make (Dom : Abstract.Dom) = struct
     match Map.find daigs entry_state with
     | Some daig -> (daig, dsg)
     | None ->
-      (*Format.printf "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;*)
+        (*Format.printf "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;*)
         let (daig as data) =
           try D.of_cfg ~entry_state ~cfg ~fn
           with _ -> failwith (Format.asprintf "caught failure in D.of_cfg: %a" Cfg.Fn.pp fn)
