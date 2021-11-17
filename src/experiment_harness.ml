@@ -34,7 +34,7 @@ let relative_java_srcs dir = List.map (java_srcs dir) ~f:(String.chop_prefix_exn
 module type S = sig
   type t
 
-  val cg : t -> Callgraph.t
+  val cg : t -> Callgraph.forward_t
 
   val init : ?cg:string -> string -> t
 
@@ -62,7 +62,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     cha : Class_hierarchy.t;
   }
 
-  type t = { dsg : G.t; cg : Callgraph.bidirectional; parse : parse_info }
+  type t = { dsg : G.t; cg : Callgraph.t; parse : parse_info }
 
   let cg x = x.cg.forward
 
@@ -86,12 +86,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     in
     let dsg = G.init ~cfgs in
     let fns = G.fns dsg in
-    let cg =
-      Callgraph.(
-        let forward = deserialize ~fns (Src_file.of_file cg) in
-        let reverse = reverse ~fns forward in
-        { forward; reverse })
-    in
+    let cg = Callgraph.deserialize ~fns (Src_file.of_file cg) in
     let parse = { src_dir; trees; loc_map; fields; cha } in
     { dsg; cg; parse }
 
@@ -151,13 +146,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
           | _ -> failwith ("error parsing file: " ^ filename))
     in
     let dsg = G.add_exn ~cfgs dsg in
-    let cg =
-      Callgraph.(
-        let fns = G.fns dsg in
-        let forward = deserialize ~fns (Src_file.of_file cg) in
-        let reverse = reverse ~fns forward in
-        { forward; reverse })
-    in
+    let fns = G.fns dsg in
+    let cg = Callgraph.deserialize ~fns (Src_file.of_file cg) in
     (* TODO: handle added fields and CHA edges in edited files; add corresponding Tree_diff.edit's
        and expose functions there to use here to apply diffs to our fields/cha structures *)
     let parse = { src_dir = next_dir; trees; loc_map; fields; cha } in
@@ -180,8 +170,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let st = systime () in
     let dsg =
       List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
-          G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit
-            ~callgraph:g.cg.forward ~fields:g.parse.fields
+          G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg
+            ~fields:g.parse.fields
           |> snd)
     in
     Format.printf "[EXPERIMENT] exhaustive analysis took: %.3f\n" (1000. *. (systime () -. st));

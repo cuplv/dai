@@ -174,7 +174,7 @@ module Make (Dom : Abstract.Dom) = struct
     match Map.find daigs entry_state with
     | Some daig -> (daig, dsg)
     | None ->
-        Format.print_flush ();
+      (*Format.printf "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;*)
         let (daig as data) =
           try D.of_cfg ~entry_state ~cfg ~fn
           with _ -> failwith (Format.asprintf "caught failure in D.of_cfg: %a" Cfg.Fn.pp fn)
@@ -200,12 +200,10 @@ module Make (Dom : Abstract.Dom) = struct
         in
         dirty_interproc_deps ~ctx:dep.ctx dsg dep.fn)
 
-  let summarize_with_callgraph (dsg : t) fields callgraph (caller : Cfg.Fn.t) caller_entry_state
-      ~callsite:(callsite, nm) caller_state =
+  let summarize_with_callgraph (dsg : t) fields (cg : Callgraph.t) (caller : Cfg.Fn.t)
+      caller_entry_state ~callsite:(callsite, nm) caller_state =
     let open Option.Monad_infix in
-    let callees =
-      Callgraph.resolve_with_callgraph ~callsite ~caller_method:caller.method_id ~callgraph
-    in
+    let callees = Callgraph.callees ~callsite ~caller_method:caller.method_id ~cg:cg.forward in
     if List.is_empty callees then Some (Dom.approximate_missing_callee ~caller_state ~callsite)
     else
       let is_exc =
@@ -222,7 +220,7 @@ module Make (Dom : Abstract.Dom) = struct
           let callee_entry_state = Dom.call ~callee ~callsite ~caller_state ~fields in
           (* four cases:
              (1) callee entry state is bottom, so no effect on return state
-             (2) this is a recusrive call and we already have an exactly-matching summary, so no widening needed
+             (2) this is a recursive call and we already have an exactly-matching summary, so no widening needed
              (3) this is a recursive call and widening has converged on the entry state, so we add a self-dependency and continue
              (4) this is a non-recursive call or recursive call yet to converge on its entry state, so attempt to summarize
           *)
@@ -231,7 +229,7 @@ module Make (Dom : Abstract.Dom) = struct
             (* case (1); do this before widening to avoid needless work *)
           then acc_result
           else
-            let is_recursive = Method_id.equal caller.method_id callee.method_id in
+            let is_recursive = Callgraph.is_mutually_recursive cg.scc caller callee in
             let exit_loc = if is_exc then callee.exc_exit else callee.exit in
             let exactly_matching_daig =
               Map.find_exn dsg callee |> snd |> flip Map.find callee_entry_state
@@ -274,8 +272,8 @@ module Make (Dom : Abstract.Dom) = struct
                   else None)
 
   let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_entry_state
-      ~callgraph caller_method =
-    let callees = Callgraph.resolve_with_callgraph ~callsite ~caller_method ~callgraph in
+      ~(cg : Callgraph.t) caller_method =
+    let callees = Callgraph.callees ~callsite ~caller_method ~cg:cg.forward in
     (* generate a subquery for each possible callee without a compatible summary *)
     List.fold callees ~init:[] ~f:(fun acc callee ->
         let is_exc =
@@ -287,7 +285,8 @@ module Make (Dom : Abstract.Dom) = struct
         let callee_entry_state =
           Dom.call ~callee ~callsite ~caller_state ~fields
           |>
-          if Method_id.equal caller_method callee.method_id then Dom.widen caller_entry_state
+          if Callgraph.methods_mutually_recursive cg.scc caller_method callee.method_id then
+            Dom.widen caller_entry_state
           else Fn.id
         in
         match Summary.find ~exc:is_exc callee_entry_state callee with
@@ -301,7 +300,7 @@ module Make (Dom : Abstract.Dom) = struct
                 let q : Q.t = { fn = callee; is_exc; entry_state = callee_entry_state } in
                 q :: acc))
 
-  let query ~method_id ~entry_state ~loc ~callgraph ~fields dsg : Dom.t * t =
+  let query ~method_id ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     let fn =
       match Cfg.Fn.Map.fn_by_method_id method_id dsg with
       | None ->
@@ -312,7 +311,7 @@ module Make (Dom : Abstract.Dom) = struct
     let issue_root_query h =
       let d, h = materialize_daig ~fn ~entry_state h in
       let res, d =
-        D.get_by_loc ~summarizer:(summarize_with_callgraph h fields callgraph fn entry_state) loc d
+        D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn entry_state) loc d
       in
       (*D.assert_wf d;*)
       (res, set_daig h d fn entry_state)
@@ -331,8 +330,8 @@ module Make (Dom : Abstract.Dom) = struct
               | D.Result _ -> dsg
               | D.Summ_qry { callsite; caller_state } ->
                   let new_qrys =
-                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~callgraph
-                      method_id ~caller_entry_state:entry_state
+                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg method_id
+                      ~caller_entry_state:entry_state
                   in
                   if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
                     failwith "got bottom new_qry"
@@ -340,15 +339,13 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.is_empty new_qrys then dsg else solve_subqueries dsg new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
-              (*Format.(fprintf err_formatter)
-                "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a)\n" Q.pp qry Cfg.Loc.pp
-                qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit;*)
+              (*Format.printf "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a)\n" Q.pp qry
+                Cfg.Loc.pp qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit;*)
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
                   D.get_by_loc
-                    ~summarizer:
-                      (summarize_with_callgraph dsg fields callgraph qry.fn qry.entry_state)
+                    ~summarizer:(summarize_with_callgraph dsg fields cg qry.fn qry.entry_state)
                     (Q.exit_loc qry) callee_daig
                 in
 
@@ -383,14 +380,17 @@ module Make (Dom : Abstract.Dom) = struct
                   solve_subqueries dsg qrys
               | D.Summ_qry { callsite; caller_state } ->
                   let new_qrys =
-                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~callgraph
+                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
                       qry.fn.method_id ~caller_entry_state:qry.entry_state
+                    |> List.filter ~f:(fun (new_qry : Q.t) ->
+                           (not @@ Callgraph.is_mutually_recursive cg.scc qry.fn new_qry.fn)
+                           || (not @@ Dom.equal new_qry.entry_state qry.entry_state))
                   in
                   solve_subqueries dsg (new_qrys @ qrys))
         in
         let dsg =
           solve_subqueries dsg
-            (callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~callgraph method_id
+            (callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg method_id
                ~caller_entry_state:entry_state)
         in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)
@@ -404,12 +404,11 @@ module Make (Dom : Abstract.Dom) = struct
                   query for %a in %a"
                  Method_id.pp method_id Dom.pp entry_state))
 
-  let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.bidirectional)
+  let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
       ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) : Dom.t list * t =
     if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
       let res, dsg =
-        query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~callgraph:cg.forward
-          ~fields
+        query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~cg ~fields
       in
       ([ res ], dsg)
     else
@@ -418,12 +417,13 @@ module Make (Dom : Abstract.Dom) = struct
         (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
         Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;
         let res, dsg =
-          query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~callgraph:cg.forward
-            ~fields
+          query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~cg ~fields
         in
         ([ res ], dsg))
       else
-        let rec_callers, nonrec_callers = List.partition_tf callers ~f:(Cfg.Fn.equal fn) in
+        let rec_callers, nonrec_callers =
+          List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
+        in
         let entry_states, dsg =
           List.fold nonrec_callers ~init:(Dom.Set.empty, dsg)
             ~f:(fun (acc_entry_states, dsg) caller ->
@@ -450,10 +450,7 @@ module Make (Dom : Abstract.Dom) = struct
             (* for non-recursive functions, analyze to [loc] in each reachable [entry_state] *)
             let results, dsg =
               Set.fold entry_states ~init:([], dsg) ~f:(fun (rs, dsg) entry_state ->
-                  let r, dsg =
-                    query dsg ~method_id:fn.method_id ~entry_state ~loc ~callgraph:cg.forward
-                      ~fields
-                  in
+                  let r, dsg = query dsg ~method_id:fn.method_id ~entry_state ~loc ~cg ~fields in
                   (r :: rs, dsg))
             in
             (results, dsg)
@@ -461,9 +458,7 @@ module Make (Dom : Abstract.Dom) = struct
             (* for recursive functions, analyze to the exit in each reachable [entry_state] first, then gather up all the abstract states at [loc]*)
             let dsg =
               Set.fold entry_states ~init:dsg ~f:(fun dsg entry_state ->
-                  query dsg ~method_id:fn.method_id ~entry_state ~loc:fn.exit ~callgraph:cg.forward
-                    ~fields
-                  |> snd)
+                  query dsg ~method_id:fn.method_id ~entry_state ~loc:fn.exit ~cg ~fields |> snd)
             in
             let results =
               Map.find_exn dsg fn |> snd |> Map.data |> List.filter_map ~f:(D.read_by_loc loc)
@@ -553,13 +548,12 @@ let%test "single-file interprocedurality with a public-static-void-main" =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
   let _, dsg = materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
-  let callgraph =
+  let cg =
     Callgraph.deserialize ~fns
       (Src_file.of_file @@ abs_of_rel_path "test_cases/procedures.callgraph")
   in
   let exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~callgraph
-      ~fields dsg
+    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_procedures.dsg.dot") dsg in
   (* hacky check that the computed exit state contains the string of the correct analysis result for the made-up numerical program [Procedures.java] *)
@@ -575,12 +569,11 @@ let%test "motivating example from SRH'96" =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
   let _, dsg = materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
-  let callgraph =
+  let cg =
     Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/srh.callgraph")
   in
   let _exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~callgraph
-      ~fields dsg
+    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_srh.dsg.dot") dsg in
   true
@@ -592,12 +585,12 @@ let%test "apply edit to SRH'96 example" =
   let main_fn =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
-  let callgraph =
+  let cg =
     Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/srh.callgraph")
   in
 
   let _exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~callgraph
+    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg
       ~fields:parse.fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "srh_pre_edit.dot") dsg in
