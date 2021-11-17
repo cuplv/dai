@@ -38,6 +38,8 @@ module type S = sig
 
   val init : ?cg:string -> string -> t
 
+  val fns : t -> Cfg.Fn.t list
+
   val update : ?cg:string -> next_dir:string -> t -> t
 
   val entrypoints : string option -> t -> Cfg.Fn.t list
@@ -63,6 +65,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
   type t = { dsg : G.t; cg : Callgraph.bidirectional; parse : parse_info }
 
   let cg x = x.cg.forward
+
+  let fns x = G.fns x.dsg
 
   (* Initialize a DSG over src_dir/**/*.java, with the callgraph serialized at [cg] *)
   let init ?cg src_dir =

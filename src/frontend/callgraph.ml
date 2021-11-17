@@ -67,6 +67,31 @@ let deserialize ~fns =
                (cg, curr_caller))
   >> fst
 
+let filter ~fns file =
+  let have_fn m_id = List.exists fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id m_id) in
+  Src_file.lines file
+  |> Array.fold ~init:None ~f:(fun curr_caller line ->
+         if String.is_prefix line ~prefix:"CALLER: " then
+           let caller_method =
+             String.chop_prefix_exn ~prefix:"CALLER: " line |> Method_id.deserialize
+           in
+           if have_fn caller_method then (
+             Format.print_string (line ^ "\n");
+             Some caller_method)
+           else None
+         else
+           match curr_caller with
+           | None -> None
+           | Some _ ->
+               let callee_method =
+                 String.chop_prefix_exn ~prefix:"\tCALLEE: " line |> Method_id.deserialize
+               in
+               if have_fn callee_method then (
+                 Format.print_string (line ^ "\n");
+                 curr_caller)
+               else curr_caller)
+  |> ignore
+
 let reverse ~(fns : Cfg.Fn.t list) (cg : t) : reverse_t =
   Map.fold cg ~init:Method_id.Map.empty ~f:(fun ~key:caller ~data:callees acc ->
       match List.find fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller) with

@@ -14,7 +14,10 @@ val deserialize : fns:Cfg.Fn.t list -> Src_file.t -> t
 (** construct an internal representation of a serialized callgraph generated using github.com/bennostein/WALA-callgraph;
     (use the provided pool of [fns] to resolve callee [Method_id]'s to corresponding [Cfg.Fn]'s at deserialization-time rather
     than keeping a Method_id -> Method_id callgraph and resolving method_id's to fn's at analysis-time
- *)
+*)
+
+val filter : fns:Cfg.Fn.t list -> Src_file.t -> unit
+(** write to stdout the provided serialized callgraph, stripped of any edges for which there is no corresponding function in [fns] *)
 
 val resolve_with_callgraph :
   callsite:Ast.Stmt.t -> caller_method:Method_id.t -> callgraph:t -> Cfg.Fn.t list

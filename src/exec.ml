@@ -42,29 +42,40 @@ let analyze =
       and unit_dom =
         flag "unit-dom" no_arg
           ~doc:"use the unit domain (defaults to array-bounds-checking interval domain otherwise)"
+      and filter_cg =
+        flag "filter-cg" (optional string)
+          ~doc:
+            "<serialized-callgraph> filter the serialized callgraph to include only edges for \
+             which source is available in SRC_DIR, writing to stdout"
       in
       fun () ->
-        Format.printf "[EXEC] Initializing DAI; java src_dir: %s\n" src_dir;
+        Format.(fprintf err_formatter) "[EXEC] Initializing DAI; java src_dir: %s\n" src_dir;
         let open Frontend in
         let (module Harness : Experiment_harness.S) =
           if unit_dom then
             (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
           else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
         in
-        if Option.is_some cg_to_dot then
+        if Option.is_some filter_cg then
+          let fns = Harness.(init src_dir |> fns) in
+          Callgraph.filter ~fns (Option.value_exn filter_cg |> Src_file.of_file)
+        else if Option.is_some cg_to_dot then
           let cg = Option.value_exn cg_to_dot in
-          let _ = Format.printf "[EXEC] Dumping DOT representation of %s at ./cg.dot\n" cg in
+          let _ =
+            Format.(fprintf err_formatter)
+              "[EXEC] Dumping DOT representation of %s at ./cg.dot\n" cg
+          in
           let state = Harness.init ~cg src_dir in
           Callgraph.dump_dot ~filename:(abs_of_rel_path "cg.dot") (Harness.cg state)
         else if diagnostic then (
-          Format.printf "[EXEC] RUNNING DIAGNOSTIC MODE: PARSING\n";
+          Format.(fprintf err_formatter) "[EXEC] RUNNING DIAGNOSTIC MODE: PARSING\n";
           Cfg_parser.set_diagnostic true;
           let state =
             match prev_cg with Some cg -> Harness.init ~cg src_dir | _ -> Harness.init src_dir
           in
           (match next_dir with
           | Some next_dir -> (
-              Format.printf "[EXEC] RUNNING DIAGNOSTIC MODE: EDITING\n";
+              Format.(fprintf err_formatter) "[EXEC] RUNNING DIAGNOSTIC MODE: EDITING\n";
               ignore
               @@
               match next_cg with
@@ -85,57 +96,57 @@ let analyze =
               in
               match mode with
               | `Batch ->
-                  Format.printf "[EXEC] Running analysis in BATCH mode\n";
-                  Format.printf "[EXEC] Constructing initial state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Running analysis in BATCH mode\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing initial state...\n";
                   let initial_state = init ~cg:prev_cg src_dir in
                   let init_entrypoints = entrypoints entry_class initial_state in
-                  Format.printf "[EXEC] Querying at program exit locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at program exit locations...\n";
                   let _queried_state = issue_exit_queries init_entrypoints initial_state in
-                  Format.printf "[EXEC] Constructing edited state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing edited state...\n";
                   let edited_state = init ~cg:next_cg next_dir in
                   let edit_entrypoints = entrypoints entry_class edited_state in
-                  Format.printf "[EXEC] Querying at program exit locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at program exit locations...\n";
                   let _queried_edited_state = issue_exit_queries edit_entrypoints edited_state in
                   ()
               | `Demand_only qry_loc ->
-                  Format.printf "[EXEC] Running analysis in DEMAND-DRIVEN mode\n";
-                  Format.printf "[EXEC] Constructing initial state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Running analysis in DEMAND-DRIVEN mode\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing initial state...\n";
                   let initial_state = init ~cg:prev_cg src_dir in
                   let init_entrypoints = entrypoints entry_class initial_state in
-                  Format.printf "[EXEC] Querying at demand query location...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at demand query location...\n";
                   let _queried_state = issue_demand_query ~qry_loc init_entrypoints initial_state in
-                  Format.printf "[EXEC] Constructing edited state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing edited state...\n";
                   let edited_state = init ~cg:next_cg next_dir in
                   let edit_entrypoints = entrypoints entry_class edited_state in
-                  Format.printf "[EXEC] Querying at demand query locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at demand query locations...\n";
                   let _queried_edited_state =
                     issue_demand_query ~qry_loc edit_entrypoints edited_state
                   in
                   ()
               | `Incr_only ->
-                  Format.printf "[EXEC] Running analysis in INCREMENTAL mode\n";
-                  Format.printf "[EXEC] Constructing initial state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Running analysis in INCREMENTAL mode\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing initial state...\n";
                   let initial_state = init ~cg:prev_cg src_dir in
                   let init_entrypoints = entrypoints entry_class initial_state in
-                  Format.printf "[EXEC] Querying at program exit locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at program exit locations...\n";
                   let queried_state = issue_exit_queries init_entrypoints initial_state in
-                  Format.printf "[EXEC] Applying incremental edit...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Applying incremental edit...\n";
                   let edited_state = update ~next_dir ~cg:next_cg queried_state in
                   let edit_entrypoints = entrypoints entry_class edited_state in
-                  Format.printf "[EXEC] Querying at program exit locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at program exit locations...\n";
                   let _queried_edited_state = issue_exit_queries edit_entrypoints edited_state in
                   ()
               | `Demand_and_incr qry_loc ->
-                  Format.printf "[EXEC] Running analysis in DEMANDED mode\n";
-                  Format.printf "[EXEC] Constructing initial state...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Running analysis in DEMANDED mode\n";
+                  Format.(fprintf err_formatter) "[EXEC] Constructing initial state...\n";
                   let initial_state = init ~cg:prev_cg src_dir in
                   let init_entrypoints = entrypoints entry_class initial_state in
-                  Format.printf "[EXEC] Querying at demand query location...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at demand query location...\n";
                   let queried_state = issue_demand_query ~qry_loc init_entrypoints initial_state in
-                  Format.printf "[EXEC] Applying incremental edit...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Applying incremental edit...\n";
                   let edited_state = update ~next_dir ~cg:next_cg queried_state in
                   let edit_entrypoints = entrypoints entry_class edited_state in
-                  Format.printf "[EXEC] Querying at demand query locations...\n";
+                  Format.(fprintf err_formatter) "[EXEC] Querying at demand query locations...\n";
                   let _queried_edited_state =
                     issue_demand_query ~qry_loc edit_entrypoints edited_state
                   in
