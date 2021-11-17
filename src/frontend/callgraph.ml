@@ -1,11 +1,13 @@
 open Dai.Import
 open Syntax
 
-type t = Cfg.Fn.t list Method_id.Map.t
+type forward_t = Cfg.Fn.t list Method_id.Map.t
 
 type reverse_t = Cfg.Fn.t list Method_id.Map.t
 
-type bidirectional = { forward : t; reverse : reverse_t }
+type scc = string Graphlib.Std.partition
+
+type t = { forward : forward_t; reverse : reverse_t; scc : scc }
 
 (* a callgraph is a map from caller [Method_id]'s to sets of callee [Cfg.Fn]'s *)
 
@@ -28,10 +30,8 @@ let is_syntactically_compatible (callsite : Ast.Stmt.t) (callee : Cfg.Fn.t) =
       String.equal meth callee.method_id.method_name && compatible_args actuals
   | _ -> false
 
-let resolve_with_callgraph ~callsite ~caller_method ~(callgraph : t) =
-  let candidates =
-    match Method_id.Map.find callgraph caller_method with Some cs -> cs | None -> []
-  in
+let callees ~callsite ~caller_method ~(cg : forward_t) =
+  let candidates = match Method_id.Map.find cg caller_method with Some cs -> cs | None -> [] in
   List.filter candidates ~f:(is_syntactically_compatible callsite)
 
 (* serialized format is "(caller_line callee_line^* )^*", where
@@ -40,7 +40,7 @@ let resolve_with_callgraph ~callsite ~caller_method ~(callgraph : t) =
    * <method_id>'s can be deserialized by [deserialized_method]
    * there exists a call edge to each CALLEE from the preceding CALLER
 *)
-let deserialize ~fns =
+let deserialize_forward ~fns =
   Src_file.lines
   >> Array.fold ~init:(Method_id.Map.empty, None) ~f:(fun (acc_cg, curr_caller) line ->
          if String.is_prefix line ~prefix:"CALLER: " then
@@ -67,6 +67,48 @@ let deserialize ~fns =
                (cg, curr_caller))
   >> fst
 
+let reverse ~(fns : Cfg.Fn.t list) (cg : forward_t) : reverse_t =
+  Map.fold cg ~init:Method_id.Map.empty ~f:(fun ~key:caller ~data:callees acc ->
+      match List.find fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller) with
+      | Some caller_fn ->
+          List.fold callees ~init:acc ~f:(fun acc callee ->
+              Map.update acc callee.method_id ~f:(function
+                | Some callers -> caller_fn :: callers
+                | None -> [ caller_fn ]))
+      | None -> acc)
+
+module G = Graph.Make (String) (Unit)
+
+let to_graph (cg : forward_t) : G.t =
+  let edges =
+    Map.fold cg ~init:[] ~f:(fun ~key:caller ~data:callees acc ->
+        let caller = Format.asprintf "%a" Method_id.pp caller in
+        List.fold callees ~init:acc ~f:(fun acc callee ->
+            let callee = Format.asprintf "%a" Method_id.pp callee.method_id in
+            (caller, callee, ()) :: acc))
+  in
+  Graph.create (module G) ~edges ()
+
+let strongly_connected_components (cg : forward_t) : scc =
+  Graph.strong_components (module G) (to_graph cg)
+
+let deserialize ~fns file =
+  let forward = deserialize_forward ~fns file in
+  let reverse = reverse ~fns forward in
+  let scc = strongly_connected_components forward in
+  { forward; reverse; scc }
+
+let callers ~callee_method ~reverse_cg =
+  match Map.find reverse_cg callee_method with Some callers -> callers | None -> []
+
+let methods_mutually_recursive scc m1 m2 =
+  Graphlib.Std.Partition.equiv scc
+    (Format.asprintf "%a" Method_id.pp m1)
+    (Format.asprintf "%a" Method_id.pp m2)
+
+let is_mutually_recursive scc (fn1 : Cfg.Fn.t) (fn2 : Cfg.Fn.t) =
+  methods_mutually_recursive scc fn1.method_id fn2.method_id
+
 let filter ~fns file =
   let have_fn m_id = List.exists fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id m_id) in
   Src_file.lines file
@@ -92,32 +134,7 @@ let filter ~fns file =
                else curr_caller)
   |> ignore
 
-let reverse ~(fns : Cfg.Fn.t list) (cg : t) : reverse_t =
-  Map.fold cg ~init:Method_id.Map.empty ~f:(fun ~key:caller ~data:callees acc ->
-      match List.find fns ~f:(fun (f : Cfg.Fn.t) -> Method_id.equal f.method_id caller) with
-      | Some caller_fn ->
-          List.fold callees ~init:acc ~f:(fun acc callee ->
-              Map.update acc callee.method_id ~f:(function
-                | Some callers -> caller_fn :: callers
-                | None -> [ caller_fn ]))
-      | None -> acc)
-
-let callers ~callee_method ~reverse_cg =
-  match Map.find reverse_cg callee_method with Some callers -> callers | None -> []
-
-module G = Graph.Make (String) (Unit)
-
-let dump_dot ~filename (cg : t) : unit =
-  let to_graph (cg : t) : G.t =
-    let edges =
-      Map.fold cg ~init:[] ~f:(fun ~key:caller ~data:callees acc ->
-          let caller = Format.asprintf "%a" Method_id.pp caller in
-          List.fold callees ~init:acc ~f:(fun acc callee ->
-              let callee = Format.asprintf "%a" Method_id.pp callee.method_id in
-              (caller, callee, ()) :: acc))
-    in
-    Graph.create (module G) ~edges ()
-  in
+let dump_dot ~filename (cg : forward_t) : unit =
   Graph.to_dot (module G) (to_graph cg) ~filename ~string_of_node:(Format.asprintf "\"%s\"")
 
 let%test "procedures example" =
@@ -126,5 +143,5 @@ let%test "procedures example" =
     Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/Procedures.java")
     |> fun { cfgs; _ } -> Map.keys cfgs
   in
-  let cg : t = deserialize ~fns src_file in
+  let cg = deserialize_forward ~fns src_file in
   List.length (Map.keys cg) |> Int.equal 3

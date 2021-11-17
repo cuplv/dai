@@ -33,7 +33,7 @@ module Make (Dom : Abstract.Dom) : sig
     method_id:Method_id.t ->
     entry_state:Dom.t ->
     loc:Cfg.Loc.t ->
-    callgraph:Callgraph.t ->
+    cg:Callgraph.t ->
     fields:Declared_fields.t ->
     t ->
     Dom.t * t
@@ -42,7 +42,7 @@ module Make (Dom : Abstract.Dom) : sig
   val loc_only_query :
     fn:Cfg.Fn.t ->
     loc:Cfg.Loc.t ->
-    cg:Callgraph.bidirectional ->
+    cg:Callgraph.t ->
     fields:Declared_fields.t ->
     entrypoints:Cfg.Fn.t list ->
     t ->
