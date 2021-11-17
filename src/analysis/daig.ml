@@ -1182,7 +1182,6 @@ module Dom = Domain.Unit_dom
 module Daig = Make (Dom)
 open Frontend
 
-(*
 let%test "build daig, edit, and dump dot: HelloWorld.java" =
   Cfg.Loc.reset ();
   let ({ loc_map; cfgs; _ } : Cfg_parser.prgm_parse_result) =
@@ -1232,26 +1231,5 @@ let%test "analyze conditional at end of loop body" =
          let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
          Daig.dump_dot
            ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ ".dot"))
-           analyzed_daig);
-  true
-  *)
-let%test "debug: analyze specific file" =
-  let ({ cfgs; _ } : Cfg_parser.prgm_parse_result) =
-    Frontend.Cfg_parser.parse_file_exn
-      (abs_of_rel_path
-         "_bugswarm/SpigotMC-BungeeCord-130330788/pass/proxy/src/main/java/net/md_5/bungee/BungeeCord.java")
-  in
-  Map.to_alist cfgs
-  |> List.iter ~f:(fun ((fn : Cfg.Fn.t), cfg) ->
-         let _ =
-           Cfg.dump_dot_intraproc
-             ~filename:(abs_of_rel_path (Format.asprintf "%a.CFG.dot" Method_id.pp fn.method_id))
-             cfg
-         in
-         let daig = Daig.of_cfg ~entry_state:(Dom.init ()) ~cfg ~fn in
-         Daig.dump_dot ~filename:(abs_of_rel_path (fn.method_id.method_name ^ ".DEBUG.dot")) daig;
-         let _, analyzed_daig = Daig.get_by_loc fn.exit daig in
-         Daig.dump_dot
-           ~filename:(abs_of_rel_path ("analyzed_" ^ fn.method_id.method_name ^ "DEBUG.dot"))
            analyzed_daig);
   true
