@@ -66,6 +66,13 @@ let hash = seeded_hash
 let apron_var_of_array_cell addr idx =
   Var.of_string (Format.asprintf "__dai_%a.%a" Addr.pp addr Int64.pp idx)
 
+let array_cell_of_apron_var var =
+  Var.to_string var |> String.split ~on:'.' |> function
+  | [ alloc_str; idx_str ] -> (
+      String.chop_prefix alloc_str ~prefix:"__dai_alloc_" >>| (Int.of_string >> Addr.of_int)
+      >>= fun addr -> try Some (addr, Int64.of_string idx_str) with _ -> None)
+  | _ -> None
+
 let apron_var_of_field addr field = Var.of_string (Format.asprintf "__dai_%a.%s" Addr.pp addr field)
 
 let apron_var_of_array_len addr = Var.of_string (Format.asprintf "__dai_%a.len" Addr.pp addr)
@@ -159,7 +166,6 @@ let texpr_of_expr (am, itv) expr =
                   join_intervals acc (Itv.lookup itv v)
                 else acc)
             |> fun v -> Some (Texpr1.Cst (Coeff.Interval v)))
-    | Ast.Expr.Array_create _ -> failwith "todo: texpr_of_expr array_create"
     | _ -> None
   in
   Itv.texpr_of_expr itv ~fallback:handle_array_or_field_expr expr
@@ -258,7 +264,44 @@ let interpret stmt phi =
       in
 
       (am, itv)
-  | Array_write _ -> failwith "todo: Array_bounds#interpret Array_write"
+  | Array_write { rcvr; idx; rhs } ->
+      let itv =
+        match Map.find am rcvr with
+        | None -> itv
+        | Some aaddr ->
+            let apply_write =
+              match texpr_of_expr (am, itv) rhs with
+              | Some texpr -> fun itv v -> Itv.weak_assign itv v texpr
+              | None ->
+                  fun itv v ->
+                    if Environment.mem_var (Abstract1.env itv) v then
+                      Abstract1.forget_array man itv [| v |] false
+                    else itv
+            in
+            let idx_interval =
+              match texpr_of_expr (am, itv) idx with
+              | None -> Interval.top
+              | Some texpr -> Itv.eval_texpr itv texpr
+            in
+            let affected_vars =
+              Environment.vars (Abstract1.env itv)
+              |> snd
+              |> Array.filter ~f:(fun v ->
+                     match array_cell_of_apron_var v with
+                     | None -> false
+                     | Some (addr, idx) -> (
+                         Set.mem aaddr addr
+                         &&
+                         match Int64.to_int idx with
+                         | Some idx -> Interval.(cmp (of_int idx idx) idx_interval) <= 0
+                         | None ->
+                             failwith
+                               "index larger than 32-bit int max seems fishy. sound to return true \
+                                here."))
+            in
+            Array.fold affected_vars ~init:itv ~f:(fun itv v -> apply_write itv v)
+      in
+      (am, itv)
   | Call _ | Exceptional_call _ -> failwith "unreachable, calls interpreted by [call] instead"
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
