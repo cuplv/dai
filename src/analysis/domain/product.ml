@@ -6,9 +6,11 @@ module Make (L : Abstract.Dom) (R : Abstract.Dom) : Abstract.Dom = struct
 
   let pp fs (l, r) = Format.fprintf fs "(%a, %a)" L.pp l R.pp r
 
-  let init () = (L.init (), R.init ())
+  let top () = (L.top (), R.top ())
 
   let bottom () = (L.bottom (), R.bottom ())
+
+  let init () = (L.init (), R.init ())
 
   let sanitize (l, r) = (L.sanitize l, R.sanitize r)
 

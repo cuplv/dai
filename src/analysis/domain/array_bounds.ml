@@ -47,6 +47,8 @@ let init () = (Map.empty (module String), Itv.init ())
 
 let bottom () = (Addr_map.empty, Itv.bottom ())
 
+let top () = (Addr_map.empty, Itv.top ())
+
 let widen (al, il) (ar, ir) = (Addr_map.join al ar, Itv.widen il ir)
 
 let join (al, il) (ar, ir) = (Addr_map.join al ar, Itv.join il ir)

@@ -30,7 +30,7 @@ module Make (Dom : Abstract.Dom) : sig
   (** dump a DOT representation of a DSG to [filename] *)
 
   val query :
-    method_id:Method_id.t ->
+    fn:Cfg.Fn.t ->
     entry_state:Dom.t ->
     loc:Cfg.Loc.t ->
     cg:Callgraph.t ->

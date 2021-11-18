@@ -742,6 +742,12 @@ let rec edge_list_of_stmt method_id loc_map entry exit ret exc ?(brk = (None, St
           ~brk:(Some exit, snd brk)
           ~cont body
       in
+      (* add an assume-false edge to body exit if there's no other control flow, to avoid malformed result *)
+      let body =
+        match List.count body ~f:(snd3 >> Loc.equal body_exit) with
+        | 0 -> (body_entry, body_exit, Stmt.Assume (Expr.Lit (Lit.Bool false))) :: body
+        | _ -> body
+      in
       (* add a dummy location and skip edge if there are multiple back edges to cond_entry *)
       let body =
         if List.count body ~f:(snd3 >> Loc.equal body_exit) > 1 then

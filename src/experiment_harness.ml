@@ -162,7 +162,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
           fun (f : Cfg.Fn.t) ->
             String.equal class_name f.method_id.class_name
             && (List.equal String.equal) package f.method_id.package
-      | None -> fun (f : Cfg.Fn.t) -> String.equal "main" f.method_id.method_name
+      | None -> fun (_f : Cfg.Fn.t) -> true
+      (*String.equal "main" f.method_id.method_name*)
     in
     List.filter (G.fns g.dsg) ~f
 
@@ -170,8 +171,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let st = systime () in
     let dsg =
       List.fold entrypoints ~init:g.dsg ~f:(fun dsg (fn : Cfg.Fn.t) ->
-          G.query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg
-            ~fields:g.parse.fields
+          G.query dsg ~fn ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields
           |> snd)
     in
     Format.printf "[EXPERIMENT] exhaustive analysis took: %.3f\n" (1000. *. (systime () -. st));
