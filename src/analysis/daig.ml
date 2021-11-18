@@ -375,8 +375,7 @@ module Make (Dom : Abstract.Dom) = struct
     let nodes_to_remove = daig_region_impl [ src ] G.Node.Set.empty in
     Set.fold nodes_to_remove ~init:daig ~f:(flip G.Node.remove) |> fun daig ->
     Sequence.fold (G.Node.inputs dst daig) ~init:daig ~f:(fun daig e ->
-        assert (G.Node.equal src @@ G.Edge.src e);
-        G.Edge.remove e daig)
+        if G.Node.equal src @@ G.Edge.src e then G.Edge.remove e daig else daig)
 
   type _edge = Ref.t * Ref.t * Comp.t
 
@@ -956,7 +955,7 @@ module Make (Dom : Abstract.Dom) = struct
                        Name.pp (Ref.name r) (List.pp ", " Name.pp) (List.map ~f:Ref.name preds)))
           | `Transfer_after_fix loop_head -> (
               match preds with
-              | [ s; phi ] ->
+              | [ s; phi ] -> (
                   get_fixedpoint_wrt ~loop_head ~ref_cell:phi summarizer daig >>= fun phi_fp daig ->
                   let phi_edge =
                     G.Node.inputs r daig |> Sequence.find_exn ~f:(G.Edge.src >> Ref.is_astate)
@@ -965,7 +964,18 @@ module Make (Dom : Abstract.Dom) = struct
                     G.Edge.remove phi_edge daig
                     |> G.Edge.(insert (create phi_fp (dst phi_edge) (label phi_edge)))
                   in
-                  (Result (Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi_fp)), daig)
+                  match Ref.stmt_exn s with
+                  | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
+                      let res =
+                        match
+                          summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi_fp)
+                        with
+                        | Some phi_prime -> Result phi_prime
+                        | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi_fp }
+                      in
+                      (res, daig)
+                  | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi_fp)), daig))
+              (*                  (Result (Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi_fp)), daig)*)
               | _ ->
                   failwith
                     "malformed DCG: transfer function must have one Stmt and one AState input") )
@@ -1113,6 +1123,9 @@ module Make (Dom : Abstract.Dom) = struct
     | Modify_statements { method_id = _; from_loc; to_loc; new_stmts = _ } ->
         let from_ref = ref_at_loc_exn ~loc:from_loc daig in
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
+        let to_loc_is_join_point =
+          G.Node.inputs to_ref daig |> Sequence.exists ~f:(G.Edge.label >> Comp.equal `Join)
+        in
         Ref.dirty to_ref;
         let dirtied_daig = dirty_from to_ref daig in
         let removed_region_daig = remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref in
@@ -1124,6 +1137,33 @@ module Make (Dom : Abstract.Dom) = struct
           of_region_cfg ~cfg ~entry_ref:from_ref ~entry:from_loc
             ~loop_iteration_ctx:(Name.iter_ctx (Ref.name from_ref))
             ~extra_back_edges:[] ~exit:(to_ref, to_loc) ()
+        in
+        let new_daig_segment =
+          if to_loc_is_join_point then
+            let new_prejoin_idx : int =
+              G.Node.preds to_ref removed_region_daig
+              |> Seq.filter ~f:Ref.is_astate
+              |> Seq.map
+                   ~f:
+                     (Ref.name >> function
+                      | Name.(Prod (Idx i, nm)) ->
+                          assert (Name.equal nm (Ref.name to_ref));
+                          i
+                      | _ -> failwith "malformed DAIG join point")
+              |> fun idxs ->
+              let rec least_missing_i i =
+                if Seq.mem idxs i ~equal:Int.equal then least_missing_i (i + 1) else i
+              in
+              least_missing_i 0
+            in
+            let new_to_ref =
+              Ref.AState { state = None; name = Name.(Prod (Idx new_prejoin_idx, Ref.name to_ref)) }
+            in
+            G.Node.inputs to_ref new_daig_segment
+            |> Seq.fold ~init:new_daig_segment ~f:(fun daig edge ->
+                   let open G.Edge in
+                   insert (create (src edge) new_to_ref (label edge)) (remove edge daig))
+          else new_daig_segment
         in
         Graph.union (module G) new_daig_segment removed_region_daig
     | Modify_header { method_id = _; prev_loc_ctx; next_stmt = _; loop_body_exit = _ } ->
