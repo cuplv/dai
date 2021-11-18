@@ -27,3 +27,12 @@ fmt:
 .PHONY: repl
 repl:
 	dune utop
+
+.PHONY: experiments
+experiments: build
+	cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_configs artifact out/log
+
+.PHONY: csv
+csv:
+	echo NAME, BATCH, DEMAND, INCREMENTAL, DEMANDINCREMENTAL > out/experiments.csv
+	cat experiment_inputs/query_artifacts | xargs -Ix ./print_as_csv_row x out/log >> out/experiments.csv

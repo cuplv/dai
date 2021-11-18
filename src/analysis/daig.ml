@@ -383,12 +383,7 @@ module Make (Dom : Abstract.Dom) = struct
   let ref_by_name nm = G.nodes >> Seq.find ~f:(Ref.name >> Name.equal nm)
 
   let ref_by_name_exn nm g =
-    match ref_by_name nm g with
-    | Some r -> r
-    | None ->
-        Format.(fprintf err_formatter) "[error] no ref found by name: %a" Name.pp nm;
-        dump_dot ~filename:(abs_of_rel_path "missingname.dot") g;
-        raise (Ref_not_found (`By_name nm))
+    match ref_by_name nm g with Some r -> r | None -> raise (Ref_not_found (`By_name nm))
 
   (** Directly implements the DAIG Encoding procedure of PLDI'21; OCaml variables are labelled by LaTeX equivalents where applicable
       [extra_back_edges] and [loop_iteration_ctx] are extensions to support DAIG construction for partial programs;

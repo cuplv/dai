@@ -1,0 +1,8 @@
+#!/bin/sh
+
+b=$(tail -n 1 $2/$1.batch | sed 's/.*: //')
+d=$(tail -n 1 $2/$1.dd | sed 's/.*: //')
+i=$(tail -n 1 $2/$1.incr | sed 's/.*: //')
+di=$(tail -n 1 $2/$1.ddincr | sed 's/.*: //')
+
+echo $1, $b, $d, $i, $di
