@@ -452,7 +452,10 @@ module Make (Dom : Abstract.Dom) = struct
     let astate_refs : Ref.t list =
       let at_locs =
         Seq.to_list (Cfg.G.nodes cfg) >>| fun l ->
-        if Cfg.Loc.equal l entry then entry_ref
+        if
+          Cfg.Loc.equal l entry
+          && not (List.exists back_edges ~f:(Cfg.G.Edge.dst >> Cfg.Loc.equal entry))
+        then entry_ref
           (* if an exit-location refcell is provided, use it instead of instantiating a new refcell*)
         else if Option.exists exit ~f:(snd >> Cfg.Loc.equal l) then
           match exit with Some (refcell, _) -> refcell | _ -> failwith "unreachable"
@@ -484,10 +487,11 @@ module Make (Dom : Abstract.Dom) = struct
       in
       let l_bar_zero = Name.wrap_iterate 0 l l_bar in
       let l_bar_one = Name.wrap_iterate 1 l l_bar in
-      [
-        Ref.AState { state = None; name = l_bar_zero };
-        Ref.AState { state = None; name = l_bar_one };
-      ]
+
+      let l_bar_zero_ref =
+        if Cfg.Loc.equal l entry then entry_ref else Ref.AState { state = None; name = l_bar_zero }
+      in
+      [ l_bar_zero_ref; Ref.AState { state = None; name = l_bar_one } ]
     in
     let all_refs = cycle_refs @ stmt_refs @ astate_refs in
     let ref_map : Ref.t Name.Map.t =
@@ -589,7 +593,21 @@ module Make (Dom : Abstract.Dom) = struct
     Graph.create (module G) ~nodes:all_refs ~edges ()
 
   let of_cfg ~(entry_state : absstate) ~(cfg : Cfg.t) ~(fn : Cfg.Fn.t) : t =
-    let entry_ref = Ref.AState { state = Some entry_state; name = Name.Loc fn.entry } in
+    let entry_ref =
+      let name =
+        if List.exists (Cfg.back_edges cfg) ~f:(fun e -> Cfg.G.Edge.dst e |> Cfg.Loc.equal fn.entry)
+        then Name.(wrap_iterate 0 fn.entry (Loc fn.entry))
+        else Name.Loc fn.entry
+      in
+      Ref.AState { state = Some entry_state; name }
+    in
+    let cfg =
+      (* if the CFG has no edge to its exit, add one from entry with [assume false] *)
+      if Seq.exists (Cfg.G.nodes cfg) ~f:(Cfg.Loc.equal fn.exit) then cfg
+      else
+        Cfg.G.Edge.(
+          insert (create fn.entry fn.exit Ast.(Stmt.Assume (Expr.Lit (Lit.Bool false)))) cfg)
+    in
     let cfg =
       (* if the CFG has no edge to its exceptional exit, add one from entry with [assume false] *)
       if Seq.exists (Cfg.G.nodes cfg) ~f:(Cfg.Loc.equal fn.exc_exit) then cfg
@@ -884,6 +902,7 @@ module Make (Dom : Abstract.Dom) = struct
     | Stmt _ -> (Result r, daig)
     | AState { state = Some _; _ } -> (Result r, daig)
     | AState { state = None; _ } when Seq.is_empty (G.Node.inputs r daig) ->
+        dump_dot daig ~filename:(abs_of_rel_path "malformed_indeg0.dot");
         failwith
           (Format.asprintf "malformed DAIG: empty cell %a with in-degree 0" Name.pp (Ref.name r))
     | AState phi ->

@@ -133,8 +133,9 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
         flip ( @ ) acc_edits
           (match (prev_stmts, next_stmts) with
           | [||], [||] -> failwith "malformed diff: empty replacement"
-          | ( [| `If_stmt (_, (_, prev_cond, _), prev_t_branch, prev_f_branch) as prev_stmt |],
-              [| `If_stmt (_, (_, next_cond, _), next_t_branch, next_f_branch) as next_stmt |] ) ->
+          | ( [| `If_stmt (_, (_, prev_cond, _), prev_t_branch, prev_f_branch) |],
+              [| `If_stmt (_, (_, next_cond, _), next_t_branch, next_f_branch) |] )
+            when Sexp.equal (CST.sexp_of_expression prev_cond) (CST.sexp_of_expression next_cond) ->
               let prev_t_branch =
                 match prev_t_branch with `Blk (_, b, _) -> b | stmt -> [ stmt ]
               in
@@ -159,27 +160,16 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               let f_branch_diff =
                 diff_of_stmt_list method_id loc_map ~prev:prev_f_branch ~next:next_f_branch
               in
-              if Sexp.equal (CST.sexp_of_expression prev_cond) (CST.sexp_of_expression next_cond)
-              then t_branch_diff @ f_branch_diff
-              else
-                let prev_loc_ctx = Loc_map.get method_id prev_stmt loc_map in
-                Modify_header { method_id; prev_loc_ctx; next_stmt; loop_body_exit = None }
-                :: (t_branch_diff @ f_branch_diff)
-          | ( [| `While_stmt (_, (_, prev_cond, _), prev_body) as prev_stmt |],
-              [| `While_stmt (_, (_, next_cond, _), next_body) as next_stmt |] ) ->
+              t_branch_diff @ f_branch_diff
+          | ( [| `While_stmt (_, (_, prev_cond, _), prev_body) |],
+              [| `While_stmt (_, (_, next_cond, _), next_body) |] )
+            when Sexp.equal (CST.sexp_of_expression prev_cond) (CST.sexp_of_expression next_cond) ->
               let prev = match prev_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
               let next = match next_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
-              let body_diff = diff_of_stmt_list method_id loc_map ~prev ~next in
-              if Sexp.equal (CST.sexp_of_expression prev_cond) (CST.sexp_of_expression next_cond)
-              then body_diff
-              else
-                let prev_loc_ctx = Loc_map.get method_id prev_stmt loc_map in
-                Modify_header { method_id; prev_loc_ctx; next_stmt; loop_body_exit = None }
-                :: body_diff
-          | ( [| `For_stmt (_, _, prev_init, prev_cond, _, prev_iter, _, prev_body) as prev_stmt |],
-              [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) as next_stmt |]
-            ) ->
-              let is_header_unchanged =
+              diff_of_stmt_list method_id loc_map ~prev ~next
+          | ( [| `For_stmt (_, _, prev_init, prev_cond, _, prev_iter, _, prev_body) |],
+              [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) |]
+            ) when
                 (match (prev_init, next_init) with
                 | `Local_var_decl p, `Local_var_decl n ->
                     Sexp.equal
@@ -206,17 +196,10 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
                 | _ -> false
-              in
+            ->
               let prev = match prev_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
               let next = match next_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
-              let body_diff = diff_of_stmt_list method_id loc_map ~prev ~next in
-              if is_header_unchanged then body_diff
-              else
-                let prev_loc_ctx = Loc_map.get method_id prev_stmt loc_map in
-                let loop_body_exit =
-                  Loc_map.get method_id (List.last_exn prev) loc_map |> fun { exit; _ } -> Some exit
-                in
-                Modify_header { method_id; prev_loc_ctx; next_stmt; loop_body_exit } :: body_diff
+              diff_of_stmt_list method_id loc_map ~prev ~next
           | prevs, nexts ->
               let from_loc, to_loc = loc_range method_id loc_map prevs in
               [ Modify_statements { method_id; from_loc; to_loc; new_stmts = to_list nexts } ])
