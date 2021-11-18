@@ -168,35 +168,33 @@ let rec diff_of_stmt_list method_id loc_map ~(prev : CST.statement list)
               let next = match next_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
               diff_of_stmt_list method_id loc_map ~prev ~next
           | ( [| `For_stmt (_, _, prev_init, prev_cond, _, prev_iter, _, prev_body) |],
-              [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) |]
-            ) when
-                (match (prev_init, next_init) with
-                | `Local_var_decl p, `Local_var_decl n ->
-                    Sexp.equal
-                      (CST.sexp_of_local_variable_declaration p)
-                      (CST.sexp_of_local_variable_declaration n)
-                | `Opt_exp_rep_COMMA_exp_SEMI (None, _), `Opt_exp_rep_COMMA_exp_SEMI (None, _) ->
-                    true
-                | `Opt_exp_rep_COMMA_exp_SEMI (Some p, _), `Opt_exp_rep_COMMA_exp_SEMI (Some n, _)
-                  ->
-                    Sexp.equal
-                      (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
-                      (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
-                | _ -> false)
-                && (match (prev_cond, next_cond) with
-                   | None, None -> true
-                   | Some p, Some n ->
-                       Sexp.equal (CST.sexp_of_expression p) (CST.sexp_of_expression n)
-                   | _ -> false)
-                &&
-                match (prev_iter, next_iter) with
-                | None, None -> true
-                | Some p, Some n ->
-                    Sexp.equal
-                      (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
-                      (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
-                | _ -> false
-            ->
+              [| `For_stmt (_, _, next_init, next_cond, _, next_iter, _, next_body) |] )
+            when (match (prev_init, next_init) with
+                 | `Local_var_decl p, `Local_var_decl n ->
+                     Sexp.equal
+                       (CST.sexp_of_local_variable_declaration p)
+                       (CST.sexp_of_local_variable_declaration n)
+                 | `Opt_exp_rep_COMMA_exp_SEMI (None, _), `Opt_exp_rep_COMMA_exp_SEMI (None, _) ->
+                     true
+                 | `Opt_exp_rep_COMMA_exp_SEMI (Some p, _), `Opt_exp_rep_COMMA_exp_SEMI (Some n, _)
+                   ->
+                     Sexp.equal
+                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
+                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
+                 | _ -> false)
+                 && (match (prev_cond, next_cond) with
+                    | None, None -> true
+                    | Some p, Some n ->
+                        Sexp.equal (CST.sexp_of_expression p) (CST.sexp_of_expression n)
+                    | _ -> false)
+                 &&
+                 match (prev_iter, next_iter) with
+                 | None, None -> true
+                 | Some p, Some n ->
+                     Sexp.equal
+                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c p)
+                       (CST.sexp_of_anon_exp_rep_COMMA_exp_0bb260c n)
+                 | _ -> false ->
               let prev = match prev_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
               let next = match next_body with `Blk (_, b, _) -> b | stmt -> [ stmt ] in
               diff_of_stmt_list method_id loc_map ~prev ~next
