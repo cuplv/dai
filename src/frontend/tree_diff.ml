@@ -693,99 +693,100 @@ let%test "conditional branch deletion" =
   | [ Delete_statements { method_id = _; from_loc = _; to_loc = _ } ] -> true
   | _ -> false
 
-let%test "modify condition of conditional" =
-  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional.java" in
-  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional4.java" in
-  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
-  let prev_cst =
-    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let updated_prev_tree =
-    prev_tree |> ok
-    >>| Tree.apply
-          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
-          ~offsets:(Src_file.line_offsets prev_file)
-  in
-  let next_cst =
-    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
-    |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
-    Cfg_parser.of_java_cst prev_cst
-  in
-  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply cha diff loc_map prev_cfg in
-  match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
-      true
-  | _ -> false
+(* NOTE(benno): punting on modify-header diffs -- if a loop/conditional header is modified, just treat the entire thing as edited.
+   let%test "modify condition of conditional" =
+     let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional.java" in
+     let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/Conditional4.java" in
+     let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+     let prev_cst =
+       bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let updated_prev_tree =
+       prev_tree |> ok
+       >>| Tree.apply
+             (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+             ~offsets:(Src_file.line_offsets prev_file)
+     in
+     let next_cst =
+       Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+       |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
+       Cfg_parser.of_java_cst prev_cst
+     in
+     let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+     let _next_cfg = apply cha diff loc_map prev_cfg in
+     match diff with
+     | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
+         true
+     | _ -> false
 
-let%test "modify header of for-loop" =
-  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
-  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops2.java" in
-  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
-  let prev_cst =
-    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let updated_prev_tree =
-    prev_tree |> ok
-    >>| Tree.apply
-          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
-          ~offsets:(Src_file.line_offsets prev_file)
-  in
-  let next_cst =
-    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
-    |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
-    Cfg_parser.of_java_cst prev_cst
-  in
-  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply cha diff loc_map prev_cfg in
-  match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = Some _ } ] ->
-      true
-  | _ -> false
+   let%test "modify header of for-loop" =
+     let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops.java" in
+     let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/NestedLoops2.java" in
+     let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+     let prev_cst =
+       bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let updated_prev_tree =
+       prev_tree |> ok
+       >>| Tree.apply
+             (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+             ~offsets:(Src_file.line_offsets prev_file)
+     in
+     let next_cst =
+       Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+       |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
+       Cfg_parser.of_java_cst prev_cst
+     in
+     let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+     let _next_cfg = apply cha diff loc_map prev_cfg in
+     match diff with
+     | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = Some _ } ] ->
+         true
+     | _ -> false
 
-let%test "modify header of while-loop" =
-  let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While.java" in
-  let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While3.java" in
-  let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
-  let prev_cst =
-    bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let updated_prev_tree =
-    prev_tree |> ok
-    >>| Tree.apply
-          (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
-          ~offsets:(Src_file.line_offsets prev_file)
-  in
-  let next_cst =
-    Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
-    |> function
-    | Ok cst -> cst
-    | Error _ -> failwith "parse error"
-  in
-  let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
-    Cfg_parser.of_java_cst prev_cst
-  in
-  let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
-  let _next_cfg = apply cha diff loc_map prev_cfg in
-  match diff with
-  | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
-      true
-  | _ -> false
-
+   let%test "modify header of while-loop" =
+     let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While.java" in
+     let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While3.java" in
+     let prev_tree = Tree.parse ~old_tree:None ~file:prev_file in
+     let prev_cst =
+       bind ~f:(Tree.as_java_cst prev_file) prev_tree |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let updated_prev_tree =
+       prev_tree |> ok
+       >>| Tree.apply
+             (Text_diff.btwn ~prev:(Src_file.lines prev_file) ~next:(Src_file.lines next_file))
+             ~offsets:(Src_file.line_offsets prev_file)
+     in
+     let next_cst =
+       Tree.parse ~old_tree:updated_prev_tree ~file:next_file |> bind ~f:(Tree.as_java_cst next_file)
+       |> function
+       | Ok cst -> cst
+       | Error _ -> failwith "parse error"
+     in
+     let ({ loc_map; cfgs = prev_cfg; cha; _ } : Cfg_parser.prgm_parse_result) =
+       Cfg_parser.of_java_cst prev_cst
+     in
+     let diff = btwn loc_map ~prev:prev_cst ~next:next_cst in
+     let _next_cfg = apply cha diff loc_map prev_cfg in
+     match diff with
+     | [ Modify_header { method_id = _; prev_loc_ctx = _; next_stmt = _; loop_body_exit = None } ] ->
+         true
+     | _ -> false
+*)
 let%test "modify body of while-loop" =
   let prev_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While.java" in
   let next_file = Src_file.of_file @@ abs_of_rel_path "test_cases/java/While2.java" in

@@ -57,7 +57,7 @@ let deserialize m : t =
   let pkg_and_class_str, rest_of_m =
     match split rest_of_m ~on:'#' with
     | [ before; after ] -> (before, after)
-    | _ -> failwith "malformed serialized method: %s"
+    | _ -> failwith ("malformed serialized method: " ^ m)
   in
   let package = deserialize_package pkg_and_class_str in
   let class_name = deserialize_class pkg_and_class_str in
