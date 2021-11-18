@@ -4,6 +4,7 @@ package foo.bar;
 public class Srh {
     static int x = 0;
     public static void main(String[] args) {
+	x = 0;
 	int n = 5;
 	p(n);
 	System.out.println(x);

@@ -47,11 +47,17 @@ module type Sig = sig
 
   val pred_state_exn : Name.t -> t -> absstate
 
+  val pred_stmt : Name.t -> t -> Ast.Stmt.t option
+
   val assert_wf : t -> unit
 
   val total_astate_refs : t -> int
 
   val nonempty_astate_refs : t -> int
+
+  val dirty_by_loc : Cfg.Loc.t -> t -> t
+
+  val reachable_callsites : Cfg.Loc.t -> t -> Ast.Stmt.t list
 
   val recursive_call_return_sites :
     t -> cg:Frontend.Callgraph.t -> self:Cfg.Fn.t -> (Ast.Stmt.t * Name.t) list
@@ -1058,13 +1064,35 @@ module Make (Dom : Abstract.Dom) = struct
         daig
     | _ -> failwith "malformed DAIG: loc-named ref cell holds stmt"
 
-  let pred_state_exn nm daig =
-    let r = ref_by_name_exn nm daig in
+  let pred_state_of_ref_exn r daig =
     G.Node.preds r daig |> Seq.filter ~f:Ref.is_astate |> Seq.to_list |> function
     | [ Ref.AState { state = Some phi; _ } ] -> phi
     | _ ->
         dump_dot daig ~filename:(abs_of_rel_path "nopred.dot");
-        failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
+        failwith (Format.asprintf "No predecessor state for %a" Name.pp (Ref.name r))
+
+  let pred_state_exn nm daig =
+    let r = ref_by_name_exn nm daig in
+    pred_state_of_ref_exn r daig
+
+  let pred_stmt_of_ref r daig = G.Node.preds r daig |> Seq.find ~f:Ref.is_stmt >>| Ref.stmt_exn
+
+  let pred_stmt nm daig =
+    let r = ref_by_name_exn nm daig in
+    pred_stmt_of_ref r daig
+
+  let reachable_callsites loc daig =
+    let r = ref_at_loc_exn ~loc daig in
+    Graph.fold_reachable
+      (module G)
+      daig r ~init:[]
+      ~f:(fun acc node ->
+        match node with
+        | Ref.AState { state = Some _; _ } -> (
+            match pred_stmt_of_ref node daig with
+            | Some (Ast.Stmt.Call _ as s) | Some (Ast.Stmt.Exceptional_call _ as s) -> s :: acc
+            | _ -> acc)
+        | _ -> acc)
 
   let recursive_call_return_sites daig ~(cg : Callgraph.t) ~(self : Cfg.Fn.t) =
     Sequence.bind (G.nodes daig) ~f:(function
@@ -1312,6 +1340,15 @@ module Make (Dom : Abstract.Dom) = struct
           List.fold new_succ_edges ~init:d ~f:(flip G.Edge.insert)
         in
         List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt
+
+  let dirty_by_loc loc daig =
+    match ref_at_loc_exn ~loc daig with
+    | Ref.AState phi as r ->
+        let daig = dirty_from r daig in
+        if Seq.is_empty (G.Node.preds r daig) then phi.state <- None (*Some (Dom.bottom ())*)
+        else phi.state <- None;
+        daig
+    | _ -> failwith "malformed DAIG: loc-named ref cell holds stmt"
 
   let assert_wf g =
     let is_wf = ref true in

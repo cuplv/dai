@@ -55,16 +55,16 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     Map.set dsg ~key:fn ~data:(cfg, Map.set daigs ~key:ctx ~data:daig)
 
   let dump_dot ~filename (dsg : t) =
-    let daigs : (Cfg.Fn.t * D.t) list =
+    let daigs : (Cfg.Fn.t * (Ctx.t * D.t)) list =
       Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
-          List.map (Map.data daigs) ~f:(pair fn) @ acc)
+          List.map (Map.to_alist daigs) ~f:(pair fn) @ acc)
     in
     let _ = Sys.command "mkdir -p scratch" in
-    List.iteri daigs ~f:(fun idx (fn, daig) ->
+    List.iteri daigs ~f:(fun idx (fn, (ctx, daig)) ->
         let filename = "scratch/" ^ Int.to_string idx ^ ".dot" in
         let loc_labeller l =
           if Cfg.Loc.equal l fn.entry then
-            Some (Format.asprintf "ENTRY[%a]: " Method_id.pp fn.method_id)
+            Some (Format.asprintf "ENTRY[%a]@CTX[%a]: " Method_id.pp fn.method_id Ctx.pp ctx)
           else None
         in
         D.dump_dot ~filename ~loc_labeller daig);
@@ -103,6 +103,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
         let daigs = Map.add_exn daigs ~key:ctx ~data in
         (daig, Map.set dsg ~key:fn ~data:(cfg, daigs))
 
+  exception No_entry_state of Cfg.Fn.t * Ctx.t
+
   let summarize_with_callgraph (dsg : t) fields (cg : Callgraph.t) (caller : Cfg.Fn.t)
       (caller_ctx : Ctx.t) ~callsite:(callsite, _nm) caller_state =
     let open Option.Monad_infix in
@@ -122,7 +124,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
           acc_result >>= fun acc_poststate ->
           let callee_entry_state = Dom.call ~callee ~caller ~callsite ~caller_state ~fields in
           let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx in
-          (* three cases:
+          (* four cases:
              (1) callee entry state is bottom, so no effect on return state
              (2) the callee's entry state includes callee_entry_state and its exit is available
              (3) the call is recursive and there is no new dataflow to the entry, so we propagate and continue
@@ -136,10 +138,18 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
             let old_callee_entry_state =
               match D.read_by_loc callee.entry callee_daig with
               | Some phi -> phi
-              | None -> failwith "malformed DAIG: entry state can not be empty"
+              | None -> raise (No_entry_state (callee, callee_ctx))
             in
             let is_new_dataflow = not @@ Dom.implies callee_entry_state old_callee_entry_state in
             let is_solved = D.is_solved exit_loc callee_daig in
+            (*Format.(fprintf err_formatter)
+                "Attempting to summarize %a in context %a\n" Cfg.Fn.pp callee Ctx.pp callee_ctx;
+              Format.(fprintf err_formatter)
+                "\tcallee_entry_state: %a\n\
+                 \told_callee_entry_st:%a\n\
+                 \tis_new_dataflow: %b\n\
+                 \tis_solved: %b\n"
+                Dom.pp callee_entry_state Dom.pp old_callee_entry_state is_new_dataflow is_solved;*)
             if (not is_new_dataflow) && is_solved then
               (* (2) *)
               D.read_by_loc exit_loc callee_daig
@@ -151,12 +161,16 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               acc_result
             else (* (4) *)
               None)
+  (*$> fun res ->
+    Format.(fprintf err_formatter)
+      "\tgot %a from summarizing %a in context %a\n" (Option.pp Dom.pp) res Ast.Stmt.pp callsite
+      Ctx.pp caller_ctx*)
 
-  let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_ctx ~cg
-      caller_method =
-    let callees = Callgraph.callees ~callsite ~caller_method ~cg in
+  let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_ctx
+      ~(cg : Callgraph.t) caller_method : t * Q.t list =
+    let callees = Callgraph.callees ~callsite ~caller_method ~cg:cg.forward in
     (* generate a subquery for each possible callee that needs further analysis *)
-    List.fold callees ~init:[] ~f:(fun acc callee ->
+    List.fold callees ~init:(dsg, []) ~f:(fun ((acc_dsg, acc_qrys) as acc) callee ->
         let is_exc =
           match callsite with
           | Ast.Stmt.Call _ -> false
@@ -182,26 +196,32 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               else Dom.join curr_callee_entry_state qry_callee_entry_state
             in
             let is_new_dataflow = not @@ Dom.implies entry_state curr_callee_entry_state in
-
             if
               (not is_new_dataflow)
               && D.is_solved (if is_exc then callee.exc_exit else callee.exit) daig
             then acc
-            else ({ fn = callee; is_exc; entry_state; ctx = callee_ctx } : Q.t) :: acc
+            else
+              let acc_dsg =
+                if is_new_dataflow then (
+                  Format.printf "\twriting new_entry to %a\n" Cfg.Fn.pp callee;
+                  let daig = D.write_by_loc callee.entry entry_state daig in
+                  set_daig acc_dsg daig callee callee_ctx)
+                else acc_dsg
+              in
+              (acc_dsg, ({ fn = callee; is_exc; entry_state; ctx = callee_ctx } : Q.t) :: acc_qrys)
         | None ->
-            ({ fn = callee; is_exc; entry_state = qry_callee_entry_state; ctx = callee_ctx } : Q.t)
-            :: acc)
+            ( acc_dsg,
+              ({ fn = callee; is_exc; entry_state = qry_callee_entry_state; ctx = callee_ctx }
+                : Q.t)
+              :: acc_qrys ))
 
-  let query ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
+  let query_impl ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     (* shorthand for issuing the initial query against the corresponding daig*)
     let issue_root_query h =
       let d, h = materialize_daig ~fn ~ctx ~entry_state h in
       let res, d =
         try D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn ctx) loc d
-        with D.Ref_not_found (`By_loc l) ->
-          Format.(fprintf err_formatter)
-            "Location %a not found in fn %a with (exit: %a; exc_exit: %a)" Cfg.Loc.pp l Cfg.Fn.pp fn
-            Cfg.Loc.pp fn.exit Cfg.Loc.pp fn.exc_exit;
+        with D.Ref_not_found _ ->
           D.dump_dot d ~filename:(abs_of_rel_path "refnotfound.daig.dot");
           failwith "ref not found"
       in
@@ -220,8 +240,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               match daig_qry_result with
               | D.Result _ -> dsg
               | D.Summ_qry { callsite; caller_state } ->
-                  let new_qrys =
-                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg:cg.forward
+                  let dsg, new_qrys =
+                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
                       fn.method_id ~caller_ctx:ctx
                   in
                   if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
@@ -247,15 +267,21 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   let rec_return_sites =
                     D.recursive_call_return_sites callee_daig ~cg ~self:qry.fn
                   in
+                  (* Format.(fprintf err_formatter) "\tGOT RESULT exit state %a\n" Dom.pp exit_state;*)
                   let recursively_dirtied_daig, needs_requery =
                     List.fold rec_return_sites ~init:(callee_daig, false)
                       ~f:(fun ((daig, _) as acc) (callsite, retsite_nm) ->
                         match D.read_by_name retsite_nm daig with
-                        | None -> acc
-                        | exception D.Ref_not_found _ ->
+                        | None | (exception D.Ref_not_found _) ->
+                            (* Format.(
+                               fprintf err_formatter "no value found at retsite_nm: %a\n" D.Name.pp
+                                 retsite_nm);*)
                             acc
                             (* this can happen if dirtying in one retsite clobbers an unrolled loop iteration containing another retsite *)
                         | Some retsite_state ->
+                            (* Format.(
+                               fprintf err_formatter "\tvalue %a found at retsite_nm: %a\n" Dom.pp
+                                 retsite_state D.Name.pp retsite_nm);*)
                             let caller_state = D.pred_state_exn retsite_nm daig in
                             let returned_state =
                               Dom.return ~callee:qry.fn ~caller:qry.fn ~callsite ~caller_state
@@ -264,6 +290,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                             if Dom.(returned_state <= retsite_state) then acc
                             else
                               let new_retsite_state = Dom.widen retsite_state returned_state in
+                              assert (not (Dom.equal new_retsite_state retsite_state));
                               let daig = D.write_by_name retsite_nm new_retsite_state daig in
                               D.assert_wf daig;
                               (daig, true))
@@ -272,8 +299,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   let qrys = if needs_requery then qry :: qrys else qrys in
                   solve_subqueries dsg qrys
               | D.Summ_qry { callsite; caller_state } ->
-                  let new_qrys =
-                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg:cg.forward
+                  let dsg, new_qrys =
+                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
                       ~caller_ctx:qry.ctx qry.fn.method_id
                   in
                   let dsg =
@@ -288,11 +315,11 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   in
                   solve_subqueries dsg (new_qrys @ qrys))
         in
-        let dsg =
-          solve_subqueries dsg
-            (callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg:cg.forward
-               fn.method_id ~caller_ctx:ctx)
+        let dsg, new_queries =
+          callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg fn.method_id
+            ~caller_ctx:ctx
         in
+        let dsg = solve_subqueries dsg new_queries in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)
         let _, dsg = materialize_daig ~fn ~ctx ~entry_state dsg in
         match issue_root_query dsg with
@@ -304,77 +331,160 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   query for %a in %a"
                  Method_id.pp fn.method_id Dom.pp entry_state))
 
-  let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
+  let rec query ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
+    try query_impl ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg
+    with No_entry_state (blocked_fn, blocked_ctx) ->
+      let entry_state = get_entry_state ~fields ~entrypoints:[] dsg blocked_fn blocked_ctx cg in
+      let dsg =
+        match Map.find_exn dsg blocked_fn |> snd |> flip Map.find blocked_ctx with
+        | Some daig ->
+            let daig = D.write_by_loc blocked_fn.entry entry_state daig in
+            set_daig dsg daig blocked_fn blocked_ctx
+        | None -> materialize_daig ~fn:blocked_fn ~ctx:blocked_ctx ~entry_state dsg |> snd
+      in
+      query ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg
+
+  and loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
       ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) :
       (Dom.t * Ctx.t) list * t =
-    if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
-      let ctx = Ctx.init () in
-      let res, dsg = query dsg ~fn ~cg ~entry_state:(Dom.init ()) ~ctx ~loc ~fields in
-      ([ (res, ctx) ], dsg)
-    else
-      let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
-      if List.is_empty callers then (
-        (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
+    (* if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
+       let ctx = Ctx.init () in
+       let res, dsg = query dsg ~fn ~cg ~entry_state:(Dom.init ()) ~ctx ~loc ~fields in
+       ([ (res, ctx) ], dsg)
+       else*)
+    let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
+    if List.is_empty callers then (
+      (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
+      if not (List.mem entrypoints fn ~equal:Cfg.Fn.equal) then
         Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;
 
-        let ctx = Ctx.init () in
-        let res, dsg = query dsg ~fn ~entry_state:(Dom.init ()) ~ctx ~loc ~cg ~fields in
-        ([ (res, ctx) ], dsg))
-      else
-        let rec_callers, nonrec_callers =
-          List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
-        in
-        let entry_states_and_contexts, dsg =
-          List.fold nonrec_callers ~init:([], dsg) ~f:(fun (acc_entries, dsg) caller ->
-              let calledges =
-                Sequence.filter
-                  (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
-                  ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
-              in
-              Sequence.fold calledges ~init:(acc_entries, dsg)
-                ~f:(fun (acc_entries, dsg) calledge ->
-                  let caller_loc = Cfg.G.Edge.src calledge in
-                  let callsite = Cfg.G.Edge.label calledge in
-                  let caller_states, dsg =
-                    loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
-                  in
-                  let acc_entries =
-                    List.fold caller_states ~init:acc_entries
-                      ~f:(fun acc (caller_state, caller_ctx) ->
-                        let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx in
-                        let entry_state =
-                          Dom.call ~caller ~callee:fn ~callsite ~caller_state ~fields
-                        in
-                        (entry_state, callee_ctx) :: acc)
-                  in
-                  (acc_entries, dsg)))
-        in
-        let states_by_context =
-          List.fold entry_states_and_contexts ~init:Ctx.Map.empty ~f:(fun acc (state, ctx) ->
-              match Map.find acc ctx with
-              | Some acc_state -> Map.set acc ~key:ctx ~data:(Dom.join acc_state state)
-              | None -> Map.add_exn acc ~key:ctx ~data:state)
-        in
-        match rec_callers with
-        | [] ->
-            (* for non-recursive functions, analyze to [loc] in each reachable [entry_state] *)
-            Map.fold states_by_context ~init:([], dsg)
-              ~f:(fun ~key:ctx ~data:entry_state (rs, dsg) ->
-                let r, dsg = query dsg ~fn ~ctx ~entry_state ~loc ~cg ~fields in
-                ((r, ctx) :: rs, dsg))
-        | _ ->
-            (* for recursive functions, analyze to the exit in each reachable [entry_state] first, then gather up all the abstract states at [loc]*)
-            let dsg =
-              Map.fold states_by_context ~init:dsg ~f:(fun ~key:ctx ~data:entry_state dsg ->
-                  query dsg ~fn ~ctx ~entry_state ~loc:fn.exit ~cg ~fields |> snd)
+      let ctx = Ctx.init () in
+      let res, dsg = query dsg ~fn ~entry_state:(Dom.init ()) ~ctx ~loc ~cg ~fields in
+      ([ (res, ctx) ], dsg))
+    else
+      let rec_callers, nonrec_callers =
+        List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
+      in
+      let entry_states_and_contexts, dsg =
+        List.fold nonrec_callers ~init:([], dsg) ~f:(fun (acc_entries, dsg) caller ->
+            let calledges =
+              Sequence.filter
+                (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
+                ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
             in
-            let results =
-              Map.find_exn dsg fn |> snd |> Map.to_alist
-              |> List.filter_map ~f:(fun (ctx, daig) -> D.read_by_loc loc daig >>| flip pair ctx)
-            in
-            (results, dsg)
+            Sequence.fold calledges ~init:(acc_entries, dsg) ~f:(fun (acc_entries, dsg) calledge ->
+                let caller_loc = Cfg.G.Edge.src calledge in
+                let callsite = Cfg.G.Edge.label calledge in
+                let caller_states, dsg =
+                  loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
+                in
+                let acc_entries =
+                  List.fold caller_states ~init:acc_entries
+                    ~f:(fun acc (caller_state, caller_ctx) ->
+                      let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx in
+                      let entry_state =
+                        Dom.call ~caller ~callee:fn ~callsite ~caller_state ~fields
+                      in
+                      (entry_state, callee_ctx) :: acc)
+                in
+                (acc_entries, dsg)))
+      in
+      let states_by_context =
+        List.fold entry_states_and_contexts ~init:Ctx.Map.empty ~f:(fun acc (state, ctx) ->
+            match Map.find acc ctx with
+            | Some acc_state -> Map.set acc ~key:ctx ~data:(Dom.join acc_state state)
+            | None -> Map.add_exn acc ~key:ctx ~data:state)
+      in
+      match rec_callers with
+      | [] ->
+          (* for non-recursive functions, analyze to [loc] in each reachable [entry_state] *)
+          Map.fold states_by_context ~init:([], dsg) ~f:(fun ~key:ctx ~data:entry_state (rs, dsg) ->
+              let r, dsg = query dsg ~fn ~ctx ~entry_state ~loc ~cg ~fields in
 
-  let apply_edit ~cha ~diff loc_map (dsg : t) =
+              ((r, ctx) :: rs, dsg))
+      | _ ->
+          (* for recursive functions, analyze to the exit in each reachable [entry_state] first, then gather up all the abstract states at [loc]*)
+          let dsg =
+            Map.fold states_by_context ~init:dsg ~f:(fun ~key:ctx ~data:entry_state dsg ->
+                query dsg ~fn ~ctx ~entry_state ~loc:fn.exit ~cg ~fields |> snd)
+          in
+          let results =
+            Map.find_exn dsg fn |> snd |> Map.to_alist
+            |> List.filter_map ~f:(fun (ctx, daig) -> D.read_by_loc loc daig >>| flip pair ctx)
+          in
+          (results, dsg)
+
+  and get_entry_state ~fields ~entrypoints (dsg : t) (fn : Cfg.Fn.t) (ctx : Ctx.t)
+      (cg : Callgraph.t) =
+    let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
+    let _rec_callers, nonrec_callers =
+      List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
+    in
+
+    let entry_states_and_contexts, _dsg =
+      List.fold nonrec_callers ~init:([], dsg) ~f:(fun (acc_entries, dsg) caller ->
+          let calledges =
+            Sequence.filter
+              (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
+              ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
+          in
+          Sequence.fold calledges ~init:(acc_entries, dsg) ~f:(fun (acc_entries, dsg) calledge ->
+              let caller_loc = Cfg.G.Edge.src calledge in
+              let callsite = Cfg.G.Edge.label calledge in
+              let caller_states, dsg =
+                loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
+              in
+              let acc_entries =
+                List.fold caller_states ~init:acc_entries ~f:(fun acc (caller_state, caller_ctx) ->
+                    let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx in
+                    let entry_state = Dom.call ~caller ~callee:fn ~callsite ~caller_state ~fields in
+                    (entry_state, callee_ctx) :: acc)
+              in
+              (acc_entries, dsg)))
+    in
+
+    List.filter entry_states_and_contexts ~f:(snd >> Ctx.equal ctx)
+    |> List.fold ~init:(Dom.bottom ()) ~f:(fun acc (state, _) -> Dom.join acc state)
+
+  let rec dirty_interproc dsg ~(fn : Cfg.Fn.t) ~loc ~ctx ~(cg : Callgraph.t) =
+    (*Format.(fprintf err_formatter)
+      "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx;*)
+    match Map.find dsg fn >>= (snd >> flip Map.find ctx) with
+    | Some daig when Option.is_none (D.read_by_loc loc daig) -> dsg
+    | Some daig ->
+        let affected_callsites = D.reachable_callsites loc daig in
+        let dsg = set_daig dsg (D.dirty_by_loc loc daig) fn ctx in
+        let dsg =
+          List.fold affected_callsites ~init:dsg ~f:(fun dsg callsite ->
+              let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx:ctx in
+              let callees =
+                Callgraph.callees ~callsite ~cg:cg.forward ~caller_method:fn.method_id
+              in
+              List.fold callees ~init:dsg ~f:(fun acc callee ->
+                  dirty_interproc acc ~fn:callee ~loc:callee.entry ~ctx:callee_ctx ~cg))
+        in
+        let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
+        List.fold callers ~init:dsg ~f:(fun dsg caller ->
+            let calledges =
+              Sequence.filter
+                (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
+                ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
+            in
+            let callsites =
+              Sequence.fold calledges ~init:[] ~f:(fun acc calledge ->
+                  let return_loc = Cfg.G.Edge.dst calledge in
+                  let callsite = Cfg.G.Edge.label calledge in
+                  (return_loc, callsite) :: acc)
+            in
+            let caller_contexts = Map.find_exn dsg caller |> snd |> Map.keys in
+            List.fold caller_contexts ~init:dsg ~f:(fun dsg caller_ctx ->
+                List.fold callsites ~init:dsg ~f:(fun dsg (loc, callsite) ->
+                    if Ctx.(callee_ctx ~callsite ~caller_ctx |> equal ctx) then
+                      dirty_interproc dsg ~fn:caller ~loc ~ctx:caller_ctx ~cg
+                    else dsg)))
+    | None -> dsg
+
+  let apply_edit ~cha ~cg ~diff loc_map (dsg : t) =
     List.fold diff ~init:(loc_map, dsg) ~f:(fun (loc_map, dsg) ->
         let open Tree_diff in
         function
@@ -401,7 +511,13 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
         | Delete_function { method_id } -> (
             let loc_map = Loc_map.remove_fn loc_map method_id in
             match Cfg.Fn.Map.fn_by_method_id method_id dsg with
-            | Some _fn -> (loc_map, failwith "dirty_interproc_deps (Map.remove dsg fn) fn")
+            | Some fn ->
+                let dsg =
+                  Map.find_exn dsg fn |> snd |> Map.keys
+                  |> List.fold ~init:dsg ~f:(fun dsg ctx ->
+                         dirty_interproc dsg ~fn ~loc:fn.entry ~ctx ~cg)
+                in
+                (loc_map, dsg)
             | None ->
                 failwith
                   (Format.asprintf "Can't remove function %a: does not exist in DAIG" Method_id.pp
@@ -420,10 +536,10 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
             | None ->
                 failwith (Format.asprintf "Can't modify unknown function %a" Method_id.pp method_id)
             )
-        | (Add_statements { method_id; _ } as edit)
-        | (Modify_statements { method_id; _ } as edit)
-        | (Modify_header { method_id; _ } as edit)
-        | (Delete_statements { method_id; _ } as edit) -> (
+        | Modify_header _ -> failwith "todo: modify_header"
+        | (Add_statements { method_id; at_loc = loc; _ } as edit)
+        | (Modify_statements { method_id; to_loc = loc; _ } as edit)
+        | (Delete_statements { method_id; to_loc = loc; _ } as edit) -> (
             match Cfg.Fn.Map.fn_by_method_id method_id dsg with
             | None ->
                 failwith
@@ -431,10 +547,14 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                      method_id)
             | Some fn ->
                 let cfg, daigs = Map.find_exn dsg fn in
-                let dsg = failwith "dirty_interproc_deps dsg fn" in
+                let dsg =
+                  Map.find_exn dsg fn |> snd |> Map.keys
+                  |> List.fold ~init:dsg ~f:(fun dsg ctx -> dirty_interproc dsg ~fn ~loc ~ctx ~cg)
+                in
                 let cfg_edit =
                   Tree_diff.apply_edit edit loc_map cfg ~ret:fn.exit ~exc:fn.exc_exit
                 in
+
                 let new_daigs =
                   Map.map daigs ~f:(fun daig -> D.apply_edit ~daig ~cfg_edit ~fn edit)
                 in

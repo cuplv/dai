@@ -12,7 +12,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) : sig
 
   val print_stats : t pp
 
-  val apply_edit : cha:Class_hierarchy.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
+  val apply_edit :
+    cha:Class_hierarchy.t -> cg:Callgraph.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
   (** apply a syntactic edit to a DSG, updating a Loc_map in the process *)
 
   val init : cfgs:Cfg.t Cfg.Fn.Map.t -> t

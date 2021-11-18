@@ -61,11 +61,17 @@ module type Sig = sig
   val pred_state_exn : Name.t -> t -> absstate
   (** returns the predecessor absstate of the cell named by the given [Name.t], if there is exactly one *)
 
+  val pred_stmt : Name.t -> t -> Ast.Stmt.t option
+
   val assert_wf : t -> unit
 
   val total_astate_refs : t -> int
 
   val nonempty_astate_refs : t -> int
+
+  val dirty_by_loc : Cfg.Loc.t -> t -> t
+
+  val reachable_callsites : Cfg.Loc.t -> t -> Ast.Stmt.t list
 
   val recursive_call_return_sites :
     t -> cg:Frontend.Callgraph.t -> self:Cfg.Fn.t -> (Ast.Stmt.t * Name.t) list

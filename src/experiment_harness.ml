@@ -130,7 +130,7 @@ module DSG_wrapper (Dom : Abstract.Dom) (Ctx : Context.Sig) : S = struct
             let%map next = Tree.as_java_cst next_file tree in
             let diff = Tree_diff.btwn lm ~prev ~next in
             Format.printf "tree diff for %s:\n%a\n" filename Tree_diff.pp diff;
-            let lm, dsg = G.apply_edit ~cha:g.parse.cha ~diff lm dsg in
+            let lm, dsg = G.apply_edit ~cg:g.cg ~cha:g.parse.cha ~diff lm dsg in
             (Map.set trees ~key:filename ~data:tree, dsg, lm))
           |> function
           | Ok res -> res
