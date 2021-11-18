@@ -42,6 +42,8 @@ module type Dom = sig
 
   val bottom : unit -> t
 
+  val top : unit -> t
+
   val interpret : Ast.Stmt.t -> t -> t
 
   val implies : t -> t -> bool

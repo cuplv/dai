@@ -22,6 +22,8 @@ let init () = ()
 
 let bottom () = ()
 
+let top () = ()
+
 let pp fs () = Format.fprintf fs "()"
 
 let sanitize () = ()

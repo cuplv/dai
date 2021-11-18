@@ -151,9 +151,11 @@ let t_of_sexp = function
       Abstract1.of_box (get_man ()) env vars itvs
   | _ -> failwith "malformed interval sexp"
 
-let init () = Abstract1.top (get_man ()) (Environment.make [||] [||])
+let top () = Abstract1.top (get_man ()) (Environment.make [||] [||])
 
 let bottom () = Abstract1.bottom (get_man ()) (Environment.make [||] [||])
+
+let init = top
 
 (* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
 let mk_tcons env op l r =

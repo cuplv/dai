@@ -174,12 +174,15 @@ module Make (Dom : Abstract.Dom) = struct
     match Map.find daigs entry_state with
     | Some daig -> (daig, dsg)
     | None ->
-        (*Format.printf "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;*)
-        let (daig as data) =
-          try D.of_cfg ~entry_state ~cfg ~fn
-          with _ -> failwith (Format.asprintf "caught failure in D.of_cfg: %a" Cfg.Fn.pp fn)
-        in
-        (*D.assert_wf daig;*)
+        (*Format.(
+          fprintf err_formatter "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;
+          pp_print_flush err_formatter ());*)
+        let (daig as data) = D.of_cfg ~entry_state ~cfg ~fn in
+        (try D.assert_wf daig
+         with _ ->
+           Cfg.dump_dot_intraproc ~filename:(abs_of_rel_path "assertwf_fail.cfg.dot") cfg;
+           D.dump_dot ~filename:(abs_of_rel_path "assertwf_fail.daig.dot") daig;
+           failwith (Format.asprintf "assertwf_fail: %a" Cfg.Fn.pp fn));
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
         (daig, Map.set dsg ~key:fn ~data:(cfg, daigs))
 
@@ -194,8 +197,13 @@ module Make (Dom : Abstract.Dom) = struct
           match Map.find dsg dep.fn >>= (snd >> flip Map.find dep.ctx) with
           | None -> dsg
           | Some dep_daig ->
-              let dep_daig = D.dirty dep.nm dep_daig in
-              (*D.assert_wf dep_daig;*)
+              let dep_daig =
+                try D.dirty dep.nm dep_daig
+                with D.Ref_not_found _ ->
+                  (* dependency was in a loop unrolling that has since been dirtied, no harm done *)
+                  dep_daig
+              in
+              D.assert_wf dep_daig;
               set_daig dsg dep_daig dep.fn dep.ctx
         in
         dirty_interproc_deps ~ctx:dep.ctx dsg dep.fn)
@@ -212,64 +220,70 @@ module Make (Dom : Abstract.Dom) = struct
         | Ast.Stmt.Exceptional_call _ -> true
         | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
       in
-      List.fold
-        ~init:(Some (Dom.bottom ()))
-        callees
-        ~f:(fun acc_result callee ->
-          acc_result >>= fun acc_poststate ->
-          let callee_entry_state = Dom.call ~callee ~callsite ~caller_state ~fields in
-          (* four cases:
-             (1) callee entry state is bottom, so no effect on return state
-             (2) this is a recursive call and we already have an exactly-matching summary, so no widening needed
-             (3) this is a recursive call and widening has converged on the entry state, so we add a self-dependency and continue
-             (4) this is a non-recursive call or recursive call yet to converge on its entry state, so attempt to summarize
-          *)
-          if
-            Dom.is_bot callee_entry_state
-            (* case (1); do this before widening to avoid needless work *)
-          then acc_result
-          else
-            let is_recursive = Callgraph.is_mutually_recursive cg.scc caller callee in
-            let exit_loc = if is_exc then callee.exc_exit else callee.exit in
-            let exactly_matching_daig =
-              Map.find_exn dsg callee |> snd |> flip Map.find callee_entry_state
-            in
+      if
+        List.exists callees ~f:(fun callee ->
+            (not (Cfg.Fn.equal caller callee))
+            && Callgraph.is_mutually_recursive cg.scc caller callee)
+      then Some (Dom.top ())
+      else
+        List.fold
+          ~init:(Some (Dom.bottom ()))
+          callees
+          ~f:(fun acc_result callee ->
+            acc_result >>= fun acc_poststate ->
+            let callee_entry_state = Dom.call ~callee ~callsite ~caller_state ~fields in
+            (* four cases:
+               (1) callee entry state is bottom, so no effect on return state
+               (2) this is a recursive call and we already have an exactly-matching summary, so no widening needed
+               (3) this is a recursive call and widening has converged on the entry state, so we add a self-dependency and continue
+               (4) this is a non-recursive call or recursive call yet to converge on its entry state, so attempt to summarize
+            *)
             if
-              is_recursive && Option.exists exactly_matching_daig ~f:(D.is_solved callee.exit)
-              (* case (2) *)
-            then
-              exactly_matching_daig >>= D.read_by_loc callee.exit
-              >>| (fun return_state ->
-                    Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields)
-              >>| Dom.join acc_poststate
+              Dom.is_bot callee_entry_state
+              (* case (1); do this before widening to avoid needless work *)
+            then acc_result
             else
-              let callee_entry_state =
-                if is_recursive then Dom.widen caller_entry_state callee_entry_state
-                else callee_entry_state
+              let is_recursive = Cfg.Fn.equal caller callee in
+              let exit_loc = if is_exc then callee.exc_exit else callee.exit in
+              let exactly_matching_daig =
+                Map.find_exn dsg callee |> snd |> flip Map.find callee_entry_state
               in
-              let add_dep = Dep.add ~callee ~callee_entry_state in
-              let summary = if is_exc then None else Summary.find callee_entry_state callee in
-              match summary with
-              | Some poststate ->
-                  let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                  Some (Dom.join acc_poststate poststate)
-              | None ->
-                  Map.find (snd @@ Map.find_exn dsg callee) callee_entry_state >>= fun daig ->
-                  if is_recursive && Dom.equal callee_entry_state caller_entry_state (* case (3) *)
-                  then
+              if is_recursive && Option.exists exactly_matching_daig ~f:(D.is_solved callee.exit)
+              then
+                (* case (2) *)
+                exactly_matching_daig >>= D.read_by_loc callee.exit
+                >>| (fun return_state ->
+                      Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields)
+                >>| Dom.join acc_poststate
+              else
+                let callee_entry_state =
+                  if is_recursive then Dom.widen caller_entry_state callee_entry_state
+                  else callee_entry_state
+                in
+                let add_dep = Dep.add ~callee ~callee_entry_state in
+                let summary = if is_exc then None else Summary.find callee_entry_state callee in
+                match summary with
+                | Some poststate ->
                     let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                    match D.read_by_loc exit_loc daig with
-                    | Some phi -> Some (Dom.join acc_poststate phi)
-                    | None -> acc_result
-                  else if (* case (4) *)
-                          D.is_solved exit_loc daig then
-                    let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                    let new_poststate =
-                      let return_state = Option.value_exn (D.read_by_loc exit_loc daig) in
-                      Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
-                    in
-                    Some (Dom.join acc_poststate new_poststate)
-                  else None)
+                    Some (Dom.join acc_poststate poststate)
+                | None ->
+                    Map.find (snd @@ Map.find_exn dsg callee) callee_entry_state >>= fun daig ->
+                    if
+                      is_recursive && Dom.equal callee_entry_state caller_entry_state (* case (3) *)
+                    then
+                      let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
+                      match D.read_by_loc exit_loc daig with
+                      | Some phi -> Some (Dom.join acc_poststate phi)
+                      | None -> acc_result
+                    else if (* case (4) *)
+                            D.is_solved exit_loc daig then
+                      let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
+                      let new_poststate =
+                        let return_state = Option.value_exn (D.read_by_loc exit_loc daig) in
+                        Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
+                      in
+                      Some (Dom.join acc_poststate new_poststate)
+                    else None)
 
   let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_entry_state
       ~(cg : Callgraph.t) caller_method =
@@ -300,20 +314,20 @@ module Make (Dom : Abstract.Dom) = struct
                 let q : Q.t = { fn = callee; is_exc; entry_state = callee_entry_state } in
                 q :: acc))
 
-  let query ~method_id ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
-    let fn =
-      match Cfg.Fn.Map.fn_by_method_id method_id dsg with
-      | None ->
-          failwith (Format.asprintf "No source available for method_id %a" Method_id.pp method_id)
-      | Some fn -> fn
-    in
+  let query ~fn ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     (* shorthand for issuing the initial query against the corresponding daig*)
     let issue_root_query h =
       let d, h = materialize_daig ~fn ~entry_state h in
       let res, d =
-        D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn entry_state) loc d
+        try D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn entry_state) loc d
+        with D.Ref_not_found (`By_loc l) ->
+          Format.(fprintf err_formatter)
+            "Location %a not found in fn %a with (exit: %a; exc_exit: %a)" Cfg.Loc.pp l Cfg.Fn.pp fn
+            Cfg.Loc.pp fn.exit Cfg.Loc.pp fn.exc_exit;
+          D.dump_dot d ~filename:(abs_of_rel_path "refnotfound.daig.dot");
+          failwith "ref not found"
       in
-      (*D.assert_wf d;*)
+      D.assert_wf d;
       (res, set_daig h d fn entry_state)
     in
     (* try getting state at loc directly from sub-DAIG; return if success; process generated summary queries otherwise *)
@@ -330,8 +344,8 @@ module Make (Dom : Abstract.Dom) = struct
               | D.Result _ -> dsg
               | D.Summ_qry { callsite; caller_state } ->
                   let new_qrys =
-                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg method_id
-                      ~caller_entry_state:entry_state
+                    callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
+                      fn.method_id ~caller_entry_state:entry_state
                   in
                   if List.exists new_qrys ~f:(fun q -> Dom.is_bot q.entry_state) then
                     failwith "got bottom new_qry"
@@ -339,8 +353,12 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.is_empty new_qrys then dsg else solve_subqueries dsg new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
-              (*Format.printf "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a)\n" Q.pp qry
-                Cfg.Loc.pp qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit;*)
+              (*Format.(
+                fprintf err_formatter
+                  "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a); stack size: %i\n" Q.pp
+                  qry Cfg.Loc.pp qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit
+                  (List.length qrys);
+                pp_print_flush err_formatter ());*)
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
@@ -348,8 +366,7 @@ module Make (Dom : Abstract.Dom) = struct
                     ~summarizer:(summarize_with_callgraph dsg fields cg qry.fn qry.entry_state)
                     (Q.exit_loc qry) callee_daig
                 in
-
-                (*D.assert_wf new_callee_daig;*)
+                D.assert_wf new_callee_daig;
                 (res, set_daig dsg new_callee_daig qry.fn qry.entry_state, new_callee_daig)
               in
               match daig_qry_result with
@@ -372,7 +389,7 @@ module Make (Dom : Abstract.Dom) = struct
                                  let daig =
                                    D.write_by_name recursive_dep.nm new_return_state daig
                                  in
-                                 (*D.assert_wf daig;*)
+                                 D.assert_wf daig;
                                  (daig, true))
                   in
                   let dsg = set_daig dsg recursively_dirtied_daig qry.fn qry.entry_state in
@@ -384,13 +401,15 @@ module Make (Dom : Abstract.Dom) = struct
                       qry.fn.method_id ~caller_entry_state:qry.entry_state
                     |> List.filter ~f:(fun (new_qry : Q.t) ->
                            (not @@ Callgraph.is_mutually_recursive cg.scc qry.fn new_qry.fn)
-                           || (not @@ Dom.equal new_qry.entry_state qry.entry_state))
+                           || not
+                              @@ (Dom.equal new_qry.entry_state qry.entry_state
+                                 && Cfg.Fn.equal qry.fn new_qry.fn))
                   in
                   solve_subqueries dsg (new_qrys @ qrys))
         in
         let dsg =
           solve_subqueries dsg
-            (callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg method_id
+            (callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg fn.method_id
                ~caller_entry_state:entry_state)
         in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)
@@ -402,23 +421,19 @@ module Make (Dom : Abstract.Dom) = struct
               (Format.asprintf
                  "error: solve_subqueries terminated but more summaries are needed to resolve \
                   query for %a in %a"
-                 Method_id.pp method_id Dom.pp entry_state))
+                 Method_id.pp fn.method_id Dom.pp entry_state))
 
   let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
       ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) : Dom.t list * t =
     if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
-      let res, dsg =
-        query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~cg ~fields
-      in
+      let res, dsg = query dsg ~fn ~entry_state:(Dom.init ()) ~loc ~cg ~fields in
       ([ res ], dsg)
     else
       let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
       if List.is_empty callers then (
         (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
         Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;
-        let res, dsg =
-          query dsg ~method_id:fn.method_id ~entry_state:(Dom.init ()) ~loc ~cg ~fields
-        in
+        let res, dsg = query dsg ~fn ~entry_state:(Dom.init ()) ~loc ~cg ~fields in
         ([ res ], dsg))
       else
         let rec_callers, nonrec_callers =
@@ -450,7 +465,7 @@ module Make (Dom : Abstract.Dom) = struct
             (* for non-recursive functions, analyze to [loc] in each reachable [entry_state] *)
             let results, dsg =
               Set.fold entry_states ~init:([], dsg) ~f:(fun (rs, dsg) entry_state ->
-                  let r, dsg = query dsg ~method_id:fn.method_id ~entry_state ~loc ~cg ~fields in
+                  let r, dsg = query dsg ~fn ~entry_state ~loc ~cg ~fields in
                   (r :: rs, dsg))
             in
             (results, dsg)
@@ -458,7 +473,7 @@ module Make (Dom : Abstract.Dom) = struct
             (* for recursive functions, analyze to the exit in each reachable [entry_state] first, then gather up all the abstract states at [loc]*)
             let dsg =
               Set.fold entry_states ~init:dsg ~f:(fun dsg entry_state ->
-                  query dsg ~method_id:fn.method_id ~entry_state ~loc:fn.exit ~cg ~fields |> snd)
+                  query dsg ~fn ~entry_state ~loc:fn.exit ~cg ~fields |> snd)
             in
             let results =
               Map.find_exn dsg fn |> snd |> Map.data |> List.filter_map ~f:(D.read_by_loc loc)
@@ -553,7 +568,7 @@ let%test "single-file interprocedurality with a public-static-void-main" =
       (Src_file.of_file @@ abs_of_rel_path "test_cases/procedures.callgraph")
   in
   let exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
+    query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_procedures.dsg.dot") dsg in
   (* hacky check that the computed exit state contains the string of the correct analysis result for the made-up numerical program [Procedures.java] *)
@@ -573,7 +588,7 @@ let%test "motivating example from SRH'96" =
     Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/srh.callgraph")
   in
   let _exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
+    query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_srh.dsg.dot") dsg in
   true
@@ -590,8 +605,7 @@ let%test "apply edit to SRH'96 example" =
   in
 
   let _exit_state, dsg =
-    query ~method_id:main_fn.method_id ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg
-      ~fields:parse.fields dsg
+    query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields:parse.fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "srh_pre_edit.dot") dsg in
   true

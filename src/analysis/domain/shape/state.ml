@@ -202,13 +202,15 @@ end
 module T = struct
   type t = G.t * Pure.t * Env.t [@@deriving equal, compare]
 
-  let init =
+  let top =
     Graph.create (module G) ~nodes:[ Memloc.null ] ~edges:[] >> fun g ->
     (g, [], Env.empty |> Env.add_exn ~key:"null" ~data:Memloc.null)
 
   let bottom =
     Graph.create (module G) ~nodes:[ Memloc.null ] ~edges:[] >> fun g ->
     (g, [ Pure.neq (Memloc.of_int 0) (Memloc.of_int 0) ], Env.empty)
+
+  let init = top
 
   let pp fs (g, _p, e) = Format.fprintf fs "MEM [%a] ; ENV [%a]" G.pp g Env.pp e
 
