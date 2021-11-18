@@ -1,0 +1,1 @@
+org.traccar.protocol.CastelProtocolDecoder#decode(ChannelHandlerContext,Channel,SocketAddress,Object)

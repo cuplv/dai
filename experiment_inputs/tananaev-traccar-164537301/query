@@ -1,0 +1,1 @@
+org.traccar.protocol.SmokeyProtocolDecoder#decode(Channel,SocketAddress,Object)
