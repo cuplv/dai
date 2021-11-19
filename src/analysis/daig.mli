@@ -33,7 +33,7 @@ module type Sig = sig
 
   type 'a or_summary_query =
     | Result of 'a
-    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
+    | Summ_qry of { callsite : Ast.Stmt.t; returnsite : Name.t; caller_state : absstate }
         (** sum type representing the possible cases when a query is issued to a DAIG:
         (case 1: Result) the result is available or can be computed with no new method summaries
         (case 2: Summ_qry) additional method summaries are needed to evaluate some [callsite] in [caller_state]
@@ -70,6 +70,8 @@ module type Sig = sig
   val nonempty_astate_refs : t -> int
 
   val dirty_by_loc : Cfg.Loc.t -> t -> t
+
+  val add_assumefalse_edge : to_:Cfg.Loc.t -> from:Cfg.Loc.t -> t -> t
 
   val reachable_callsites : Cfg.Loc.t -> t -> Ast.Stmt.t list
 

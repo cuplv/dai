@@ -27,7 +27,7 @@ module type Sig = sig
 
   type 'a or_summary_query =
     | Result of 'a
-    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
+    | Summ_qry of { callsite : Ast.Stmt.t; returnsite : Name.t; caller_state : absstate }
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
@@ -56,6 +56,8 @@ module type Sig = sig
   val nonempty_astate_refs : t -> int
 
   val dirty_by_loc : Cfg.Loc.t -> t -> t
+
+  val add_assumefalse_edge : to_:Cfg.Loc.t -> from:Cfg.Loc.t -> t -> t
 
   val reachable_callsites : Cfg.Loc.t -> t -> Ast.Stmt.t list
 
@@ -333,7 +335,7 @@ module Make (Dom : Abstract.Dom) = struct
 
   type 'a or_summary_query =
     | Result of 'a
-    | Summ_qry of { callsite : Ast.Stmt.t; caller_state : absstate }
+    | Summ_qry of { callsite : Ast.Stmt.t; returnsite : Name.t; caller_state : absstate }
 
   type summarizer = callsite:Ast.Stmt.t * Name.t -> absstate -> absstate option
 
@@ -629,7 +631,7 @@ module Make (Dom : Abstract.Dom) = struct
     in
     of_region_cfg ~entry_ref ~cfg ~entry:fn.entry ~loop_iteration_ctx:None ()
 
-  let ref_at_loc_exn ~loc =
+  let ref_at_loc_exn ?(fp = true) ~loc =
     G.nodes
     >> Seq.filter ~f:(function
          | Ref.AState { state = _; name = Name.Loc l } -> Cfg.Loc.equal l loc
@@ -642,8 +644,8 @@ module Make (Dom : Abstract.Dom) = struct
     | [] -> raise (Ref_not_found (`By_loc loc))
     | [ r1; r2 ] -> (
         match Ref.(name r1, name r2) with
-        | Name.Loc _, Name.Iterate _ -> r1
-        | Name.Iterate _, Name.Loc _ -> r2
+        | Name.Loc _, Name.Iterate _ -> if fp then r1 else r2
+        | Name.Iterate _, Name.Loc _ -> if fp then r2 else r1
         | _ ->
             failwith
               (Format.asprintf "error: malformed ref names at loop-head location %a" Cfg.Loc.pp loc)
@@ -844,8 +846,22 @@ module Make (Dom : Abstract.Dom) = struct
              ~f:change_prop_step)
     in
     let loop_head_fixpoints, loop_shortcircuit_edges = change_prop [ r ] [] [] in
-    (* remove all edges that short-circuit loops, to be re-added after fixpoint computations are reset *)
-    let daig = List.fold loop_shortcircuit_edges ~init:daig ~f:(flip G.Edge.remove) in
+
+    (* remove all edges that short-circuit loops whose fixpoints are invalidated, to be re-added after fixpoint computations are reset *)
+    let daig =
+      List.fold loop_shortcircuit_edges ~init:daig ~f:(fun daig e ->
+          match G.Edge.label e with
+          | `Transfer_after_fix l ->
+              if
+                List.exists loop_head_fixpoints
+                  ~f:
+                    (Ref.name >> function
+                     | Name.Loc lh | Name.(Iterate (_, Loc lh)) -> Cfg.Loc.equal l lh
+                     | _ -> false)
+              then G.Edge.remove e daig
+              else daig
+          | _ -> failwith "malformed shortcircuiting edge")
+    in
     (* For each encountered (and therefore dirtied) loop fixpoint,
        (1) find the least i such that the ith abstract iterate is empty,
        (2) remove any unrollings beyond that point, and
@@ -898,7 +914,8 @@ module Make (Dom : Abstract.Dom) = struct
                 let new_src =
                   Seq.find_exn (G.nodes daig) ~f:(Ref.name >> Name.(equal reset_src_name))
                 in
-                G.Edge.(insert (create new_src (G.Edge.dst edge) lbl) daig))
+                let new_edge = G.Edge.(create new_src (dst edge) lbl) in
+                G.Edge.insert new_edge daig)
       | _ ->
           failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
 
@@ -939,7 +956,13 @@ module Make (Dom : Abstract.Dom) = struct
                       let res =
                         match summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi) with
                         | Some phi_prime -> Result phi_prime
-                        | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi }
+                        | None ->
+                            Summ_qry
+                              {
+                                callsite;
+                                returnsite = Ref.name r;
+                                caller_state = Ref.astate_exn phi;
+                              }
                       in
                       (res, daig)
                   | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi)), daig))
@@ -984,12 +1007,19 @@ module Make (Dom : Abstract.Dom) = struct
                           summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi_fp)
                         with
                         | Some phi_prime -> Result phi_prime
-                        | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi_fp }
+                        | None ->
+                            Summ_qry
+                              {
+                                callsite;
+                                returnsite = Ref.name r;
+                                caller_state = Ref.astate_exn phi_fp;
+                              }
                       in
                       (res, daig)
                   | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi_fp)), daig))
               (*                  (Result (Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi_fp)), daig)*)
               | _ ->
+                  let _ = dump_dot ~filename:(abs_of_rel_path "malformed.dot") daig in
                   failwith
                     "malformed DCG: transfer function must have one Stmt and one AState input") )
         (* write result to the queried ref-cell and return *)
@@ -1057,7 +1087,7 @@ module Make (Dom : Abstract.Dom) = struct
     | _ -> failwith (Format.asprintf "can't write to non-absstate ref-cell %a" Name.pp nm)
 
   let write_by_loc loc absstate daig =
-    match ref_at_loc_exn ~loc daig with
+    match ref_at_loc_exn ~fp:false ~loc daig with
     | Ref.AState phi as r ->
         let daig = dirty_from r daig in
         phi.state <- Some absstate;
@@ -1367,6 +1397,14 @@ module Make (Dom : Abstract.Dom) = struct
 
   let nonempty_astate_refs =
     G.nodes >> Seq.count ~f:(function Ref.AState { state = Some _; _ } -> true | _ -> false)
+
+  let add_assumefalse_edge ~(to_ : Cfg.Loc.t) ~(from : Cfg.Loc.t) daig =
+    let from_ref = ref_at_loc_exn ~loc:from daig in
+    let to_ref = Ref.AState { state = None; name = Name.Loc to_ } in
+    let assumefalse = Ast.Stmt.Assume Ast.(Expr.Lit (Lit.Bool false)) in
+    let stmt_ref = Ref.Stmt { stmt = assumefalse; name = Name.(Prod (Loc to_, Loc from)) } in
+    G.Edge.(
+      insert (create from_ref to_ref `Transfer) daig |> insert (create stmt_ref to_ref `Transfer))
 end
 
 module Dom = Domain.Unit_dom
