@@ -202,10 +202,10 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
             then acc
             else
               let acc_dsg =
-                if is_new_dataflow then (
-                  Format.printf "\twriting new_entry to %a\n" Cfg.Fn.pp callee;
+                if is_new_dataflow then
+                  (*Format.(fprintf err_formatter) "\twriting new_entry to %a\n" Cfg.Fn.pp callee;*)
                   let daig = D.write_by_loc callee.entry entry_state daig in
-                  set_daig acc_dsg daig callee callee_ctx)
+                  set_daig acc_dsg daig callee callee_ctx
                 else acc_dsg
               in
               (acc_dsg, ({ fn = callee; is_exc; entry_state; ctx = callee_ctx } : Q.t) :: acc_qrys)
@@ -231,7 +231,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     let daig_qry_result, dsg = issue_root_query dsg in
     match daig_qry_result with
     | D.Result res -> (res, dsg)
-    | D.Summ_qry { callsite; caller_state } -> (
+    | D.Summ_qry { callsite; returnsite = _; caller_state } -> (
         (* one or more additional summary is needed to analyze [callsite] in [caller_state] *)
         (* next, while (query stack is nonempty) pop, solve, add new queries as needed to analyze transitive callees *)
         let rec solve_subqueries dsg = function
@@ -239,7 +239,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               let daig_qry_result, dsg = issue_root_query dsg in
               match daig_qry_result with
               | D.Result _ -> dsg
-              | D.Summ_qry { callsite; caller_state } ->
+              | D.Summ_qry { callsite; returnsite = _; caller_state } ->
                   let dsg, new_qrys =
                     callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
                       fn.method_id ~caller_ctx:ctx
@@ -267,7 +267,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   let rec_return_sites =
                     D.recursive_call_return_sites callee_daig ~cg ~self:qry.fn
                   in
-                  (* Format.(fprintf err_formatter) "\tGOT RESULT exit state %a\n" Dom.pp exit_state;*)
                   let recursively_dirtied_daig, needs_requery =
                     List.fold rec_return_sites ~init:(callee_daig, false)
                       ~f:(fun ((daig, _) as acc) (callsite, retsite_nm) ->
@@ -298,20 +297,60 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                   let dsg = set_daig dsg recursively_dirtied_daig qry.fn qry.ctx in
                   let qrys = if needs_requery then qry :: qrys else qrys in
                   solve_subqueries dsg qrys
-              | D.Summ_qry { callsite; caller_state } ->
+              | D.Summ_qry { callsite; returnsite; caller_state } ->
+                  (*Format.(fprintf err_formatter)
+                    "\tGOT SUMM QRY callsite: %a caller_state: %a\n" Ast.Stmt.pp callsite Dom.pp
+                    caller_state;*)
                   let dsg, new_qrys =
                     callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg
                       ~caller_ctx:qry.ctx qry.fn.method_id
                   in
-                  let dsg =
-                    List.fold new_qrys ~init:dsg ~f:(fun dsg { fn; ctx; entry_state; _ } ->
-                        if Ctx.equal ctx qry.ctx && Cfg.Fn.equal fn qry.fn then
+                  (*Format.(fprintf err_formatter)
+                    "\tproduced new queries:\n\t\t%a\n" (List.pp "\n\t\t" Q._pp) new_qrys;*)
+                  (* For each new_qry, there are four cases:
+                     (1) it is for results in this DAIG and we've converged at the entry, so propagate bottom over the call, add [new_qry]
+                     (2) it is for results in this DAIG and we haven't converged, so propagate flow back to the procedure entry, add [new_qry]
+                     (3) it is for a mutually recursive procedure.  propagate top over the call, since we can't handle that yet, don't add [new_qry]
+                     (4) it is not recursive in any way -- leave the current DAIG unchanged and add [new_qry] to subquery queue
+                  *)
+                  let dsg, new_qrys =
+                    List.fold new_qrys ~init:(dsg, []) ~f:(fun (acc_dsg, acc_qrys) new_qry ->
+                        let is_recursive =
+                          Ctx.equal new_qry.ctx qry.ctx && Cfg.Fn.equal new_qry.fn qry.fn
+                        in
+                        let is_mutually_recursive =
+                          Callgraph.is_mutually_recursive cg.scc new_qry.fn qry.fn
+                        in
+                        if is_recursive then
                           let daig =
-                            Map.find_exn dsg fn |> snd |> flip Map.find_exn ctx
-                            |> D.write_by_loc fn.entry entry_state
+                            Map.find_exn acc_dsg qry.fn |> snd |> flip Map.find_exn qry.ctx
                           in
-                          set_daig dsg daig fn ctx
-                        else dsg)
+                          let new_daig =
+                            match D.read_by_loc qry.fn.entry daig with
+                            | Some old_entry_state ->
+                                if Dom.implies new_qry.entry_state old_entry_state then
+                                  (* (1) *)
+                                  D.write_by_name returnsite (Dom.bottom ()) daig
+                                else
+                                  (* (2) *)
+                                  D.write_by_loc qry.fn.entry
+                                    (Dom.widen old_entry_state new_qry.entry_state)
+                                    daig
+                            | None ->
+                                (* also (2) *) D.write_by_loc qry.fn.entry new_qry.entry_state daig
+                          in
+                          let new_dsg = set_daig acc_dsg new_daig qry.fn qry.ctx in
+                          (* commit DAIG changes and add new_qry for cases (1),(2) *)
+                          (new_dsg, new_qry :: acc_qrys)
+                        else if is_mutually_recursive then
+                          (* (3) *)
+                          let daig =
+                            Map.find_exn acc_dsg qry.fn |> snd |> flip Map.find_exn qry.ctx
+                            |> D.write_by_name returnsite (Dom.top ())
+                          in
+                          let acc_dsg = set_daig acc_dsg daig qry.fn qry.ctx in
+                          (acc_dsg, acc_qrys)
+                        else (acc_dsg, new_qry :: acc_qrys))
                   in
                   solve_subqueries dsg (new_qrys @ qrys))
         in
@@ -420,7 +459,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     let _rec_callers, nonrec_callers =
       List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
     in
-
     let entry_states_and_contexts, _dsg =
       List.fold nonrec_callers ~init:([], dsg) ~f:(fun (acc_entries, dsg) caller ->
           let calledges =
