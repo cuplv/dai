@@ -438,18 +438,17 @@ let rec expr ?exit_loc ~(curr_loc : Loc.t) ~(exc : Loc.t) (cst : CST.expression)
                       { lhs = result; rhs = Expr.binop heap_loc op (Expr.Lit (Lit.Int 1L)) } );
                   (next_loc, end_loc, Stmt.Write { rcvr; field; rhs = Expr.Var result });
                 ]
-            | Expr.Array_access { rcvr = Expr.Var rcvr; idx = Expr.Var idx } ->
+            | Expr.Array_access { rcvr = Expr.Var rcvr; idx } ->
+                (* TODO: assumes the expression idx has no side effects *)
                 [
                   ( curr_loc,
                     next_loc,
                     Stmt.Assign
                       { lhs = result; rhs = Expr.binop heap_loc op (Expr.Lit (Lit.Int 1L)) } );
-                  ( next_loc,
-                    end_loc,
-                    Stmt.Array_write { rcvr; idx = Expr.Var idx; rhs = Expr.Var result } );
+                  (next_loc, end_loc, Stmt.Array_write { rcvr; idx; rhs = Expr.Var result });
                 ]
             | Expr.Array_access _ ->
-                unimplemented "Unary_increment_or_decrement_of_nonvar_array_or_idx" []
+                unimplemented "`Unary_increment_or_decrement_of_nonvar_array" []
             | _ -> failwith "unreachable"
           in
           if is_pre then (Expr.Var result, (end_loc, update_edges @ intermediates))
