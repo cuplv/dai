@@ -121,6 +121,15 @@ module Make (Dom : Abstract.Dom) = struct
           List.fold (Map.data data) ~init:acc ~f:(fun acc deps -> acc + Set.length deps))
 
     let clear () = interproc_deps := Cfg.Fn.Map.empty
+
+    let cleanup dsg =
+      let is_stale { ctx; fn; nm; _ } =
+        not @@ Option.is_some
+        @@ (Map.find dsg fn >>= (snd >> flip Map.find ctx) >>= D.read_by_name nm)
+        $> fun res ->
+        if res then Format.(fprintf err_formatter) "got a stale edge to %a\n" Cfg.Fn.pp fn
+      in
+      interproc_deps := Map.map !interproc_deps ~f:(Map.map ~f:(Set.filter ~f:(is_stale >> not)))
   end
 
   type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
@@ -179,6 +188,7 @@ module Make (Dom : Abstract.Dom) = struct
 
   let print_stats fs (dsg : t) =
     let daigs : D.t list = List.bind (Map.data dsg) ~f:(fun (_cfg, daigs) -> Map.data daigs) in
+    let procedures : int = Map.count dsg ~f:(snd >> Map.is_empty >> not) in
     let total_astates : int =
       List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.total_astate_refs daig)
     in
@@ -186,8 +196,8 @@ module Make (Dom : Abstract.Dom) = struct
       List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.nonempty_astate_refs daig)
     in
     let total_deps : int = Dep.count () in
-    Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i\n" (List.length daigs) total_deps
-      total_astates nonemp_astates
+    Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i, %i\n" (List.length daigs) total_deps
+      procedures total_astates nonemp_astates
 
   let materialize_daig ~(fn : Cfg.Fn.t) ~(entry_state : Dom.t) (dsg : t) =
     let cfg, daigs = Map.find_exn dsg fn in
@@ -563,6 +573,7 @@ module Make (Dom : Abstract.Dom) = struct
                 in
                 (*Map.iter new_daigs ~f:D.assert_wf;*)
                 (cfg_edit.new_loc_map, Map.set dsg ~key:fn ~data:(cfg_edit.cfg, new_daigs))))
+    $> (snd >> Dep.cleanup)
 end
 
 open Make (Array_bounds)
