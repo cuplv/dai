@@ -124,10 +124,10 @@ module Make (Dom : Abstract.Dom) = struct
 
     let cleanup dsg =
       let is_stale { ctx; fn; nm; _ } =
-        not @@ Option.is_some
-        @@ (Map.find dsg fn >>= (snd >> flip Map.find ctx) >>= D.read_by_name nm)
-        $> fun res ->
-        if res then Format.(fprintf err_formatter) "got a stale edge to %a\n" Cfg.Fn.pp fn
+        try
+          not @@ Option.is_some
+          @@ (Map.find dsg fn >>= (snd >> flip Map.find ctx) >>= D.read_by_name nm)
+        with D.Ref_not_found _ -> true
       in
       interproc_deps := Map.map !interproc_deps ~f:(Map.map ~f:(Set.filter ~f:(is_stale >> not)))
   end
