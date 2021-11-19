@@ -1,0 +1,9 @@
+#!/bin/bash
+
+for i in {1..10}; do
+    mkdir -p out/run$i
+    echo "BEGIN RUN $i"
+    cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_configs artifact out/run$i
+    echo "END RUN $i"
+done
+
