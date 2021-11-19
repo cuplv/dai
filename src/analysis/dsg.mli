@@ -1,3 +1,4 @@
+open Dai.Import
 open Domain
 open Frontend
 open Syntax
@@ -14,6 +15,8 @@ module Make (Dom : Abstract.Dom) : sig
   (** relations over abstract states, representing summaries *)
 
   type t
+
+  val print_stats : t pp
 
   val apply_edit : cha:Class_hierarchy.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
   (** apply a syntactic edit to a DSG, updating a Loc_map in the process *)

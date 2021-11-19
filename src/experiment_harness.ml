@@ -151,6 +151,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     (* TODO: handle added fields and CHA edges in edited files; add corresponding Tree_diff.edit's
        and expose functions there to use here to apply diffs to our fields/cha structures *)
     let parse = { src_dir = next_dir; trees; loc_map; fields; cha } in
+    Format.printf "\n[EXPERIMENT][INFO] dirtying\n";
+    G.print_stats Format.std_formatter dsg;
     { dsg; cg; parse }
 
   let entrypoints entry_class g =
@@ -174,7 +176,10 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
           G.query dsg ~fn ~entry_state:(Dom.init ()) ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields
           |> snd)
     in
-    Format.printf "[EXPERIMENT] exhaustive analysis took: %.3f\n" (1000. *. (systime () -. st));
+    Format.(fprintf std_formatter)
+      "\n[EXPERIMENT] exhaustive analysis took: %.3f\n"
+      (1000. *. (systime () -. st));
+    G.print_stats Format.std_formatter dsg;
     { dsg; cg = g.cg; parse = g.parse }
 
   let issue_demand_query ~qry_loc entrypoints (g : t) : t =
@@ -186,6 +191,9 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
         let _res, dsg =
           G.loc_only_query g.dsg ~fn ~loc:fn.exit ~cg:g.cg ~fields:g.parse.fields ~entrypoints
         in
-        Format.printf "[EXPERIMENT] demand query took: %.3f\n" (1000. *. (systime () -. st));
+        Format.(fprintf std_formatter)
+          "\n[EXPERIMENT] demand query took: %.3f\n"
+          (1000. *. (systime () -. st));
+        G.print_stats Format.std_formatter dsg;
         { dsg; cg = g.cg; parse = g.parse }
 end

@@ -60,6 +60,10 @@ module type Sig = sig
   (** returns the predecessor absstate of the cell named by the given [Name.t], if there is exactly one *)
 
   val assert_wf : t -> unit
+
+  val total_astate_refs : t -> int
+
+  val nonempty_astate_refs : t -> int
 end
 
 module Make (Dom : Abstract.Dom) : Sig with type absstate := Dom.t

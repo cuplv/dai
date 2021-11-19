@@ -115,6 +115,12 @@ module Make (Dom : Abstract.Dom) = struct
       match Map.find !interproc_deps fn >>= flip Map.find ctx with
       | None -> Set.empty
       | Some deps -> Set.filter deps ~f:(fun dep -> Cfg.Fn.equal fn dep.fn)
+
+    let count () =
+      Map.fold !interproc_deps ~init:0 ~f:(fun ~key:_ ~data acc ->
+          List.fold (Map.data data) ~init:acc ~f:(fun acc deps -> acc + Set.length deps))
+
+    let clear () = interproc_deps := Cfg.Fn.Map.empty
   end
 
   type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
@@ -122,7 +128,9 @@ module Make (Dom : Abstract.Dom) = struct
   (* Each procedure (i.e [Cfg.Fn.t]'s) maps to its [Cfg.t] representation as well as a map from procedure-entry abstract states (i.e. [Dom.t]'s)
      to corresponding DAIGs ([D.t]'s and any interprocedural dependencies thereof ([dep list]'s)*)
 
-  let init ~cfgs : t = Cfg.Fn.Map.map cfgs ~f:(flip pair Dom.Map.empty)
+  let init ~cfgs : t =
+    Dep.clear ();
+    Cfg.Fn.Map.map cfgs ~f:(flip pair Dom.Map.empty)
 
   let add_exn ~cfgs dsg =
     Cfg.Fn.Map.fold cfgs ~init:dsg ~f:(fun ~key ~data dsg ->
@@ -168,6 +176,18 @@ module Make (Dom : Abstract.Dom) = struct
     let _ = Sys.command ("dot scratch/*.dot | gvpack 2>/dev/null > " ^ filename) in
     let _ = Sys.command "rm -r scratch" in
     ()
+
+  let print_stats fs (dsg : t) =
+    let daigs : D.t list = List.bind (Map.data dsg) ~f:(fun (_cfg, daigs) -> Map.data daigs) in
+    let total_astates : int =
+      List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.total_astate_refs daig)
+    in
+    let nonemp_astates : int =
+      List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.nonempty_astate_refs daig)
+    in
+    let total_deps : int = Dep.count () in
+    Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i\n" (List.length daigs) total_deps
+      total_astates nonemp_astates
 
   let materialize_daig ~(fn : Cfg.Fn.t) ~(entry_state : Dom.t) (dsg : t) =
     let cfg, daigs = Map.find_exn dsg fn in

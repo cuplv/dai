@@ -49,6 +49,10 @@ module type Sig = sig
   val pred_state_exn : Name.t -> t -> absstate
 
   val assert_wf : t -> unit
+
+  val total_astate_refs : t -> int
+
+  val nonempty_astate_refs : t -> int
 end
 
 module Make (Dom : Abstract.Dom) = struct
@@ -1291,6 +1295,11 @@ module Make (Dom : Abstract.Dom) = struct
           Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
           is_wf := false);
         assert !is_wf)
+
+  let total_astate_refs = G.nodes >> Seq.count ~f:Ref.is_astate
+
+  let nonempty_astate_refs =
+    G.nodes >> Seq.count ~f:(function Ref.AState { state = Some _; _ } -> true | _ -> false)
 end
 
 module Dom = Domain.Unit_dom
