@@ -1,0 +1,1 @@
+org.la4j.matrix.operation.ooplace.OoPlaceMatrixByVectorMultiplication#apply(org.la4j.matrix.sparse.RowMajorSparseMatrix,org.la4j.vector.sparse.SparseVector)
