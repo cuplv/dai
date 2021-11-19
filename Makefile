@@ -31,14 +31,8 @@ repl:
 .PHONY: experiments
 experiments: build
 	cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_configs artifact out/log
-	cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_configs_callstrings artifact out/log/callstrings
 
 .PHONY: csv
 csv:
 	echo NAME, BATCH, DEMAND, INCREMENTAL, DEMANDINCREMENTAL > out/experiments.csv
 	cat experiment_inputs/query_artifacts | xargs -Ix ./print_as_csv_row x out/log >> out/experiments.csv
-
-.PHONY: csv
-csv_with_callstrings:
-	echo NAME, BATCH, DEMAND, INCREMENTAL, DEMANDINCREMENTAL, CS_BATCH, CS_DD, CS_INCR, CS_DDINCR > out/experiments.csv
-	cat experiment_inputs/query_artifacts | xargs -Ix ./print_as_csv_row_with_callstrings x out/log >> out/experiments.csv
