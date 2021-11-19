@@ -8,7 +8,7 @@ _build/default/src/exec.exe _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev expe
 
 if test -f "experiment_inputs/$1/query"; then
     echo "DEMAND-DRIVEN"
-    _build/default/src/exec.exe _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand $(<experiment_inputs/$1/query) | grep EXPERIMENT > $2/$1.dd
+    _build/default/src/exec.exe _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" | grep EXPERIMENT > $2/$1.dd
     echo "DEMAND-DRIVEN and INCREMENTAL"
-    _build/default/src/exec.exe _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand $(<experiment_inputs/$1/query) -incr | grep EXPERIMENT > $2/$1.ddincr
+    _build/default/src/exec.exe _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" -incr | grep EXPERIMENT > $2/$1.ddincr
 fi
