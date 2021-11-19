@@ -373,7 +373,9 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
   let rec query ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     try query_impl ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg
     with No_entry_state (blocked_fn, blocked_ctx) ->
-      let entry_state = get_entry_state ~fields ~entrypoints:[] dsg blocked_fn blocked_ctx cg in
+      let entry_state, dsg =
+        get_entry_state ~fields ~entrypoints:[] dsg blocked_fn blocked_ctx cg
+      in
       let dsg =
         match Map.find_exn dsg blocked_fn |> snd |> flip Map.find blocked_ctx with
         | Some daig ->
@@ -386,11 +388,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
   and loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
       ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) :
       (Dom.t * Ctx.t) list * t =
-    (* if List.mem entrypoints fn ~equal:Cfg.Fn.equal then
-       let ctx = Ctx.init () in
-       let res, dsg = query dsg ~fn ~cg ~entry_state:(Dom.init ()) ~ctx ~loc ~fields in
-       ([ (res, ctx) ], dsg)
-       else*)
     let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
     if List.is_empty callers then (
       (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
@@ -459,6 +456,31 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     let _rec_callers, nonrec_callers =
       List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)
     in
+    (* doing this in an ugly imperative way to avoid stack overflows *)
+    let res : Dom.t ref = ref (Dom.bottom ()) in
+    let dsg : t ref = ref dsg in
+    let callsites =
+      Sequence.of_list nonrec_callers
+      |> Sequence.bind ~f:(fun caller ->
+             Sequence.filter
+               (Cfg.G.edges (Cfg.Fn.Map.find_exn !dsg caller |> fst))
+               ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
+             |> Sequence.map ~f:(pair caller))
+    in
+    Sequence.iter callsites ~f:(fun (caller, calledge) ->
+        let caller_loc = Cfg.G.Edge.src calledge in
+        let callsite = Cfg.G.Edge.label calledge in
+        let caller_states, updated_dsg =
+          loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints !dsg
+        in
+        dsg := updated_dsg;
+        List.iter caller_states ~f:(fun (caller_state, caller_ctx) ->
+            if Ctx.(equal ctx @@ callee_ctx ~callsite ~caller_ctx) then
+              let entry_state = Dom.call ~caller ~callee:fn ~callsite ~caller_state ~fields in
+              res := Dom.join !res entry_state));
+    (!res, !dsg)
+
+  (*
     let entry_states_and_contexts, _dsg =
       List.fold nonrec_callers ~init:([], dsg) ~f:(fun (acc_entries, dsg) caller ->
           let calledges =
@@ -483,7 +505,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
 
     List.filter entry_states_and_contexts ~f:(snd >> Ctx.equal ctx)
     |> List.fold ~init:(Dom.bottom ()) ~f:(fun acc (state, _) -> Dom.join acc state)
-
+*)
   let rec dirty_interproc dsg ~(fn : Cfg.Fn.t) ~loc ~ctx ~(cg : Callgraph.t) =
     (*Format.(fprintf err_formatter)
       "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx;*)
