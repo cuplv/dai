@@ -1,0 +1,13 @@
+#!/bin/sh
+
+b=$(tail -n 1 $2/$1.batch | sed 's/.*: //')
+d=$(tail -n 1 $2/$1.dd | sed 's/.*: //')
+i=$(tail -n 1 $2/$1.incr | sed 's/.*: //')
+di=$(tail -n 1 $2/$1.ddincr | sed 's/.*: //')
+
+cs_b=$(tail -n 1 $2/callstrings/$1.batch | sed 's/.*: //')
+cs_d=$(tail -n 1 $2/callstrings/$1.dd | sed 's/.*: //')
+cs_i=$(tail -n 1 $2/callstrings/$1.incr | sed 's/.*: //')
+cs_di=$(tail -n 1 $2/callstrings/$1.ddincr | sed 's/.*: //')
+
+echo $1, $b, $d, $i, $di, $cs_b, $cs_d, $cs_i, $cs_di
