@@ -1,0 +1,11 @@
+# generate using xargs -t -a experiment_inputs/query_artifacts -Iprog sloc -f simple -k source _bugswarm/prog/pass | grep "ource" | sed "s/.*ource //" and careful editing
+SpigotMC-BungeeCord-130330788 :  15774  
+tananaev-traccar-188473749 :  39377  
+tananaev-traccar-255051211 :  63758  
+tananaev-traccar-64783123 :  23455  
+tananaev-traccar-164537301 :  36196  
+square-okhttp-95014919 :  45679  
+davidmoten-rxjava-jdbc-172208959 :  32308  
+raphw-byte-buddy-234970609 :  147639 
+tananaev-traccar-191125671 :  39622  
+vkostyukov-la4j-45524419 :  15214  

@@ -1,0 +1,11 @@
+# generate using scripts/diff_counts.py
+tananaev-traccar-64783123 : 4
+tananaev-traccar-164537301 : 8
+tananaev-traccar-188473749 : 4
+tananaev-traccar-255051211 : 4
+davidmoten-rxjava-jdbc-172208959 : 4
+SpigotMC-BungeeCord-130330788 : 4
+raphw-byte-buddy-234970609 : 56
+tananaev-traccar-191125671 : 8
+vkostyukov-la4j-45524419 : 20
+square-okhttp-95014919 : 134

@@ -1,0 +1,11 @@
+# generate with xargs -a experiment_inputs/query_artifacts -Iprog sh -c 'echo prog && sed "s/CALLER:\s*//" experiment_inputs/prog/pass/callgraph | sed "s/\sCALLEE:\s*//" | uniq | wc -l' | paste -s -d' \n'
+SpigotMC-BungeeCord-130330788 1599
+tananaev-traccar-188473749 8212
+tananaev-traccar-255051211 10048
+tananaev-traccar-64783123 2559
+tananaev-traccar-164537301 7379
+square-okhttp-95014919 3866
+davidmoten-rxjava-jdbc-172208959 1233
+raphw-byte-buddy-234970609 2920
+tananaev-traccar-191125671 8260
+vkostyukov-la4j-45524419 3558
