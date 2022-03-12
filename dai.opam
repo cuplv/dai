@@ -1,7 +1,7 @@
 opam-version: "2.0"
 maintainer: "Benno Stein <bennostein@colorado.edu>"
 authors: "Benno Stein <bennostein@colorado.edu>"
-dev-repo: "git://github.com/cuplv/d1a.git"
+dev-repo: "git://github.com/cuplv/dai.git"
 build: [
   ["dune" "build" "-p" name "-j" jobs]
 ]

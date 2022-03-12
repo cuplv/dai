@@ -388,12 +388,6 @@ module Make (Dom : Abstract.Dom) = struct
                   if List.is_empty new_qrys then dsg else solve_subqueries dsg new_qrys)
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
-              (*Format.(
-                fprintf err_formatter
-                  "[INFO] processing qry: %a (entry: %a; exit: %a; exc: %a); stack size: %i\n" Q.pp
-                  qry Cfg.Loc.pp qry.fn.entry Cfg.Loc.pp qry.fn.exit Cfg.Loc.pp qry.fn.exc_exit
-                  (List.length qrys);
-                pp_print_flush err_formatter ());*)
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
