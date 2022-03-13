@@ -79,7 +79,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
       (* Map.fold dsg ~init:0 ~f:(fun ~key:fn ~data:(_, daigs) acc ->
            List.fold (Map.keys daigs) ~init:acc ~f:(fun acc ctx ->
                acc + (Set.length @@ Dep.self_loops fn ctx)))*)
-      failwith "todo"
+      -1
     in
     let total_astates : int =
       List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.total_astate_refs daig)
@@ -87,7 +87,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     let nonemp_astates : int =
       List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.nonempty_astate_refs daig)
     in
-    let total_deps : int = (*Dep.count ()*) failwith "todo" in
+    let total_deps : int = (*Dep.count ()*) -1 in
     Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i, %i, %i\n" (List.length daigs) total_deps
       procedures total_astates nonemp_astates self_loops
 
