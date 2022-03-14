@@ -42,6 +42,10 @@ let analyze =
       and unit_dom =
         flag "unit-dom" no_arg
           ~doc:"use the unit domain (defaults to array-bounds-checking interval domain otherwise)"
+      and null_dom =
+        flag "null-dom" no_arg
+          ~doc:
+            "use the nullable domain (defaults to array-bounds-checking interval domain otherwise)"
       and filter_cg =
         flag "filter-cg" (optional string)
           ~doc:
@@ -54,6 +58,9 @@ let analyze =
         let (module Harness : Experiment_harness.S) =
           if unit_dom then
             (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
+          else if null_dom then
+            (module Experiment_harness.DSG_wrapper (Domain.Incr.Make_env_with_heap (Domain.Null_dom))
+            : Experiment_harness.S)
           else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
         in
         if Option.is_some filter_cg then
