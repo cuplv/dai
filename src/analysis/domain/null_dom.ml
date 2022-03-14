@@ -48,6 +48,8 @@ let pp fs = function
   | Null -> Format.pp_print_string fs "Null"
   | NotNull -> Format.pp_print_string fs "NotNull"
 
-let show = function Top -> "Top" | Bot -> "Bot" | Null -> "Null" | NotNull -> "NotNull"
+let show x =
+  pp Format.str_formatter x;
+  Format.flush_str_formatter ()
 
-let hash _seed t = hash t
+let hash = seeded_hash
