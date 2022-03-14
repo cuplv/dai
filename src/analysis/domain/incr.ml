@@ -219,7 +219,9 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
             Some (AAddr_or_val.InR (Val.of_lit (Lit.String "object")))
         | _ -> None)
     | Expr.Deref _ ->
-        failwith "todo"
+        None
+        (* TODO(archerd): unsound? overly simple? *)
+        (* failwith "todo eval_expr deref" (*needed*)*)
         (*(
           match (eval_expr env heap rcvr, eval_expr env heap field) with
           | Some (AAddr_or_val.InL addrs), Some (AAddr_or_val.InR field) ->
@@ -233,7 +235,9 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               |> Option.map ~f:(fun v -> AAddr_or_val.InR v)
                                         | _ -> None )*)
     | Expr.Array_access _ | Expr.Array_create _ | Expr.Method_ref _ | Expr.Class_lit _ ->
-        failwith "todo"
+        None
+        (* TODO(archerd): unsound? overly simple? *)
+        (* failwith "todo eval_expr array access/create, method ref, class lit" *)
     | Expr.Array_literal _ ->
         (* NOTE: wouldn't be that tricky to support if it comes up: just thread env/heap through
            eval_expr so we can store elements there and then return the addr
@@ -268,18 +272,21 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
               in
               Some (env, heap)
           | Assign { lhs; rhs } -> eval_expr env heap rhs >>| fun r -> (Env.add env lhs r, heap)
-          | Write { rcvr = _; field = _; rhs = _ } ->
-              failwith "todo"
-              (*
-              Env.find env rcvr >>= AAddr_or_val.addr >>= fun rcvr ->
-              eval_expr env heap field >>= AAddr_or_val.value >>= fun field ->
-              eval_expr env heap rhs >>| fun rhs -> (env, weak_update heap rcvr field rhs)*)
+          | Write { rcvr; field; rhs } ->
+              (* failwith "todo interpret write" *)
+              (* TODO(archerd): understand why commented out *)
+              Env.find env rcvr >>= AAddr_or_val._addr >>= fun rcvr_set ->
+              (* the deref can't possibly be right, can it? *)
+              eval_expr env heap (Ast.Expr.Deref { rcvr; field }) >>= AAddr_or_val.value
+              >>= fun field ->
+              eval_expr env heap rhs >>| fun rhs -> (env, _weak_update heap rcvr_set field rhs)
           | Assume e -> (
               eval_expr env heap e >>= AAddr_or_val.value >>| Val.truthiness >>= function
               | `T | `Either -> Some (env, heap)
               | _ -> None)
           | Skip | Expr _ | Call _ -> Some (env, heap)
-          | Array_write _ | Exceptional_call _ -> failwith "todo")
+          | Array_write _ | Exceptional_call _ ->
+              failwith "todo interpret Array_write/Exceptional_call")
     in
     fun stmt -> flip ( >>= ) (fun state -> mfn.mfn_art (stmt, state) |> Art.force)
 
@@ -318,16 +325,37 @@ module Make_env_with_heap (Val : Abstract.Val) : Abstract.Dom = struct
         | AAddr_or_val.InR v1, AAddr_or_val.InR v2 -> AAddr_or_val.InR (Val.join v1 v2)
         | _ -> failwith "This domain functor assumes static separation of arrays and scalars")
 
-  let implies _ _ = failwith "todo"
+  let implies _ _ = failwith "todo implies"
 
   let ( <= ) = implies
 
-  let call ~callee:_ ~callsite:_ ~caller_state:_ ~fields:_ = failwith "todo"
+  let call ~callee:_ ~callsite ~caller_state ~fields:_ =
+    match callsite with
+    | Ast.Stmt.Call _ | Ast.Stmt.Exceptional_call _ ->
+        caller_state
+        (* TODO(archerd): definitely unsound *)
+        (* failwith "todo calls" *)
+    | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-  let return ~callee:_ ~caller:_ ~callsite:_ ~caller_state:_ ~return_state:_ ~fields:_ =
-    failwith "todo"
+  let return ~callee:_ ~caller:_ ~callsite ~caller_state ~return_state:_ ~fields:_ =
+    match callsite with
+    | Ast.Stmt.Call _ ->
+        caller_state
+        (* TODO(archerd): unsound *)
+        (* failwith "todo return call" *)
+    | Ast.Stmt.Exceptional_call _ ->
+        caller_state
+        (* TODO(archerd): unsound *)
+        (* failwith "todo return exceptional" *)
+    | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
-  let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
+  let approximate_missing_callee ~caller_state ~callsite =
+    match callsite with
+    | Ast.Stmt.Call _ | Ast.Stmt.Exceptional_call _ ->
+        caller_state
+        (* TODO(archerd): probably bad/unsound *)
+        (* failwith "todo approximate missing callee" *)
+    | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
   let sexp_of_t =
     let open Sexp in
