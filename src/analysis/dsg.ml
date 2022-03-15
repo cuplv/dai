@@ -201,13 +201,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               && D.is_solved (if is_exc then callee.exc_exit else callee.exit) daig
             then acc
             else
-              let acc_dsg =
-                if is_new_dataflow then
-                  (*Format.(fprintf err_formatter) "\twriting new_entry to %a\n" Cfg.Fn.pp callee;*)
-                  let daig = D.write_by_loc callee.entry entry_state daig in
-                  set_daig acc_dsg daig callee callee_ctx
-                else acc_dsg
-              in
               (acc_dsg, ({ fn = callee; is_exc; entry_state; ctx = callee_ctx } : Q.t) :: acc_qrys)
         | None ->
             ( acc_dsg,
@@ -217,21 +210,25 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
 
   let query_impl ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     (* shorthand for issuing the initial query against the corresponding daig*)
-    let issue_root_query h =
-      let d, h = materialize_daig ~fn ~ctx ~entry_state h in
+    let issue_root_query dsg =
+      let d, dsg = materialize_daig ~fn ~ctx ~entry_state dsg in
       let res, d =
-        try D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn ctx) loc d
+        try D.get_by_loc ~summarizer:(summarize_with_callgraph dsg fields cg fn ctx) loc d
         with D.Ref_not_found _ ->
           D.dump_dot d ~filename:(abs_of_rel_path "refnotfound.daig.dot");
           failwith "ref not found"
       in
-      (res, set_daig h d fn ctx)
+      (res, set_daig dsg d fn ctx)
     in
     (* try getting state at loc directly from sub-DAIG; return if success; process generated summary queries otherwise *)
     let daig_qry_result, dsg = issue_root_query dsg in
     match daig_qry_result with
     | D.Result res -> (res, dsg)
     | D.Summ_qry { callsite; returnsite = _; caller_state } -> (
+        let dsg, new_queries =
+          callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg fn.method_id
+            ~caller_ctx:ctx
+        in
         (* one or more additional summary is needed to analyze [callsite] in [caller_state] *)
         (* next, while (query stack is nonempty) pop, solve, add new queries as needed to analyze transitive callees *)
         let rec solve_subqueries dsg = function
@@ -266,6 +263,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
               | D.Result exit_state ->
                   let rec_return_sites =
                     D.recursive_call_return_sites callee_daig ~cg ~self:qry.fn
+                    |> List.filter ~f:(fun (callsite, _) ->
+                           Ctx.compatible ~callsite ~callee_ctx:qry.ctx)
                   in
                   let recursively_dirtied_daig, needs_requery =
                     List.fold rec_return_sites ~init:(callee_daig, false)
@@ -353,10 +352,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                         else (acc_dsg, new_qry :: acc_qrys))
                   in
                   solve_subqueries dsg (new_qrys @ qrys))
-        in
-        let dsg, new_queries =
-          callee_subqueries_of_summ_qry dsg fields ~callsite ~caller_state ~cg fn.method_id
-            ~caller_ctx:ctx
         in
         let dsg = solve_subqueries dsg new_queries in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)

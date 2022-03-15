@@ -18,6 +18,8 @@ module type Sig = sig
 
   val callee_ctx : callsite:Ast.Stmt.t -> caller_ctx:t -> t
 
+  val compatible : callsite:Ast.Stmt.t -> callee_ctx:t -> bool
+
   include Comparator.S with type t := t
 
   module Map : sig
@@ -40,6 +42,8 @@ module ZeroCFA : Sig = struct
     let pp fs () = Format.fprintf fs "()"
 
     let callee_ctx ~callsite:_ ~caller_ctx:_ = ()
+
+    let compatible ~callsite:_ ~callee_ctx:_ = true
   end
 
   module T_comp = struct
@@ -73,6 +77,8 @@ module OneCFA : Sig = struct
       | None -> Format.fprintf fs "[]"
 
     let callee_ctx ~callsite ~caller_ctx:_ = Some callsite
+
+    let compatible ~callsite ~callee_ctx = Option.exists callee_ctx ~f:(Ast.Stmt.equal callsite)
   end
 
   module T_comp = struct
