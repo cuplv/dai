@@ -91,10 +91,59 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i, %i, %i\n" (List.length daigs) total_deps
       procedures total_astates nonemp_astates self_loops
 
-  let materialize_daig ~(fn : Cfg.Fn.t) ~(ctx : Ctx.t) ~(entry_state : Dom.t) (dsg : t) =
+  let rec dirty_interproc dsg ~(fn : Cfg.Fn.t) ~loc ~ctx ~(cg : Callgraph.t) =
+    (*Format.printf
+      "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx ;*)
+    match Map.find dsg fn >>= (snd >> flip Map.find ctx) with
+    | Some daig when Option.is_none (D.read_by_loc loc daig) ->
+        D.dump_dot ~filename:(abs_of_rel_path "dirty_interproc_daig_empty.dot") daig;
+        dsg
+    | Some daig ->
+        D.dump_dot ~filename:(abs_of_rel_path "dirty_interproc_daig_target.dot") daig;
+        let affected_callsites = D.reachable_callsites loc daig in
+        let dsg = set_daig dsg (D.dirty_by_loc loc daig) fn ctx in
+        let dsg =
+          List.fold affected_callsites ~init:dsg ~f:(fun dsg callsite ->
+              let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx:ctx in
+              let callees =
+                Callgraph.callees ~callsite ~cg:cg.forward ~caller_method:fn.method_id
+              in
+              List.fold callees ~init:dsg ~f:(fun acc callee ->
+                  dirty_interproc acc ~fn:callee ~loc:callee.entry ~ctx:callee_ctx ~cg))
+        in
+        let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
+        List.fold callers ~init:dsg ~f:(fun dsg caller ->
+            let calledges =
+              Sequence.filter
+                (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
+                ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
+            in
+            let callsites =
+              Sequence.fold calledges ~init:[] ~f:(fun acc calledge ->
+                  let return_loc = Cfg.G.Edge.dst calledge in
+                  let callsite = Cfg.G.Edge.label calledge in
+                  (return_loc, callsite) :: acc)
+            in
+            let caller_contexts = Map.find_exn dsg caller |> snd |> Map.keys in
+            List.fold caller_contexts ~init:dsg ~f:(fun dsg caller_ctx ->
+                List.fold callsites ~init:dsg ~f:(fun dsg (loc, callsite) ->
+                    if Ctx.(callee_ctx ~callsite ~caller_ctx |> equal ctx) then
+                      dirty_interproc dsg ~fn:caller ~loc ~ctx:caller_ctx ~cg
+                    else dsg)))
+    | None -> dsg
+
+  let materialize_daig ~(fn : Cfg.Fn.t) ~(ctx : Ctx.t) ~(entry_state : Dom.t) (dsg : t)
+      ~(cg : Callgraph.t) =
     let cfg, daigs = Map.find_exn dsg fn in
     match Map.find daigs ctx with
-    | Some daig -> (daig, dsg)
+    | Some daig -> (
+        match D.read_by_loc fn.entry daig with
+        | Some old_entry_state when Dom.implies entry_state old_entry_state -> (daig, dsg)
+        | Some old_entry_state ->
+            let dsg' : t = dirty_interproc dsg ~fn ~loc:fn.entry ~ctx ~cg in
+            let daig' : D.t = D.write_by_loc fn.entry (Dom.join old_entry_state entry_state) daig in
+            (daig', dsg')
+        | None -> (D.write_by_loc fn.entry entry_state daig, dsg))
     | None ->
         (*Format.(
           fprintf err_formatter "[INFO] materializing: %a in %a\n" Cfg.Fn.pp fn Dom.pp entry_state;
@@ -211,7 +260,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
   let query_impl ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg : Dom.t * t =
     (* shorthand for issuing the initial query against the corresponding daig*)
     let issue_root_query dsg =
-      let d, dsg = materialize_daig ~fn ~ctx ~entry_state dsg in
+      let d, dsg = materialize_daig ~fn ~ctx ~entry_state ~cg dsg in
       let res, d =
         try D.get_by_loc ~summarizer:(summarize_with_callgraph dsg fields cg fn ctx) loc d
         with D.Ref_not_found _ ->
@@ -248,7 +297,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
           | qry :: qrys when Dom.is_bot qry.entry_state -> solve_subqueries dsg qrys
           | qry :: qrys -> (
               let callee_daig, dsg =
-                materialize_daig ~fn:qry.fn ~ctx:qry.ctx ~entry_state:qry.entry_state dsg
+                materialize_daig ~fn:qry.fn ~ctx:qry.ctx ~entry_state:qry.entry_state ~cg dsg
               in
               let daig_qry_result, dsg, callee_daig =
                 let res, new_callee_daig =
@@ -355,7 +404,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
         in
         let dsg = solve_subqueries dsg new_queries in
         (* requery loc; the callsite that triggered a summary query is now resolvable since solve_subqueries terminated *)
-        let _, dsg = materialize_daig ~fn ~ctx ~entry_state dsg in
+        let _, dsg = materialize_daig ~fn ~ctx ~entry_state ~cg dsg in
         match issue_root_query dsg with
         | D.Result res, dsg -> (res, dsg)
         | _ ->
@@ -376,7 +425,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
         | Some daig ->
             let daig = D.write_by_loc blocked_fn.entry entry_state daig in
             set_daig dsg daig blocked_fn blocked_ctx
-        | None -> materialize_daig ~fn:blocked_fn ~ctx:blocked_ctx ~entry_state dsg |> snd
+        | None -> materialize_daig ~fn:blocked_fn ~ctx:blocked_ctx ~entry_state ~cg dsg |> snd
       in
       query ~fn ~ctx ~entry_state ~loc ~cg ~fields dsg
 
@@ -501,43 +550,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     List.filter entry_states_and_contexts ~f:(snd >> Ctx.equal ctx)
     |> List.fold ~init:(Dom.bottom ()) ~f:(fun acc (state, _) -> Dom.join acc state)
 *)
-  let rec dirty_interproc dsg ~(fn : Cfg.Fn.t) ~loc ~ctx ~(cg : Callgraph.t) =
-    (*Format.(fprintf err_formatter)
-      "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx;*)
-    match Map.find dsg fn >>= (snd >> flip Map.find ctx) with
-    | Some daig when Option.is_none (D.read_by_loc loc daig) -> dsg
-    | Some daig ->
-        let affected_callsites = D.reachable_callsites loc daig in
-        let dsg = set_daig dsg (D.dirty_by_loc loc daig) fn ctx in
-        let dsg =
-          List.fold affected_callsites ~init:dsg ~f:(fun dsg callsite ->
-              let callee_ctx = Ctx.callee_ctx ~callsite ~caller_ctx:ctx in
-              let callees =
-                Callgraph.callees ~callsite ~cg:cg.forward ~caller_method:fn.method_id
-              in
-              List.fold callees ~init:dsg ~f:(fun acc callee ->
-                  dirty_interproc acc ~fn:callee ~loc:callee.entry ~ctx:callee_ctx ~cg))
-        in
-        let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
-        List.fold callers ~init:dsg ~f:(fun dsg caller ->
-            let calledges =
-              Sequence.filter
-                (Cfg.G.edges (Cfg.Fn.Map.find_exn dsg caller |> fst))
-                ~f:(Cfg.G.Edge.label >> flip Callgraph.is_syntactically_compatible fn)
-            in
-            let callsites =
-              Sequence.fold calledges ~init:[] ~f:(fun acc calledge ->
-                  let return_loc = Cfg.G.Edge.dst calledge in
-                  let callsite = Cfg.G.Edge.label calledge in
-                  (return_loc, callsite) :: acc)
-            in
-            let caller_contexts = Map.find_exn dsg caller |> snd |> Map.keys in
-            List.fold caller_contexts ~init:dsg ~f:(fun dsg caller_ctx ->
-                List.fold callsites ~init:dsg ~f:(fun dsg (loc, callsite) ->
-                    if Ctx.(callee_ctx ~callsite ~caller_ctx |> equal ctx) then
-                      dirty_interproc dsg ~fn:caller ~loc ~ctx:caller_ctx ~cg
-                    else dsg)))
-    | None -> dsg
 
   let apply_edit ~cha ~cg ~diff loc_map (dsg : t) =
     List.fold diff ~init:(loc_map, dsg) ~f:(fun (loc_map, dsg) ->
@@ -609,7 +621,6 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                 let cfg_edit =
                   Tree_diff.apply_edit edit loc_map cfg ~ret:fn.exit ~exc:fn.exc_exit
                 in
-
                 let new_daigs =
                   Map.map daigs ~f:(fun daig -> D.apply_edit ~daig ~cfg_edit ~fn edit)
                 in
@@ -631,11 +642,11 @@ let%test "single-file interprocedurality with a public-static-void-main" =
   let main_fn =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
-  let _, dsg = materialize_daig ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) dsg in
   let cg =
     Callgraph.deserialize ~fns
       (Src_file.of_file @@ abs_of_rel_path "test_cases/procedures.callgraph")
   in
+  let _, dsg = materialize_daig ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) ~cg dsg in
   let exit_state, dsg =
     query ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields
       dsg
@@ -653,10 +664,10 @@ let%test "motivating example from SRH'96" =
   let main_fn =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
-  let _, dsg = materialize_daig ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) dsg in
   let cg =
     Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/srh.callgraph")
   in
+  let _, dsg = materialize_daig ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) ~cg dsg in
   let _exit_state, dsg =
     query ~fn:main_fn ~ctx:(Ctx.init ()) ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields
       dsg
