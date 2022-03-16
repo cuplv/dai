@@ -96,10 +96,8 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
       "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx ;*)
     match Map.find dsg fn >>= (snd >> flip Map.find ctx) with
     | Some daig when Option.is_none (D.read_by_loc loc daig) ->
-        D.dump_dot ~filename:(abs_of_rel_path "dirty_interproc_daig_empty.dot") daig;
         dsg
     | Some daig ->
-        D.dump_dot ~filename:(abs_of_rel_path "dirty_interproc_daig_target.dot") daig;
         let affected_callsites = D.reachable_callsites loc daig in
         let dsg = set_daig dsg (D.dirty_by_loc loc daig) fn ctx in
         let dsg =
