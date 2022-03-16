@@ -341,7 +341,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
                           let new_dsg = set_daig acc_dsg new_daig qry.fn qry.ctx in
                           (* commit DAIG changes and add new_qry for cases (1),(2) *)
                           (new_dsg, new_qry :: acc_qrys)
-                        else if is_mutually_recursive then
+                        else if is_mutually_recursive && Ctx.equal qry.ctx new_qry.ctx then
                           (* (3) *)
                           let daig =
                             Map.find_exn acc_dsg qry.fn |> snd |> flip Map.find_exn qry.ctx
