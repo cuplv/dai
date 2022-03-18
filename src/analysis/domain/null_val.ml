@@ -5,6 +5,10 @@ open Syntax
 (* use Make_env_with_heap to get a domain *)
 type t = Top | Null | NotNull | Bot [@@deriving hash, equal, sexp, compare]
 
+let not_null = NotNull
+
+let top = Top
+
 let join = function
   | Top -> fun _ -> Top
   | Bot -> fun n2 -> n2
