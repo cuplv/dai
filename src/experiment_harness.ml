@@ -47,6 +47,8 @@ module type S = sig
   val issue_exit_queries : Cfg.Fn.t list -> t -> t
 
   val issue_demand_query : qry_loc:string -> Cfg.Fn.t list -> t -> t
+
+  val dump_dot : t -> filename:string -> unit
 end
 
 module DSG_wrapper (Dom : Abstract.Dom) : S = struct
@@ -63,6 +65,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
   }
 
   type t = { dsg : G.t; cg : Callgraph.t; parse : parse_info }
+
+  let dump_dot { dsg; _ } = G.dump_dot dsg
 
   let cg x = x.cg.forward
 
@@ -164,6 +168,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
           fun (f : Cfg.Fn.t) ->
             String.equal class_name f.method_id.class_name
             && (List.equal String.equal) package f.method_id.package
+            && String.equal "main" f.method_id.method_name
       | None -> fun (_f : Cfg.Fn.t) -> true
       (*String.equal "main" f.method_id.method_name*)
     in

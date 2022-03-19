@@ -32,6 +32,11 @@ repl:
 experiments: build
 	cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_configs artifact out/log
 
+.PHONY: callstring_experiments
+callstring_experiments: build
+	cat experiment_inputs/query_artifacts | xargs -Iartifact ./run_callstring_configs artifact out/log
+
+
 .PHONY: csv
 csv:
 	echo NAME, BATCH, DEMAND, INCREMENTAL, DEMANDINCREMENTAL > out/experiments.csv

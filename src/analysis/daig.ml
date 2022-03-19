@@ -296,14 +296,18 @@ module Make (Dom : Abstract.Dom) = struct
     let grey = 0xdedede in
     let green = 0xaaffaa in
     let blue = 0xaaaaff in
-    let string_of_node = function
-      (* | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
-           let label_prefix = Option.value_exn (loc_labeller l) in
-           "\"" ^ label_prefix ^ Ref.to_string r ^ "\""
-         | r -> "\"" ^ Ref.to_string r ^ "\""*)
-      | r ->
-          let _ = loc_labeller in
-          "\"" ^ Name.to_string (Ref.name r) ^ "\""
+    let string_of_ref = function
+      | Ref.Stmt { stmt; name } -> Format.asprintf "%a:: %a" Name.pp name Ast.Stmt.pp stmt
+      | Ref.AState { state = None; name } -> Format.asprintf "%a:: ?" Name.pp name
+      | Ref.AState { state = Some phi; name } -> Format.asprintf "%a:: %a" Name.pp name Dom.pp phi
+    in
+    let string_of_node =
+      (function
+        | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
+            let label_prefix = Option.value_exn (loc_labeller l) in
+            label_prefix ^ string_of_ref r
+        | r -> string_of_ref r)
+      >> fun s -> "\"" ^ String.escaped s ^ "\""
     in
     Graph.to_dot
       (module G)
