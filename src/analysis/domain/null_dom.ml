@@ -99,7 +99,48 @@ let forget_used_tmp_vars stmt state =
   let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
   forget_vars used_tmps state
 
-let interpret = failwith "unimplemented" (* TODO(archerd): implement *)
+(* TODO(archerd): something feels off with the handling of the abstract addrs. *)
+let rec eval_expr (env : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
+  let env = Option.value env ~default:Env.empty (* TODO(archerd): double check this default *) in
+  let open Ast in
+  function
+  | Expr.Var v -> (
+      match Env.find env v with
+      | Some value -> value
+      | None -> (Null_val.of_lit Lit.Null, Addr.Abstract.empty))
+  | Expr.Lit l -> (Null_val.of_lit l, Addr.Abstract.empty)
+  | Expr.Binop { l; op; r } ->
+      let vl, aaddrl = eval_expr (Some env) l in
+      let vr, aaddrr = eval_expr (Some env) r in
+      (Null_val.eval_binop vl op vr, Addr.Abstract.union aaddrl aaddrr)
+  | Expr.Unop { op; e } ->
+      let v, aaddr = eval_expr (Some env) e in
+      (Null_val.eval_unop op v, aaddr)
+  | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _
+  | Expr.Method_ref _ | Expr.Class_lit _ ->
+      (Null_val.top, Addr.Abstract.empty)
+(* failwith "expression not handled by this basic environment functor" *)
+
+let interpret stmt (phi : t) =
+  let env = Option.value phi ~default:Env.empty in
+  forget_used_tmp_vars stmt
+  @@
+  (* TODO(archerd): implement different stmt cases *)
+  match stmt with
+  | Assign { lhs; rhs = Expr.Var v } when Map.mem env v ->
+      Some (Map.set env ~key:lhs ~data:(Map.find_exn env v))
+  | Assign { lhs; rhs } ->
+      let nullness, aaddr = eval_expr phi rhs in
+      Some (Env.set env ~key:lhs ~nullness ~aaddr)
+  | Assume e -> (
+      match Null_val.truthiness (fst (eval_expr phi e)) with
+      | `T | `Either -> Some env
+      | `F | `Neither -> None)
+  | Skip -> Some env
+  | Expr _ | Write _ ->
+      Some env (* TODO(archerd): revisit, there should be something we can do here *)
+  | Call _ -> failwith "should be handled by the call function?"
+  | _ -> failwith "unimplemented"
 
 let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
   let tmp_var = "__DAI_array_for_varargs" in
@@ -141,11 +182,10 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
        * (see array_bounds.ml:393-429*)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Stmt.pp s)
 
-let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : t)
-    ~(return_state : t) ~fields =
+let return ~(callee : Cfg.Fn.t) ~caller:_ ~callsite ~(caller_state : t) ~(return_state : t) ~fields
+    =
   forget_used_tmp_vars callsite
   @@
-  (* TODO(archerd): fill out the two cases *)
   (* TODO(archerd): adjust default value or otherwise change this *)
   let caller_env = Option.value caller_state ~default:Env.empty in
   let return_env = Option.value return_state ~default:Env.empty in
