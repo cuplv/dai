@@ -685,6 +685,27 @@ let%test "apply edit to SRH'96 example" =
   let _ = dump_dot ~filename:(abs_of_rel_path "srh_pre_edit.dot") dsg in
   true
 
+open Make (Domain.Null_dom)
+
+let%test "Nullability tests" =
+  let ({ cfgs; fields; _ } : Cfg_parser.prgm_parse_result) =
+    Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/Nullability.java")
+  in
+  let dsg : t = init ~cfgs in
+  let fns = Cfg.Fn.Map.keys dsg in
+  let main_fn =
+    List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
+  in
+  let _, dsg = materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
+  let cg =
+    Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/nullability.callgraph")
+  in
+  let _exit_state, dsg =
+    query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
+  in
+  let _ = dump_dot ~filename:(abs_of_rel_path "solved_nullability.dsg.dot") dsg in
+  true
+
 (*
 let%test "variadic arguments" =
   let ({ cfgs; fields; cha = _; loc_map = _ } : Cfg_parser.prgm_parse_result) =
