@@ -36,19 +36,44 @@ module Env = struct
     Map.filter_keys env ~f:(Set.mem vars) |> Map.data |> List.map ~f:snd |> List.bind ~f:Set.to_list
 
   let forget vars env = List.fold vars ~init:env ~f:Map.remove
+
+  let find (env : t) var = Map.find env var
 end
 
+module Addr_field = struct
+  type t = Addr.t * String.t [@@deriving compare, equal, sexp, hash]
+
+  let pp fs (addr, field) = Format.fprintf fs "(%a, %s)" Addr.pp addr field
+end
+
+module Addr_field_with_comparator = struct
+  include Addr_field
+  include Base.Comparator.Make (Addr_field)
+end
+
+(* TODO(archerd): add full heap support *)
 module Heap = struct
-  (* type t = (Null_val.t * Addr.Abstract.t) Map.M(Tuple.T2(Domain.Addr.t, string)).t *)
+  (* TODO(archerd): There must be a nicer way to define this type. *)
+  type t = (Null_val.t * Addr.Abstract.t) Map.M(Addr_field_with_comparator).t
+  [@@deriving compare, equal, hash, sexp]
+
+  let pp fs (heap : t) =
+    let pp_binding fs (k, (v, a)) =
+      Format.fprintf fs "%a -> (%a, %a)" Addr_field.pp k Null_val.pp v Addr.Abstract.pp a
+    in
+    List.pp ~pre:"{" ~suf:"}" ";@ " pp_binding fs (Map.to_alist heap)
+
+  let empty = Map.empty (module Addr_field_with_comparator)
 end
 
-type t = Env.t option [@@deriving compare, equal, hash, sexp]
+type t = (Env.t * Heap.t) option [@@deriving compare, equal, hash, sexp]
+(* type t = Env.t option [@@deriving compare, equal, hash, sexp] *)
 
 let hash = seeded_hash
 
-let pp fs (env : t) =
-  match env with
-  | Some env -> Format.fprintf fs "%a" Env.pp env
+let pp fs (state : t) =
+  match state with
+  | Some (env, heap) -> Format.fprintf fs "%a | %a" Env.pp env Heap.pp heap
   | None -> Format.print_string "bottom"
 
 let show (x : t) =
@@ -57,7 +82,7 @@ let show (x : t) =
 
 let bottom () = None
 
-let top () = Some Env.empty
+let top () = Some (Env.empty, Heap.empty)
 
 let init = top
 
@@ -65,44 +90,55 @@ let is_bot = is_some >> not
 
 (* keys s2 subset keys s1 
  * AND s1[k] implies s2[k] for all keys k in keys s2 *)
-let implies s1 s2 =
+let implies (s1 : t) (s2 : t) =
   match (s1, s2) with
   | None, None -> true
   | None, Some _ -> true
   | Some _, None -> false
-  | Some s1, Some s2 ->
-      Map.for_alli s2 ~f:(fun ~key ~data ->
-          Map.mem s1 key
-          && Null_val.implies (fst (Map.find_exn s1 key)) (fst data)
-          && Addr.Abstract.is_subset (Map.find_exn s1 key |> snd) ~of_:(snd data))
+  | Some (env1, heap1), Some (env2, heap2) ->
+      Map.for_alli env2 ~f:(fun ~key ~data ->
+          Map.mem env1 key
+          && Null_val.implies (fst (Map.find_exn env1 key)) (fst data)
+          && Addr.Abstract.is_subset (Map.find_exn env1 key |> snd) ~of_:(snd data))
+      && Map.for_alli heap2 ~f:(fun ~key ~data ->
+             Map.mem heap1 key
+             && Null_val.implies (fst (Map.find_exn heap1 key)) (fst data)
+             && Addr.Abstract.is_subset (Map.find_exn heap1 key |> snd) ~of_:(snd data))
 
 let ( <= ) = implies
 
 let sanitize = Fn.id
 
-let join s1 s2 =
-  Option.merge s1 s2
-    (Map.merge_skewed ~combine:(fun ~key:_ (v1, addr1) (v2, addr2) ->
-         (Null_val.join v1 v2, Addr.Abstract.union addr1 addr2)))
+let join (s1 : t) (s2 : t) =
+  Option.merge s1 s2 (fun (env1, heap1) (env2, heap2) ->
+      ( Map.merge_skewed env1 env2 ~combine:(fun ~key:_ (v1, addr1) (v2, addr2) ->
+            (Null_val.join v1 v2, Addr.Abstract.union addr1 addr2)),
+        Map.merge_skewed heap1 heap2 ~combine:(fun ~key:_ (v1, addr1) (v2, addr2) ->
+            (Null_val.join v1 v2, Addr.Abstract.union addr1 addr2)) ))
 
 let widen = join (* TODO(archerd): double check this, but I think it still applies *)
 
-let _extend_env_by_uses _stmt phi = phi
-(* TODO(archerd): I don't think this does anything for me here/yet. *)
+let _extend_env_by_uses _stmt (phi : t) = phi
+(* TODO(archerd): update to reflect heap. *)
 
-let forget_vars vars phi =
-  Option.map phi ~f:(fun env ->
+let forget_vars vars (phi : t) : t =
+  Option.map phi ~f:(fun (env, heap) ->
+      (* TODO(archerd): update to reflect heap. *)
       let vars_to_forget = Map.keys env |> List.filter ~f:(Set.mem vars) in
-      List.fold ~init:env ~f:Map.remove vars_to_forget)
+      (List.fold ~init:env ~f:Map.remove vars_to_forget, heap))
 
-let forget_used_tmp_vars stmt state =
+let forget_used_tmp_vars stmt (state : t) : t =
   let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
   forget_vars used_tmps state
 
 (* TODO(archerd): something feels off with the handling of the abstract addrs. *)
-let rec eval_expr (env : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
-  let env = Option.value env ~default:Env.empty (* TODO(archerd): double check this default *) in
+let rec eval_expr (state : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
+  let env, heap =
+    Option.value state ~default:(Env.empty, Heap.empty)
+    (* TODO(archerd): double check this default *)
+  in
   let open Ast in
+  (* TODO(archerd): update to reflect heap. *)
   function
   | Expr.Var v -> (
       match Env.find env v with
@@ -110,39 +146,41 @@ let rec eval_expr (env : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
       | None -> (Null_val.of_lit Lit.Null, Addr.Abstract.empty))
   | Expr.Lit l -> (Null_val.of_lit l, Addr.Abstract.empty)
   | Expr.Binop { l; op; r } ->
-      let vl, aaddrl = eval_expr (Some env) l in
-      let vr, aaddrr = eval_expr (Some env) r in
+      let vl, aaddrl = eval_expr (Some (env, heap)) l in
+      let vr, aaddrr = eval_expr (Some (env, heap)) r in
       (Null_val.eval_binop vl op vr, Addr.Abstract.union aaddrl aaddrr)
   | Expr.Unop { op; e } ->
-      let v, aaddr = eval_expr (Some env) e in
+      let v, aaddr = eval_expr (Some (env, heap)) e in
       (Null_val.eval_unop op v, aaddr)
   | Expr.Deref _ | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _
   | Expr.Method_ref _ | Expr.Class_lit _ ->
       (Null_val.top, Addr.Abstract.empty)
 (* failwith "expression not handled by this basic environment functor" *)
 
-let interpret stmt (phi : t) =
-  let env = Option.value phi ~default:Env.empty in
+let interpret stmt (phi : t) : t =
+  let env, heap = Option.value phi ~default:(Env.empty, Heap.empty) in
   forget_used_tmp_vars stmt
   @@
   (* TODO(archerd): implement different stmt cases *)
+  (* TODO(archerd): update to reflect heap. *)
   match stmt with
   | Assign { lhs; rhs = Expr.Var v } when Map.mem env v ->
-      Some (Map.set env ~key:lhs ~data:(Map.find_exn env v))
+      Some (Map.set env ~key:lhs ~data:(Map.find_exn env v), heap)
   | Assign { lhs; rhs } ->
       let nullness, aaddr = eval_expr phi rhs in
-      Some (Env.set env ~key:lhs ~nullness ~aaddr)
+      Some (Env.set env ~key:lhs ~nullness ~aaddr, heap)
   | Assume e -> (
       match Null_val.truthiness (fst (eval_expr phi e)) with
-      | `T | `Either -> Some env
+      | `T | `Either -> Some (env, heap)
       | `F | `Neither -> None)
-  | Skip -> Some env
+  | Skip -> Some (env, heap)
   | Expr _ | Write _ ->
-      Some env (* TODO(archerd): revisit, there should be something we can do here *)
+      Some (env, heap)
+      (* TODO(archerd): revisit, there should be something we can do here (write ensures nonnull) *)
   | Call _ -> failwith "should be handled by the call function?"
   | _ -> failwith "unimplemented"
 
-let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
+let arrayify_varargs (callee : Cfg.Fn.t) actuals formals (phi : t) : Expr.t list * t =
   let tmp_var = "__DAI_array_for_varargs" in
   let varargs = List.drop actuals (formals - 1) in
   let arrayify =
@@ -156,7 +194,7 @@ let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
   let phi' = interpret arrayify phi in
   (List.take actuals (formals - 1) @ [ Expr.Var tmp_var ], phi')
 
-let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
+let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) ~fields:_ : t =
   (* let state = extend_env_by_uses callsite caller_state in *)
   match callsite with
   | Stmt.Call { rcvr = _; actuals; _ } | Stmt.Exceptional_call { rcvr = _; actuals; _ } ->
@@ -165,17 +203,19 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
         else arrayify_varargs callee actuals (List.length callee.formals) caller_state
       in
       (* re-scope the address map to include only the formal parameters *)
-      let callee_state =
+      (* TODO(archerd): update to reflect heap. *)
+      let callee_state : t =
         Some
-          (List.(fold (zip_exn callee.formals actuals)) ~init:Env.empty
-             ~f:(fun env (formal, actual) ->
+          (List.(fold (zip_exn callee.formals actuals)) ~init:(Env.empty, Heap.empty)
+             ~f:(fun (env, heap) (formal, actual) ->
                match actual with
                | Ast.Expr.Var v ->
-                   Option.fold
-                     (Option.bind caller_state ~f:(flip Map.find v))
-                     ~init:env
-                     ~f:(fun env actual_state -> Map.add_exn env ~key:formal ~data:actual_state)
-               | _ -> env))
+                   ( Option.fold
+                       (Option.bind caller_state ~f:(fst >> flip Map.find v))
+                       ~init:env
+                       ~f:(fun env actual_state -> Map.add_exn env ~key:formal ~data:actual_state),
+                     heap )
+               | _ -> (env, heap)))
       in
       callee_state
       (* TODO(archerd): doesn't handle passing receiver or formal fields, or heap(heap isn't modeled yet)
@@ -183,12 +223,13 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields:_ =
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Stmt.pp s)
 
 let return ~(callee : Cfg.Fn.t) ~caller:_ ~callsite ~(caller_state : t) ~(return_state : t) ~fields
-    =
+    : t =
   forget_used_tmp_vars callsite
   @@
   (* TODO(archerd): adjust default value or otherwise change this *)
-  let caller_env = Option.value caller_state ~default:Env.empty in
-  let return_env = Option.value return_state ~default:Env.empty in
+  let caller_env, caller_heap = Option.value caller_state ~default:(Env.empty, Heap.empty) in
+  let return_env, _return_heap = Option.value return_state ~default:(Env.empty, Heap.empty) in
+  (* TODO(archerd): update to reflect heap. *)
   match callsite with
   | Ast.Stmt.Call { lhs; rcvr; meth; alloc_site; actuals = _ } ->
       (* [rcvr_aaddr] is one of:
@@ -232,7 +273,8 @@ let return ~(callee : Cfg.Fn.t) ~caller:_ ~callsite ~(caller_state : t) ~(return
             Env.set ~key:(Option.value_exn lhs) ~nullness:retval_nullness ~aaddr:retval_aaddr
         | _ -> Fn.id
       in
-      Some env
+      (* TODO(archerd): update to reflect heap, this is an (bad) approximation. *)
+      Some (env, caller_heap)
   | Ast.Stmt.Exceptional_call { rcvr; meth = _; actuals = _ } ->
       (* [rcvr_aaddr] is one of:
          * [`This], indicating an absent or "this" receiver;
@@ -283,7 +325,8 @@ let return ~(callee : Cfg.Fn.t) ~caller:_ ~callsite ~(caller_state : t) ~(return
       (*         else Itv.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val))) *)
       (*   else Fn.id *)
       (* in *)
-      Some env
+      (* TODO(archerd): update to reflect heap, this is an (bad) approximation. *)
+      Some (env, caller_heap)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 let noop_library_methods : String.Set.t =
@@ -299,19 +342,19 @@ let _is_setter meth =
   | Some fld when String.length fld > 0 && Char.is_uppercase (String.get fld 0) -> true
   | _ -> false
 
-let approximate_missing_callee ~caller_state ~callsite =
+let approximate_missing_callee ~(caller_state : t) ~callsite : t =
   forget_used_tmp_vars callsite
   @@
+  (* TODO(archerd): update to reflect heap. *)
   match callsite with
   (* unknown constructor -- just bind the address and ignore the rest *)
   | Ast.Stmt.Call { lhs = Some lhs; rcvr = _; meth = _; actuals = _; alloc_site = Some a } ->
-      let caller_env = caller_state in
       let env =
         Env.set
-          (Option.value caller_env ~default:Env.empty)
+          (Option.value_map caller_state ~default:Env.empty ~f:fst)
           ~key:lhs ~nullness:Null_val.not_null ~aaddr:(Addr.Abstract.singleton a)
       in
-      Some env
+      Some (env, Heap.empty)
   (* unknown constructor, value being discarded -- no-op*)
   | Ast.Stmt.Call { lhs = None; alloc_site = Some _; _ } -> caller_state
   (* call to assumed-no-op library methods -- no-op*)
@@ -325,7 +368,7 @@ let approximate_missing_callee ~caller_state ~callsite =
          (3) address or value of lhs    [done]
          conservatively assuming that receiver and actual fields are modified by the call
       *)
-      Option.map caller_state ~f:(function caller_env ->
+      Option.map caller_state ~f:(function caller_env, caller_heap ->
           let affected_vars =
             rcvr :: List.filter_map actuals ~f:(function Expr.Var v -> Some v | _ -> None)
           in
@@ -345,7 +388,7 @@ let approximate_missing_callee ~caller_state ~callsite =
           (*   in *)
           (*   Itv.forget vars_to_forget caller_itv *)
           (* in *)
-          env)
+          (env, caller_heap))
   (* TODO(archerd): implement more Ast.Stmt.Call cases *)
   | Ast.Stmt.Exceptional_call _ -> caller_state
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)

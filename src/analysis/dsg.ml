@@ -698,7 +698,8 @@ let%test "Nullability tests" =
   in
   let _, dsg = materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
   let cg =
-    Callgraph.deserialize ~fns (Src_file.of_file @@ abs_of_rel_path "test_cases/nullability.callgraph")
+    Callgraph.deserialize ~fns
+      (Src_file.of_file @@ abs_of_rel_path "test_cases/nullability.callgraph")
   in
   let _exit_state, dsg =
     query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
