@@ -705,6 +705,13 @@ let%test "Nullability tests" =
     query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_nullability.dsg.dot") dsg in
+  let daigs : (Cfg.Fn.t * D.t) list =
+    Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
+        List.map (Map.data daigs) ~f:(pair fn) @ acc)
+  in
+  let () = Printf.printf "num daigs: %i\n" (List.length daigs) in
+  let () = Printf.printf "num fns: %i\n" (List.length fns) in
+  let () = List.iter ~f:(fun fn -> Printf.printf "fn: %s " fn.method_id.method_name) fns in
   true
 
 (*
