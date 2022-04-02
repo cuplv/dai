@@ -76,6 +76,10 @@ module Option = struct
     | Some _, None -> l
     | None, Some _ -> r
     | Some x, Some y -> Some (f x y)
+
+  let ( let* ) = ( >>= )
+
+  let ( let+ ) = ( >>| )
 end
 
 include Option.Monad_infix
