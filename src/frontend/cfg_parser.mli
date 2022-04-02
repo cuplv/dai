@@ -77,11 +77,14 @@ val of_constructor_decl :
   ?package:string list ->
   class_name:string ->
   instance_init:CST.program option ->
+  field_decls:CST.field_declaration list ->
   cha:Class_hierarchy.t ->
   CST.constructor_declarator ->
   CST.constructor_body ->
   Loc_map.t * edge list * Cfg.Fn.t
 (** construct a constructor's CFG from its declaration's concrete syntax tree *)
+
+val instance_field_decls : CST.class_body_declaration list -> CST.field_declaration list
 
 val of_static_init :
   Loc_map.t ->

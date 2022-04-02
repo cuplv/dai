@@ -6,7 +6,7 @@ type edit =
   | Add_function of {
       method_id : Method_id.t;
       decl : CST.class_body_declaration;
-      instance_init : CST.program option;
+      init_info : init_info;
     }
   | Delete_function of { method_id : Method_id.t }
   | Modify_function of { method_id : Method_id.t; new_header : CST.method_header }
@@ -25,6 +25,10 @@ type edit =
     }
   | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
 
+and init_info = { instance_init : CST.program option; field_decls : CST.field_declaration list }
+
+let empty_init_info = { instance_init = None; field_decls = [] }
+
 let method_id_of_edit = function
   | Add_function { method_id; _ }
   | Delete_function { method_id; _ }
@@ -38,7 +42,7 @@ let method_id_of_edit = function
 type t = edit list
 
 let pp_edit fs = function
-  | Add_function { method_id; decl = _; instance_init = _ } ->
+  | Add_function { method_id; decl = _; init_info = _ } ->
       Format.fprintf fs "(Add function %a)" Method_id.pp method_id
   | Delete_function { method_id } -> Format.fprintf fs "(Delete function %a)" Method_id.pp method_id
   | Modify_function { method_id; new_header = _ } ->
@@ -266,7 +270,7 @@ let rec decls_by_id ?(package = []) ?(parent_class = None) :
       []
   | _ -> failwith "unrecognized top-level definition"
 
-let find_instance_init class_name (cst : Tree.java_cst) =
+let init_info class_name (cst : Tree.java_cst) =
   (* recursively traverse nested class decls until finding one with [class_name]; at that point, return its instance init block if it exists *)
   let rec impl containing_class = function
     | `Decl (`Class_decl (_, _, (_, name), _, _, _, (_, body, _))) :: rest -> (
@@ -274,7 +278,11 @@ let find_instance_init class_name (cst : Tree.java_cst) =
           match containing_class with Some n -> n ^ "$" ^ name | None -> name
         in
         if String.equal class_name curr_class_name then
-          List.find_map body ~f:(function `Blk (_, b, _) -> Some b | _ -> None)
+          let instance_init =
+            List.find_map body ~f:(function `Blk (_, b, _) -> Some b | _ -> None)
+          in
+          let field_decls = Cfg_parser.instance_field_decls body in
+          Some { instance_init; field_decls }
         else
           match
             List.find_map body ~f:(function
@@ -286,7 +294,7 @@ let find_instance_init class_name (cst : Tree.java_cst) =
     | _ :: rest -> impl containing_class rest
     | [] -> None
   in
-  impl None cst
+  impl None cst |> Option.value ~default:empty_init_info
 
 let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   let package =
@@ -309,10 +317,12 @@ let btwn loc_map ~(prev : Tree.java_cst) ~(next : Tree.java_cst) =
   let function_additions =
     List.map added_ids ~f:(fun method_id ->
         let decl = Method_id.Map.find_exn next_decls_by_id method_id in
-        let instance_init =
-          match decl with `Cons_decl _ -> find_instance_init method_id.class_name next | _ -> None
+        let init_info =
+          match decl with
+          | `Cons_decl _ -> init_info method_id.class_name next
+          | _ -> empty_init_info
         in
-        Add_function { method_id; decl; instance_init })
+        Add_function { method_id; decl; init_info })
   in
   let function_deletions =
     List.map deleted_ids ~f:(fun method_id -> Delete_function { method_id })
@@ -529,16 +539,17 @@ let apply_edit edit loc_map cfg ~ret ~exc : cfg_edit_result =
 let apply cha diff loc_map cfgs =
   List.fold diff ~init:(loc_map, cfgs) ~f:(fun (lm, cfgs) edit ->
       match edit with
-      | Add_function { method_id = { package; class_name; _ }; decl; instance_init } -> (
+      | Add_function { method_id = { package; class_name; _ }; decl; init_info } -> (
           match decl with
           | `Meth_decl md -> (
               match Cfg_parser.of_method_decl loc_map ~package ~class_name md with
               | Some (loc_map, edges, fn) -> (loc_map, Cfg.add_fn fn ~edges cfgs)
               | None -> (loc_map, cfgs))
           | `Cons_decl (_, cd, _, body) ->
+              let { instance_init; field_decls } = init_info in
               let loc_map, edges, fn =
-                Cfg_parser.of_constructor_decl loc_map ~package ~class_name ~cha ~instance_init cd
-                  body
+                Cfg_parser.of_constructor_decl loc_map ~package ~class_name ~cha ~instance_init
+                  ~field_decls cd body
               in
               (loc_map, Cfg.add_fn fn ~edges cfgs)
           | `Static_init (_, blk) ->

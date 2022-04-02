@@ -510,8 +510,7 @@ module Make (Dom : Abstract.Dom) = struct
     List.fold diff ~init:(loc_map, dsg) ~f:(fun (loc_map, dsg) ->
         let open Tree_diff in
         function
-        | Add_function { method_id = { package; class_name; _ } as method_id; decl; instance_init }
-          ->
+        | Add_function { method_id = { package; class_name; _ } as method_id; decl; init_info } ->
             (match decl with
             | `Meth_decl md ->
                 Cfg_parser.of_method_decl loc_map ~package ~class_name md |> fun res ->
@@ -520,8 +519,9 @@ module Make (Dom : Abstract.Dom) = struct
                     (Format.asprintf "Failed to parse method declaration: %a" Method_id.pp method_id)
                   res
             | `Cons_decl (_, decl, _, body) ->
-                Cfg_parser.of_constructor_decl loc_map ~package ~class_name ~instance_init ~cha decl
-                  body
+                let { instance_init; field_decls } = init_info in
+                Cfg_parser.of_constructor_decl loc_map ~package ~class_name ~instance_init
+                  ~field_decls ~cha decl body
             | `Static_init (_, blk) -> Cfg_parser.of_static_init loc_map ~package ~class_name blk
             | _ ->
                 failwith

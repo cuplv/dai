@@ -6,7 +6,7 @@ type edit =
   | Add_function of {
       method_id : Method_id.t;
       decl : CST.class_body_declaration;
-      instance_init : CST.program option;
+      init_info : init_info;
     }
   | Delete_function of { method_id : Method_id.t }
   | Modify_function of { method_id : Method_id.t; new_header : CST.method_header }
@@ -24,6 +24,8 @@ type edit =
       loop_body_exit : Cfg.Loc.t option;
     }
   | Delete_statements of { method_id : Method_id.t; from_loc : Cfg.Loc.t; to_loc : Cfg.Loc.t }
+
+and init_info = { instance_init : CST.program option; field_decls : CST.field_declaration list }
 
 val method_id_of_edit : edit -> Method_id.t
 

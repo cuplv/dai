@@ -303,10 +303,10 @@ module Make (Dom : Abstract.Dom) = struct
     in
     let string_of_node =
       (function
-        | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
-            let label_prefix = Option.value_exn (loc_labeller l) in
-            label_prefix ^ string_of_ref r
-        | r -> string_of_ref r)
+      | Ref.AState { state = _; name = Name.Loc l } as r when Option.is_some (loc_labeller l) ->
+          let label_prefix = Option.value_exn (loc_labeller l) in
+          label_prefix ^ string_of_ref r
+      | r -> string_of_ref r)
       >> fun s -> "\"" ^ String.escaped s ^ "\""
     in
     Graph.to_dot
