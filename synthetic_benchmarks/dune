@@ -1,0 +1,5 @@
+(executable
+ (name exec)
+ (libraries dai)
+ (preprocess (pps ppx_let))
+)
