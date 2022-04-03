@@ -1471,100 +1471,100 @@ let parse_files_exn ~files =
 let ( let/ ) f o = o (abs_of_rel_path f |> Src_file.of_file)
 
 let%test "hello world program" =
-    let/ file = "test_cases/java/HelloWorld.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
+  let/ file = "test_cases/java/HelloWorld.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
 
-  let%test "nested classes" =
-    let/ file = "test_cases/java/NestedClasses.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
+let%test "nested classes" =
+  let/ file = "test_cases/java/NestedClasses.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst |> Result.is_ok
 
-  let%test "nested loops" =
-    let/ file = "test_cases/java/NestedLoops.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> () | Ok { cfgs; _ } -> dump_dot_interproc ~filename:"nested_loops.dot" cfgs)
-    |> Result.is_ok
+let%test "nested loops" =
+  let/ file = "test_cases/java/NestedLoops.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> () | Ok { cfgs; _ } -> dump_dot_interproc ~filename:"nested_loops.dot" cfgs)
+  |> Result.is_ok
 
-  let%test "constructors" =
-    let/ file = "test_cases/java/Constructors.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfgs)
-    |> Result.is_ok
+let%test "constructors" =
+  let/ file = "test_cases/java/Constructors.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "constructors.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "Cibai example" =
-    let/ file = "test_cases/java/CibaiExample/MiniBag.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfgs)
-    |> Result.is_ok
+let%test "Cibai example" =
+  let/ file = "test_cases/java/CibaiExample/MiniBag.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "cibai_example.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "exceptions, try, catch, finally" =
-    let/ file = "test_cases/java/Exceptions.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfgs)
-    |> Result.is_ok
+let%test "exceptions, try, catch, finally" =
+  let/ file = "test_cases/java/Exceptions.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "exceptions.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "Literals: various syntactic forms / types" =
-    let/ file = "test_cases/java/Literals.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "literals.dot") cfgs)
-    |> Result.is_ok
+let%test "Literals: various syntactic forms / types" =
+  let/ file = "test_cases/java/Literals.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "literals.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "switch block statements" =
-    let/ file = "test_cases/java/Switch.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "switch.dot") cfgs)
-    |> Result.is_ok
+let%test "switch block statements" =
+  let/ file = "test_cases/java/Switch.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "switch.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "Enhanced For loops" =
-    let/ file = "test_cases/java/ForEach.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "for_each.dot") cfgs)
-    |> Result.is_ok
+let%test "Enhanced For loops" =
+  let/ file = "test_cases/java/ForEach.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "for_each.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "super method call" =
-    let/ file = "test_cases/java/SuperMethodInvocation.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "supercall.dot") cfgs)
-    |> Result.is_ok
+let%test "super method call" =
+  let/ file = "test_cases/java/SuperMethodInvocation.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "supercall.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "instance initializers" =
-    let/ file = "test_cases/java/InstanceInitializer.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "instance_init.dot") cfgs)
-    |> Result.is_ok
+let%test "instance initializers" =
+  let/ file = "test_cases/java/InstanceInitializer.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "instance_init.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "labeled breaks" =
-    let/ file = "test_cases/java/Break.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "break.dot") cfgs)
-    |> Result.is_ok
+let%test "labeled breaks" =
+  let/ file = "test_cases/java/Break.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } -> dump_dot_interproc ~filename:(abs_of_rel_path "break.dot") cfgs)
+  |> Result.is_ok
 
-  let%test "try-with-resources" =
-    let/ file = "test_cases/java/TryWithResources.java" in
-    Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
-    $> (function
-         | Error _ -> ()
-         | Ok { cfgs; _ } ->
-             dump_dot_interproc ~filename:(abs_of_rel_path "trywithresources.dot") cfgs)
-    |> Result.is_ok
+let%test "try-with-resources" =
+  let/ file = "test_cases/java/TryWithResources.java" in
+  Tree.parse ~old_tree:None ~file >>= Tree.as_java_cst file >>| of_java_cst
+  $> (function
+       | Error _ -> ()
+       | Ok { cfgs; _ } ->
+           dump_dot_interproc ~filename:(abs_of_rel_path "trywithresources.dot") cfgs)
+  |> Result.is_ok
 
 let%test "field initializers" =
   let/ file = "test_cases/java/FieldInitializers.java" in
