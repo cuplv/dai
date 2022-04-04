@@ -59,8 +59,7 @@ let analyze =
           if unit_dom then
             (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
           else if null_dom then
-            (module Experiment_harness.DSG_wrapper (Domain.Incr.Make_env_with_heap (Domain.Null_val))
-            : Experiment_harness.S)
+            (module Experiment_harness.DSG_wrapper (Domain.Null_dom) : Experiment_harness.S)
           else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
         in
         if Option.is_some filter_cg then
