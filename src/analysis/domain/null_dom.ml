@@ -327,17 +327,6 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                          | Some (_, aaddr) -> `AAddr aaddr
                          | None -> `None)
                  in
-                 let () =
-                   match rcvr_aaddr with
-                   | `Static -> print_string "static rcvr return\n"
-                   | `This -> print_string "this rcvr return\n"
-                   | `None -> print_string "none rcvr return\n"
-                   | `AAddr aaddr ->
-                       print_string
-                         ("aaddr {"
-                         ^ (Set.to_list aaddr |> List.map ~f:Addr.show |> String.concat ~sep:" ")
-                         ^ "} rcvr return\n")
-                 in
                  let callee_instance_fields =
                    if callee.method_id.static then String.Set.empty
                    else
@@ -368,23 +357,20 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                                Set.fold aaddr ~init:heap ~f:(fun heap addr ->
                                    Map.set heap ~key:(addr, fld) ~data:(fld_nullness, fld_aaddr))
                            | `Static | `None -> heap))
-                   (* transfer the static fields to the receiver if they share a class *)
-                   |>
-                   if Cfg.Fn.is_same_class callee caller then fun heap ->
-                     let _static_fields =
-                       Declared_fields.lookup_static fields ~package:callee.method_id.package
-                         ~class_name:callee.method_id.class_name
-                     in
-                     heap
-                     (* TODO(archerd): this also needs to modify the environment, not the heap? *)
-                   else Fn.id
                  in
-                 (* (1) bind the receiver's abstract address if needed, then
+                 (* (1) bind the receiver's abstract address if needed
+                        and the instance fields for a this receiver, then
                     (2) transfer any return-value address binding to the callsite's lhs *)
                  let env =
                    (* (1) *)
                    (match rcvr_aaddr with
-                   | `This | `Static | `None -> caller_env
+                   | `This ->
+                       Set.fold callee_instance_fields ~init:caller_env ~f:(fun env fld ->
+                           let fld_val = Env.find return_env fld in
+                           Option.value_map fld_val ~default:env
+                             ~f:(fun (fld_nullness, fld_aaddr) ->
+                               Env.set env ~key:fld ~nullness:fld_nullness ~aaddr:fld_aaddr))
+                   | `Static | `None -> caller_env
                    | `AAddr rcvr_aaddr ->
                        if String.equal "<init>" meth && Option.is_some lhs then
                          Env.set caller_env ~key:(Option.value_exn lhs) ~nullness:Null_val.not_null
@@ -392,14 +378,24 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                        else
                          Env.set caller_env ~key:rcvr ~nullness:Null_val.not_null ~aaddr:rcvr_aaddr)
                    (* (2) *)
+                   |> (match Map.find return_env Cfg.retvar with
+                      | Some (retval_nullness, retval_aaddr) when Option.is_some lhs ->
+                          Env.set ~key:(Option.value_exn lhs) ~nullness:retval_nullness
+                            ~aaddr:retval_aaddr
+                      | _ -> Fn.id)
+                   (* transfer the static fields to the receiver if they share a class *)
                    |>
-                   match Map.find return_env Cfg.retvar with
-                   | Some (retval_nullness, retval_aaddr) when Option.is_some lhs ->
-                       Env.set ~key:(Option.value_exn lhs) ~nullness:retval_nullness
-                         ~aaddr:retval_aaddr
-                   | _ -> Fn.id
+                   if Cfg.Fn.is_same_class callee caller then fun env ->
+                     let static_fields =
+                       Declared_fields.lookup_static fields ~package:callee.method_id.package
+                         ~class_name:callee.method_id.class_name
+                     in
+                     Set.fold static_fields ~init:env ~f:(fun env fld ->
+                         let fld_data = Env.find return_env fld in
+                         Option.fold fld_data ~init:env ~f:(fun env (nullness, aaddr) ->
+                             Env.set env ~key:fld ~nullness ~aaddr))
+                   else Fn.id
                  in
-                 (* TODO(archerd): update to reflect heap, this is an (bad) approximation. *)
                  (env, heap)
              | Ast.Stmt.Exceptional_call { rcvr; meth = _; actuals = _ } ->
                  (* TODO(archerd): UPDATE EXCEPTIONAL CALLS case *)
