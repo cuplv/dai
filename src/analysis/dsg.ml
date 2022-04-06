@@ -179,10 +179,13 @@ module Make (Dom : Abstract.Dom) = struct
     else ();
     Map.set dsg ~key:fn ~data:(cfg, Map.remove daigs entry_state)
 
-  let dump_dot ~filename (dsg : t) =
+  let dump_dot ~filename ?num_daigs (dsg : t) =
     let daigs : (Cfg.Fn.t * D.t) list =
       Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
           List.map (Map.data daigs) ~f:(pair fn) @ acc)
+    in
+    let daigs =
+      Option.value_map num_daigs ~default:daigs ~f:(fun num_daigs -> List.take daigs num_daigs)
     in
     let _ = Sys.command "mkdir -p scratch" in
     List.iteri daigs ~f:(fun idx (fn, daig) ->
@@ -196,6 +199,32 @@ module Make (Dom : Abstract.Dom) = struct
     let _ = Sys.command ("dot scratch/*.dot | gvpack 2>/dev/null > " ^ filename) in
     let _ = Sys.command "rm -r scratch" in
     ()
+
+  let print_summaries ?num_summaries fs (dsg : t) =
+    let daigs : (Cfg.Fn.t * D.t) list =
+      Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
+          List.map (Map.data daigs) ~f:(pair fn) @ acc)
+    in
+    let solved_daigs = List.filter daigs ~f:(fun (fn, daig) -> D.is_solved fn.exit daig) in
+    let summary_components =
+      List.map solved_daigs ~f:(fun (fn, daig) ->
+          ( Option.value_exn (D.read_by_loc fn.entry daig),
+            fn.method_id,
+            Option.value_exn (D.read_by_loc fn.exit daig) ))
+    in
+    let summaries =
+      List.map summary_components ~f:(fun (entry_state, method_id, exit_state) ->
+          Format.asprintf "{%a} %a {%a}" Dom.pp entry_state Method_id.pp method_id Dom.pp exit_state)
+    in
+    let filtered_summaries =
+      Option.value_map num_summaries ~default:summaries ~f:(fun num_daigs ->
+          List.take summaries num_daigs)
+    in
+    Format.fprintf fs "[EXPERIMENT][SUMMARIES] Total solved summaries %i\n"
+      (List.length solved_daigs);
+    Format.fprintf fs "[EXPERIMENT][SUMMARIES] Printing summaries %i\n"
+      (List.length filtered_summaries);
+    List.iter filtered_summaries ~f:(Format.fprintf fs "[EXPERIMENT][SUMMARIES] %s\n")
 
   let print_stats fs (dsg : t) =
     let daigs : D.t list = List.bind (Map.data dsg) ~f:(fun (_cfg, daigs) -> Map.data daigs) in

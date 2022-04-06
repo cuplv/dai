@@ -18,6 +18,8 @@ module Make (Dom : Abstract.Dom) : sig
 
   type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
 
+  val print_summaries : ?num_summaries:int -> t pp
+
   val print_stats : t pp
 
   val apply_edit : cha:Class_hierarchy.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
@@ -31,7 +33,7 @@ module Make (Dom : Abstract.Dom) : sig
 
   val fns : t -> Cfg.Fn.t list
 
-  val dump_dot : filename:string -> t -> unit
+  val dump_dot : filename:string -> ?num_daigs:int -> t -> unit
   (** dump a DOT representation of a DSG to [filename] *)
 
   val query :

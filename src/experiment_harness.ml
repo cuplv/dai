@@ -185,6 +185,8 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
       "\n[EXPERIMENT] exhaustive analysis took: %.3f\n"
       (1000. *. (systime () -. st));
     G.print_stats Format.std_formatter dsg;
+    G.print_summaries Format.std_formatter dsg ~num_summaries:100;
+    (* G.dump_dot dsg ~filename:(abs_of_rel_path "solved_experiement.dsg.dot") ~num_daigs:100; *)
     { dsg; cg = g.cg; parse = g.parse }
 
   let issue_demand_query ~qry_loc entrypoints (g : t) : t =
