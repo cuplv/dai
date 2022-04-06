@@ -201,14 +201,20 @@ let interpret stmt (phi : t) : t =
       (* TODO(archerd): update to reflect heap. *)
       match stmt with
       | Assign { lhs; rhs = Expr.Var v } when Map.mem env v ->
-          let () = print_string ("assigning var to " ^ lhs ^ "\n") in
+          (* let () = print_string ("assigning var to " ^ lhs ^ "\n") in *)
           Some (Map.set env ~key:lhs ~data:(Map.find_exn env v), heap)
       | Assign { lhs; rhs } ->
-          let () = print_string ("assigning expr to " ^ lhs ^ "\n") in
+          (* let () = print_string ("assigning expr to " ^ lhs ^ "\n") in *)
           let nullness, aaddr = eval_expr phi rhs in
           Some (Env.set env ~key:lhs ~nullness ~aaddr, heap)
       | Assume (Binop { l; op = Binop.NEq; r = Expr.Lit Lit.Null }) ->
           if Null_val.is_null_or_bot (fst (eval_expr phi l)) then None else Some (env, heap)
+      | Assume (Unop { op = Unop.Not; e = Binop { l; op = Binop.Eq; r = Expr.Lit Lit.Null } }) ->
+          if Null_val.is_null_or_bot (fst (eval_expr phi l)) then None else Some (env, heap)
+      | Assume (Binop { l; op = Binop.Eq; r = Expr.Lit Lit.Null }) ->
+          if Null_val.is_null_or_bot (fst (eval_expr phi l)) then Some (env, heap) else None
+      | Assume (Unop { op = Unop.Not; e = Binop { l; op = Binop.NEq; r = Expr.Lit Lit.Null } }) ->
+          if Null_val.is_null_or_bot (fst (eval_expr phi l)) then Some (env, heap) else None
       | Assume e -> (
           match Null_val.truthiness (fst (eval_expr phi e)) with
           | `T | `Either -> Some (env, heap)
@@ -216,13 +222,13 @@ let interpret stmt (phi : t) : t =
       | Skip -> Some (env, heap)
       | Expr _ -> Some (env, heap)
       | Write { rcvr; field; rhs } ->
-          let () = print_string ("writing with rcvr " ^ rcvr ^ "\n") in
+          (* let () = print_string ("writing with rcvr " ^ rcvr ^ "\n") in *)
           let nullness, aaddr = eval_expr phi rhs in
           let rcvr_state = Env.find env rcvr in
           let new_heap =
             match rcvr_state with
             | None ->
-                let () = print_string "write with rcvr_state = None\n" in
+                (* let () = print_string "write with rcvr_state = None\n" in *)
                 heap
             | Some (_, rcvr_aaddr) -> weak_update heap rcvr_aaddr field (nullness, aaddr)
             (* TODO(archerd): check the state of the obj? update it to NotNull? *)
@@ -230,6 +236,7 @@ let interpret stmt (phi : t) : t =
           Some (env, new_heap)
           (* TODO(archerd): revisit, there should be something we can do here (write ensures nonnull) *)
       | Call _ -> failwith "should be handled by the call function?"
+      | Array_write _ -> Some (env, heap) (* TODO(archerd): fix this case *)
       | _ -> failwith "unimplemented")
 
 let arrayify_varargs (callee : Cfg.Fn.t) actuals formals (phi : t) : Expr.t list * t =
@@ -353,7 +360,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                                heap
                                (* TOOD(archerd): in this case, I think I need to modify the environment, not the heap *)
                            | `AAddr aaddr ->
-                               let () = print_string ("adding fld " ^ fld ^ " to heap\n") in
+                               (* let () = print_string ("adding fld " ^ fld ^ " to heap\n") in *)
                                Set.fold aaddr ~init:heap ~f:(fun heap addr ->
                                    Map.set heap ~key:(addr, fld) ~data:(fld_nullness, fld_aaddr))
                            | `Static | `None -> heap))
@@ -487,8 +494,8 @@ let approximate_missing_callee ~(caller_state : t) ~callsite : t =
          | Ast.Stmt.Call { lhs = _; rcvr = _; meth; actuals = _; alloc_site = _ }
            when Set.mem noop_library_methods meth ->
              caller_state
-         | Ast.Stmt.Call { lhs; rcvr; meth; actuals; alloc_site = None } ->
-             let () = Printf.printf "approximating method %s\n" meth in
+         | Ast.Stmt.Call { lhs; rcvr; meth = _; actuals; alloc_site = None } ->
+             (* let () = Printf.printf "approximating method %s\n" meth in *)
              (* for a call to an unknown function `x = o.foo(y1,y2,,...)`, we forget any constraints on:
                 (1) fields of rcvr o [work needed]
                 (2) fields of actuals y_i
