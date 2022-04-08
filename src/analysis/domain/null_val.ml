@@ -11,6 +11,8 @@ let top = Top
 
 let is_null_or_bot = function Null | Bot -> true | _ -> false
 
+let is_null_or_top = function Null | Top -> true | _ -> false
+
 let join = function
   | Top -> fun _ -> Top
   | Bot -> fun n2 -> n2
