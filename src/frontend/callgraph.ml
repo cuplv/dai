@@ -7,7 +7,19 @@ type reverse_t = Cfg.Fn.t list Method_id.Map.t
 
 type scc = string Graphlib.Std.partition
 
-type t = { forward : forward_t; reverse : reverse_t; scc : scc }
+type t = { forward : forward_t; reverse : reverse_t; scc : scc option }
+
+let empty = { forward = Method_id.Map.empty; reverse = Method_id.Map.empty; scc = None }
+
+let add ~(caller : Cfg.Fn.t) ~(callee : Cfg.Fn.t) cg =
+  let update map m_id fn =
+    Map.update map m_id ~f:(function None -> [ fn ] | Some fns -> fn :: fns)
+  in
+  {
+    cg with
+    forward = update cg.forward caller.method_id callee;
+    reverse = update cg.reverse callee.method_id caller;
+  }
 
 (* a callgraph is a map from caller [Method_id]'s to sets of callee [Cfg.Fn]'s *)
 
@@ -96,15 +108,18 @@ let deserialize ~fns file =
   let forward = deserialize_forward ~fns file in
   let reverse = reverse ~fns forward in
   let scc = strongly_connected_components forward in
-  { forward; reverse; scc }
+  { forward; reverse; scc = Some scc }
 
 let callers ~callee_method ~reverse_cg =
   match Map.find reverse_cg callee_method with Some callers -> callers | None -> []
 
 let methods_mutually_recursive scc m1 m2 =
-  Graphlib.Std.Partition.equiv scc
-    (Format.asprintf "%a" Method_id.pp m1)
-    (Format.asprintf "%a" Method_id.pp m2)
+  match scc with
+  | None -> Method_id.equal m1 m2
+  | Some scc ->
+      Graphlib.Std.Partition.equiv scc
+        (Format.asprintf "%a" Method_id.pp m1)
+        (Format.asprintf "%a" Method_id.pp m2)
 
 let is_mutually_recursive scc (fn1 : Cfg.Fn.t) (fn2 : Cfg.Fn.t) =
   methods_mutually_recursive scc fn1.method_id fn2.method_id

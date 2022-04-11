@@ -5,6 +5,8 @@ open Syntax
 
 (** Demanded Summarization Graph : per-procedure DAIGs interoperating to perform summary-based interprocedural analysis *)
 module Make (Dom : Abstract.Dom) : sig
+  module Dom : module type of Abstract.DomWithDataStructures (Dom)
+
   module D : Daig.Sig with type absstate := Dom.t
   (** underlying intra-procedural DAIGs *)
 
@@ -14,7 +16,7 @@ module Make (Dom : Abstract.Dom) : sig
   (*module R : Relation.Sig with type state := Dom.t*)
   (** relations over abstract states, representing summaries *)
 
-  type t
+  type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
 
   val print_stats : t pp
 
@@ -52,5 +54,13 @@ module Make (Dom : Abstract.Dom) : sig
     Dom.t list * t
   (** query for the abstract state at some [loc] under _any_ reachable [entry_state] precondition,
         exploring back to the specified [entrypoints]
-    *)
+  *)
+
+  val drop_daigs : t -> t
+
+  val dirty_interproc_deps : ?ctx:Dom.t -> Cfg.Fn.t -> t -> t
+
+  val f0_daigs : t -> D.t list
+
+  val check_deps : t -> unit
 end

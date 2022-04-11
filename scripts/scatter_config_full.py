@@ -62,14 +62,14 @@ plt.rc('xtick',labelsize='large')
 plt.rc('ytick',labelsize='large')
 
 #linear axes
-plt.axis([0,3000,0,30000])
+plt.axis([0,2500,0,5000])
 
 
 plt.ylabel(r"Analysis Time (ms)")
 plt.xlabel(r"Cumulative Program Edits")
 
-plt.xticks([0,1000,2000,3000])
-plt.yticks([0,5000,10000,15000,20000,25000,30000])
+#plt.xticks([0,1000,2000,3000])
+#plt.yticks([0,5000,10000,15000,20000,25000,30000])
 
 for i in range(runs):
     plt.scatter(x_coords, raw[i], s=0.08, alpha=0.2, color=color,marker=",")

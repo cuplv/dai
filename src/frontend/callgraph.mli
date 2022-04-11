@@ -11,7 +11,11 @@ type reverse_t
 type scc
 (** strongly-connected components of a callgraph, to detect mutual recursion *)
 
-type t = { forward : forward_t; reverse : reverse_t; scc : scc }
+type t = { forward : forward_t; reverse : reverse_t; scc : scc option }
+
+val empty : t
+
+val add : caller:Cfg.Fn.t -> callee:Cfg.Fn.t -> t -> t
 
 val deserialize : fns:Cfg.Fn.t list -> Src_file.t -> t
 (** deserialize a forward callgraph as in [deserialize_forward], and construct the reversed version and strongly-connected components partition*)
@@ -29,9 +33,9 @@ val callees : callsite:Ast.Stmt.t -> caller_method:Method_id.t -> cg:forward_t -
 
 val is_syntactically_compatible : Ast.Stmt.t -> Cfg.Fn.t -> bool
 
-val is_mutually_recursive : scc -> Cfg.Fn.t -> Cfg.Fn.t -> bool
+val is_mutually_recursive : scc option -> Cfg.Fn.t -> Cfg.Fn.t -> bool
 
-val methods_mutually_recursive : scc -> Method_id.t -> Method_id.t -> bool
+val methods_mutually_recursive : scc option -> Method_id.t -> Method_id.t -> bool
 
 val reverse : fns:Cfg.Fn.t list -> forward_t -> reverse_t
 

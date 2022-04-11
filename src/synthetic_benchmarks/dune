@@ -1,0 +1,6 @@
+(executable
+ (name exec)
+ (modules exec random_edits)
+ (libraries dai frontend analysis domain syntax)
+ (preprocess (pps ppx_let))
+)

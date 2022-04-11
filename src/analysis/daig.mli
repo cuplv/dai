@@ -6,14 +6,44 @@ open Syntax
 module type Sig = sig
   type absstate
 
-  type t
-
   (** names are opaque from outside a DAIG, except for comparison, hashing, and sexp utilities (for use in hashsets/maps) *)
   module Name : sig
     type t [@@deriving compare, hash, sexp_of]
 
     val pp : t pp
   end
+
+  module Ref : sig
+    type t =
+      | Stmt of { mutable stmt : Ast.Stmt.t; name : Name.t }
+      | AState of { mutable state : absstate option; name : Name.t }
+    [@@deriving sexp_of, equal, compare]
+
+    val name : t -> Name.t
+
+    val hash : t -> int
+
+    val pp : t pp
+  end
+
+  module Comp : sig
+    type t = [ `Transfer | `Join | `Widen | `Fix | `Transfer_after_fix of Cfg.Loc.t ]
+    [@@deriving compare, equal, hash, sexp_of]
+
+    val pp : t pp
+
+    val to_string : t -> string
+  end
+
+  module Opaque_ref : module type of struct
+    include Regular.Std.Opaque.Make (Ref)
+
+    type t = Ref.t
+  end
+
+  module G : module type of Graph.Make (Opaque_ref) (Comp)
+
+  type t = G.t
 
   val of_cfg : entry_state:absstate -> cfg:Cfg.t -> fn:Cfg.Fn.t -> t
   (** Construct a DAIG for a procedure with body [cfg] and metadata [fn], with [init_state] at the procedure entry *)

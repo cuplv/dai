@@ -102,7 +102,7 @@ module Make (Dom : Abstract.Dom) = struct
           match ctx with
           | None ->
               interproc_deps := Map.remove !interproc_deps fn;
-              Map.fold fn_deps ~init:Set.empty ~f:(fun ~key:_ ~data acc -> Set.union acc data)
+              Map.fold fn_deps ~init:Set.empty ~f:(fun ~key:_ ~data -> Set.union data)
           | Some ctx -> (
               match Map.find fn_deps ctx with
               | None -> Set.empty
@@ -130,6 +130,17 @@ module Make (Dom : Abstract.Dom) = struct
         with D.Ref_not_found _ -> true
       in
       interproc_deps := Map.map !interproc_deps ~f:(Map.map ~f:(Set.filter ~f:(is_stale >> not)))
+
+    exception Missing_dep
+
+    let assert_on ~caller ~callee_nm =
+      let callee =
+        Map.keys !interproc_deps
+        |> List.find_exn ~f:(fun (fn : Cfg.Fn.t) -> String.equal callee_nm fn.method_id.method_name)
+      in
+      let callee_deps = Map.find_exn !interproc_deps callee in
+      if not (Map.exists callee_deps ~f:(Set.exists ~f:(fun { fn; _ } -> Cfg.Fn.equal fn caller)))
+      then raise Missing_dep
   end
 
   type t = (Cfg.t * D.t Dom.Map.t) Cfg.Fn.Map.t
@@ -221,33 +232,60 @@ module Make (Dom : Abstract.Dom) = struct
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
         (daig, Map.set dsg ~key:fn ~data:(cfg, daigs))
 
+  let check_deps (g : t) =
+    Map.iteri g ~f:(fun ~key:caller ~data:(_, daigs) ->
+        Map.iteri daigs ~f:(fun ~key:_ ~data:daig ->
+            Sequence.iter (D.G.nodes daig) ~f:(fun rc ->
+                match rc with
+                | D.Ref.Stmt { stmt = Syntax.Ast.Stmt.Call { meth; _ }; _ } -> (
+                    match D.G.Node.succs rc daig |> Sequence.hd_exn with
+                    | AState { state = Some phi; _ }
+                      when (not (Dom.is_bot phi))
+                           && not (String.equal caller.method_id.method_name meth) -> (
+                        try Dep.assert_on ~caller ~callee_nm:meth
+                        with Dep.Missing_dep | Not_found_s _ ->
+                          D.dump_dot daig ~filename:(abs_of_rel_path "missing_dep.dot");
+                          failwith (Format.asprintf "missing dep: %a -> %s" Cfg.Fn.pp caller meth))
+                    | _ -> ())
+                | _ -> ())))
+
   (* dirty [fn] in [dsg], recursively dirtying its dependencies and affected summaries.
    * [ctx], if provided, restricts dirtying to a particular context
    *)
-  let rec dirty_interproc_deps ?ctx dsg fn =
+  let rec dirty_interproc_deps ?ctx fn dsg =
     (match ctx with Some pre -> Summary.dirty ~pre fn | None -> Summary.dirty fn);
-    let deps = Dep.pop ~ctx ~fn in
-    Set.fold deps ~init:dsg ~f:(fun dsg dep ->
-        let dsg =
-          match Map.find dsg dep.fn >>= (snd >> flip Map.find dep.ctx) with
-          | None -> dsg
-          | Some dep_daig ->
-              let dep_daig =
-                try D.dirty dep.nm dep_daig
-                with D.Ref_not_found _ ->
-                  (* dependency was in a loop unrolling that has since been dirtied, no harm done *)
-                  dep_daig
-              in
-              D.assert_wf dep_daig;
-              set_daig dsg dep_daig dep.fn dep.ctx
-        in
-        dirty_interproc_deps ~ctx:dep.ctx dsg dep.fn)
+    if Option.is_none ctx then
+      match Map.find dsg fn with
+      | None -> dsg
+      | Some (_, daigs) ->
+          Map.keys daigs |> List.fold ~init:dsg ~f:(fun dsg ctx -> dirty_interproc_deps ~ctx fn dsg)
+    else
+      let deps = Dep.pop ~ctx ~fn in
+      Set.fold deps ~init:dsg ~f:(fun dsg dep ->
+          if Cfg.Fn.equal fn dep.fn && Option.exists ctx ~f:(Dom.equal dep.ctx) then dsg
+          else
+            match Map.find dsg dep.fn >>= (snd >> flip Map.find dep.ctx) with
+            | None -> dsg
+            | Some dep_daig ->
+                let dep_daig' =
+                  try D.dirty dep.nm dep_daig
+                  with D.Ref_not_found _ ->
+                    (* dependency was in a loop unrolling that has since been dirtied, no harm done *)
+                    dep_daig
+                in
+                D.assert_wf dep_daig';
+                set_daig dsg dep_daig' dep.fn dep.ctx)
+      |> fun dsg ->
+      Set.fold deps ~init:dsg ~f:(fun dsg dep ->
+          if Cfg.Fn.equal fn dep.fn && Option.exists ctx ~f:(Dom.equal dep.ctx) then dsg
+          else dirty_interproc_deps ~ctx:dep.ctx dep.fn dsg)
 
   let summarize_with_callgraph (dsg : t) fields (cg : Callgraph.t) (caller : Cfg.Fn.t)
       caller_entry_state ~callsite:(callsite, nm) caller_state =
     let open Option.Monad_infix in
     let callees = Callgraph.callees ~callsite ~caller_method:caller.method_id ~cg:cg.forward in
-    if List.is_empty callees then Some (Dom.approximate_missing_callee ~caller_state ~callsite)
+    if List.is_empty callees then (*failwith "no missing callees in synthetic benchmarks"*)
+      Some (Dom.approximate_missing_callee ~caller_state ~callsite)
     else
       let is_exc =
         match callsite with
@@ -310,15 +348,16 @@ module Make (Dom : Abstract.Dom) = struct
                       match D.read_by_loc exit_loc daig with
                       | Some phi -> Some (Dom.join acc_poststate phi)
                       | None -> acc_result
-                    else if (* case (4) *)
-                            D.is_solved exit_loc daig then
+                    else
                       let _ = add_dep ~caller:(nm, caller, caller_entry_state, callsite) in
-                      let new_poststate =
-                        let return_state = Option.value_exn (D.read_by_loc exit_loc daig) in
-                        Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
-                      in
-                      Some (Dom.join acc_poststate new_poststate)
-                    else None)
+                      if (* case (4) *)
+                         D.is_solved exit_loc daig then
+                        let new_poststate =
+                          let return_state = Option.value_exn (D.read_by_loc exit_loc daig) in
+                          Dom.return ~callee ~caller ~callsite ~caller_state ~return_state ~fields
+                        in
+                        Some (Dom.join acc_poststate new_poststate)
+                      else None)
 
   let callee_subqueries_of_summ_qry (dsg : t) fields ~callsite ~caller_state ~caller_entry_state
       ~(cg : Callgraph.t) caller_method =
@@ -533,7 +572,7 @@ module Make (Dom : Abstract.Dom) = struct
         | Delete_function { method_id } -> (
             let loc_map = Loc_map.remove_fn loc_map method_id in
             match Cfg.Fn.Map.fn_by_method_id method_id dsg with
-            | Some fn -> (loc_map, dirty_interproc_deps (Map.remove dsg fn) fn)
+            | Some fn -> (loc_map, dirty_interproc_deps fn (Map.remove dsg fn))
             | None ->
                 failwith
                   (Format.asprintf "Can't remove function %a: does not exist in DAIG" Method_id.pp
@@ -563,7 +602,7 @@ module Make (Dom : Abstract.Dom) = struct
                      method_id)
             | Some fn ->
                 let cfg, daigs = Map.find_exn dsg fn in
-                let dsg = dirty_interproc_deps dsg fn in
+                let dsg = dirty_interproc_deps fn dsg in
                 let cfg_edit =
                   Tree_diff.apply_edit edit loc_map cfg ~ret:fn.exit ~exc:fn.exc_exit
                 in
@@ -573,6 +612,14 @@ module Make (Dom : Abstract.Dom) = struct
                 (*Map.iter new_daigs ~f:D.assert_wf;*)
                 (cfg_edit.new_loc_map, Map.set dsg ~key:fn ~data:(cfg_edit.cfg, new_daigs))))
     $> (snd >> Dep.cleanup)
+
+  let drop_daigs (g : t) = Cfg.Fn.Map.map g ~f:(fun (cfg, _) -> (cfg, Dom.Map.empty))
+
+  let f0_daigs (g : t) =
+    let fn =
+      fns g |> List.find_exn ~f:(fun (fn : Cfg.Fn.t) -> String.equal "f0" fn.method_id.method_name)
+    in
+    Cfg.Fn.Map.find g fn |> function None -> [] | Some (_cfg, daigs) -> Map.data daigs
 end
 
 open Make (Array_bounds)

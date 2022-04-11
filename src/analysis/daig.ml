@@ -5,13 +5,43 @@ open Syntax
 module type Sig = sig
   type absstate
 
-  type t
-
   module Name : sig
     type t [@@deriving compare, hash, sexp_of]
 
     val pp : t pp
   end
+
+  module Ref : sig
+    type t =
+      | Stmt of { mutable stmt : Ast.Stmt.t; name : Name.t }
+      | AState of { mutable state : absstate option; name : Name.t }
+    [@@deriving sexp_of, equal, compare]
+
+    val name : t -> Name.t
+
+    val hash : t -> int
+
+    val pp : t pp
+  end
+
+  module Comp : sig
+    type t = [ `Transfer | `Join | `Widen | `Fix | `Transfer_after_fix of Cfg.Loc.t ]
+    [@@deriving compare, equal, hash, sexp_of]
+
+    val pp : t pp
+
+    val to_string : t -> string
+  end
+
+  module Opaque_ref : module type of struct
+    include Regular.Std.Opaque.Make (Ref)
+
+    type t = Ref.t
+  end
+
+  module G : module type of Graph.Make (Opaque_ref) (Comp)
+
+  type t = G.t
 
   val of_cfg : entry_state:absstate -> cfg:Cfg.t -> fn:Cfg.Fn.t -> t
 
@@ -248,7 +278,7 @@ module Make (Dom : Abstract.Dom) = struct
 
       let is_stmt = is_astate >> not
 
-      let is_empty = function AState { state = None; name = _ } -> true | _ -> false
+      let is_empty r = match r with AState { state = None; name = _ } -> true | _ -> false
 
       let dirty = function
         | AState a -> a.state <- None
@@ -471,10 +501,11 @@ module Make (Dom : Abstract.Dom) = struct
       and pre_widens =
         back_edges >>| fun e ->
         let l = Cfg.dst e in
-        let l_bar =
-          Option.fold loop_iteration_ctx ~init:(name_of_loc l) ~f:(fun nm ic ->
-              List.fold ic ~init:nm ~f:(fun acc (i, lh) -> Name.wrap_iterate i lh acc))
-        in
+        let l_bar = name_of_loc l in
+        (* let l_bar =
+           Option.fold loop_iteration_ctx ~init:(name_of_loc l) ~f:(fun nm ic ->
+               List.fold ic ~init:nm ~f:(fun acc (i, lh) -> Name.wrap_iterate i lh acc))
+           in*)
         let l_bar_zero = Name.wrap_iterate 0 l l_bar in
         let l_bar_one = Name.wrap_iterate 1 l l_bar in
         Ref.AState { state = None; name = Name.Prod (l_bar_zero, l_bar_one) }
@@ -485,10 +516,11 @@ module Make (Dom : Abstract.Dom) = struct
     let cycle_refs : Ref.t list =
       back_edges >>= fun e ->
       let l = Cfg.dst e in
-      let l_bar =
-        Option.fold loop_iteration_ctx ~init:(name_of_loc l) ~f:(fun nm ic ->
-            List.fold ic ~init:nm ~f:(fun acc (i, lh) -> Name.wrap_iterate i lh acc))
-      in
+      let l_bar = name_of_loc l in
+      (* let l_bar =
+         Option.fold loop_iteration_ctx ~init:(name_of_loc l) ~f:(fun nm ic ->
+             List.fold ic ~init:nm ~f:(fun acc (i, lh) -> Name.wrap_iterate i lh acc))
+         in*)
       let l_bar_zero = Name.wrap_iterate 0 l l_bar in
       let l_bar_one = Name.wrap_iterate 1 l l_bar in
 
@@ -760,9 +792,6 @@ module Make (Dom : Abstract.Dom) = struct
               | Some r -> r
               | None -> Ref.AState { state = None; name = increment_iteration loop_head name }
             in
-            (* Format.printf "\tADDING NEW REF: %a\n" Name.pp (Ref.name r);
-               Format.printf "\tHAVE EXISTING REF WITH NAME? %b\n"
-                 (G.nodes daig |> Sequence.exists ~f:(Ref.equal r));*)
             r :: acc
         | _ -> acc)
     in
@@ -792,7 +821,6 @@ module Make (Dom : Abstract.Dom) = struct
     List.fold all_new_edges ~init:daig_without_fix_edges ~f:(flip G.Edge.insert)
 
   let dirty_from (r : Ref.t) (daig : t) =
-    dump_dot daig ~filename:(abs_of_rel_path "predirty.dot");
     let change_prop_step acc n =
       let outgoing_edges = G.Node.outputs n daig in
       if Seq.is_empty outgoing_edges then
@@ -894,7 +922,10 @@ module Make (Dom : Abstract.Dom) = struct
       | _ ->
           failwith "malformed DAIG -- loop fixpoints are always named by their syntactic location")
 
-  let dirty (nm : Name.t) (daig : t) = dirty_from (ref_by_name_exn nm daig) daig
+  let dirty (nm : Name.t) (daig : t) =
+    let r = ref_by_name_exn nm daig in
+    Ref.dirty r;
+    dirty_from r daig
 
   (** IMPURE -- possibly mutates argument [g] by computing and filling empty ref cells
    * Return value is a pair, consisting of the query result (either that ref-cell, guaranteed to be nonempty, or a query for a requisite procedure summary), and a new daig [t] reflecting possible changes to the DAIG structure
@@ -1088,12 +1119,13 @@ module Make (Dom : Abstract.Dom) = struct
         (* statement edges previously from [at_loc], to be renamed to now be from [added_loc]*)
         let stmts_to_rename =
           List.map old_succ_edges ~f:(fun e ->
-              Sequence.find_exn (G.Node.inputs (G.Edge.dst e) daig) ~f:(G.Edge.src >> Ref.is_stmt))
+              Sequence.find_exn (G.Node.inputs (G.Edge.dst e) daig) ~f:(G.Edge.src >> Ref.is_stmt)
+              |> G.Edge.src)
         in
-        let rename_stmt daig stmt_edge =
-          let old_stmt_node = G.Edge.src stmt_edge in
+        let rename_stmt daig old_stmt_node =
           (* two cases: old_stmt_node is named `l->l'` or `i.l->l'`;
-             in each case, replace l by added_loc.
+             in each case, replace l by added_loc in old_stmt_node and
+             its outgoing edges.
           *)
           let new_stmt_node =
             match old_stmt_node with
@@ -1105,8 +1137,10 @@ module Make (Dom : Abstract.Dom) = struct
                 failwith
                   (Format.asprintf "malformed name for statement ref-cell: %a" Name.pp (Ref.name r))
           in
-          G.Node.remove (G.Edge.src stmt_edge) daig
-          |> G.Edge.(insert (create new_stmt_node (dst stmt_edge) (label stmt_edge)))
+          let old_stmt_edges = G.Node.outputs old_stmt_node daig in
+          G.Node.remove old_stmt_node daig |> fun init ->
+          Sequence.fold old_stmt_edges ~init ~f:(fun g e ->
+              G.Edge.(insert (create new_stmt_node (dst e) (label e))) g)
         in
         let cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
         (* (1) construct a DAIG segment for the added region
@@ -1117,14 +1151,16 @@ module Make (Dom : Abstract.Dom) = struct
         let new_daig_segment =
           of_region_cfg ~cfg ~entry_ref:ref_at_loc ~entry:at_loc
             ~loop_iteration_ctx:(Name.iter_ctx (Ref.name ref_at_loc))
-            ~extra_back_edges:[] ()
+            ~extra_back_edges:[] ~exit:(added_loc_ref, added_loc) ()
         in
         let unioned_daig = Graph.union (module G) daig new_daig_segment in
         let rebased_daig =
           List.fold old_succ_edges ~init:unioned_daig ~f:(flip G.Edge.remove) |> fun d ->
           List.fold new_succ_edges ~init:d ~f:(flip G.Edge.insert)
         in
-        List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt
+        let res = List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt in
+        dump_dot ~filename:(abs_of_rel_path "edited_daig.dot") res;
+        res
     | Modify_statements { method_id = _; from_loc; to_loc; new_stmts = _ } -> (
         let from_ref = ref_at_loc_exn ~loc:from_loc daig in
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
@@ -1288,17 +1324,17 @@ module Make (Dom : Abstract.Dom) = struct
         List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt
 
   let assert_wf g =
-    let is_wf = ref true in
     Sequence.iter (G.nodes g) ~f:(fun rc ->
         if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
           Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
-          is_wf := false)
+          assert false)
         else if
-          not @@ (Ref.is_empty rc || Sequence.for_all (G.Node.preds rc g) ~f:(Ref.is_empty >> not))
+          let is_non_empty = not (Ref.is_empty rc) in
+          let has_empty_pred = Sequence.exists (G.Node.preds rc g) ~f:Ref.is_empty in
+          is_non_empty && has_empty_pred
         then (
           Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
-          is_wf := false);
-        assert !is_wf)
+          assert false))
 
   let total_astate_refs = G.nodes >> Seq.count ~f:Ref.is_astate
 
