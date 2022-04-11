@@ -3,11 +3,9 @@ open Import
 open Syntax
 
 (* use Make_env_with_heap to get a domain *)
-type t = Top | Null | NotNull | Bot [@@deriving hash, equal, sexp, compare]
+type nullness = Top | Null | NotNull | Bot [@@deriving hash, equal, sexp, compare]
 
-let not_null = NotNull
-
-let top = Top
+type t = nullness [@@deriving hash, equal, sexp, compare]
 
 let is_null_or_bot = function Null | Bot -> true | _ -> false
 

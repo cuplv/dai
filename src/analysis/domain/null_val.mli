@@ -1,10 +1,8 @@
 (* open Syntax *)
 
-include Abstract.Val
+type nullness = Top | Null | NotNull | Bot
 
-val not_null : t
-
-val top : t
+include Abstract.Val with type t = nullness
 
 val is_null_or_bot : t -> bool
 
