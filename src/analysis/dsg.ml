@@ -95,8 +95,7 @@ module Make (Dom : Abstract.Dom) (Ctx : Context.Sig) = struct
     (*Format.printf
       "[DIRTYING] %a from %a in %a\n" Cfg.Fn.pp fn Cfg.Loc.pp loc Ctx.pp ctx ;*)
     match Map.find dsg fn >>= (snd >> flip Map.find ctx) with
-    | Some daig when Option.is_none (D.read_by_loc loc daig) ->
-        dsg
+    | Some daig when Option.is_none (D.read_by_loc loc daig) -> dsg
     | Some daig ->
         let affected_callsites = D.reachable_callsites loc daig in
         let dsg = set_daig dsg (D.dirty_by_loc loc daig) fn ctx in
