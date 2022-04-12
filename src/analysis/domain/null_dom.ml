@@ -45,6 +45,10 @@ module Env = struct
 
   let forget vars env = List.fold vars ~init:env ~f:Map.remove
 
+  let vars_to_top vars env =
+    List.fold vars ~init:env ~f:(fun env var ->
+        set ~key:var ~nullness:Null_val.Top ~aaddr:Addr.Abstract.empty env)
+
   let find (env : t) var = Map.find env var
 end
 
@@ -81,22 +85,27 @@ module Heap = struct
         (Option.value_map ~default:(nullness, aaddr) ~f:(fun (k_nullness, k_aaddr) ->
              (Null_val.join nullness k_nullness, Addr.Abstract.union aaddr k_aaddr)))
 
+  let addrs_of_map =
+    Map.fold ~init:Addr.Set.empty ~f:(fun ~key:_ ~data:(_, addrs) -> Set.union addrs)
+
+  let rec reachable_addrs roots heap =
+    if Map.is_empty heap || Set.is_empty roots then roots
+    else
+      let rooted, unexplored =
+        Map.partition_mapi heap ~f:(fun ~key:(a, _) ~data ->
+            if Set.mem roots a then First data else Second data)
+      in
+      Set.union roots (reachable_addrs (addrs_of_map rooted) unexplored)
+
   (** project out the subheap reachable from env *)
   let project (heap : t) (env : Env.t) : t =
-    let addrs_of_map =
-      Map.fold ~init:Addr.Set.empty ~f:(fun ~key:_ ~data:(_, addrs) -> Set.union addrs)
-    in
-    let rec reachable_addrs roots heap =
-      if Map.is_empty heap || Set.is_empty roots then roots
-      else
-        let rooted, unexplored =
-          Map.partition_mapi heap ~f:(fun ~key:(a, _) ~data ->
-              if Set.mem roots a then First data else Second data)
-        in
-        Set.union roots (reachable_addrs (addrs_of_map rooted) unexplored)
-    in
     let footprint = reachable_addrs (addrs_of_map env) heap in
     Map.filter_keys heap ~f:(fst >> Set.mem footprint)
+
+  let reachable_to_top addrs (heap : t) =
+    let footprint = reachable_addrs addrs heap in
+    Map.mapi heap ~f:(fun ~key:(addr, _) ~data ->
+        if Set.mem footprint addr then (Null_val.Top, Addr.Abstract.empty) else data)
 end
 
 type t = (Env.t * Heap.t) option [@@deriving compare, equal, hash, sexp]
@@ -157,7 +166,7 @@ let forget_vars vars (phi : t) : t =
       let vars_to_forget = Map.keys env |> List.filter ~f:(Set.mem vars) in
       (Env.forget vars_to_forget env, heap))
 
-let forget_addrs (heap : Heap.t) addrs =
+let _forget_addrs (heap : Heap.t) addrs =
   Map.filter_keys heap ~f:(fun (addr, _) -> List.mem addrs addr ~equal:( = ))
 
 let forget_used_tmp_vars stmt (state : t) : t =
@@ -165,25 +174,26 @@ let forget_used_tmp_vars stmt (state : t) : t =
   forget_vars used_tmps state
 
 (* TODO(archerd): pass on state *)
-let rec eval_expr (state : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
+let rec eval_expr (state : t) : Ast.Expr.t -> t * (Null_val.t * Addr.Abstract.t) =
   let env, heap =
     Option.value_exn state
     (* ~default:(Env.empty, Heap.empty) *)
-    (* TODO(archerd): double check this default *)
-    (* I think this is fine because when it is called, state should always be not bottom *)
+    (* TODO(archerd): double check this default, it might not apply anymore *)
   in
   let open Ast in
   function
   | Expr.Var v -> (
-      match Env.find env v with Some value -> value | None -> (Null_val.Top, Addr.Abstract.empty))
-  | Expr.Lit l -> (Null_val.of_lit l, Addr.Abstract.empty)
+      match Env.find env v with
+      | Some value -> (state, value)
+      | None -> (state, (Null_val.Top, Addr.Abstract.empty)))
+  | Expr.Lit l -> (state, (Null_val.of_lit l, Addr.Abstract.empty))
   | Expr.Binop { l; op; r } ->
-      let vl, aaddrl = eval_expr state l in
-      let vr, aaddrr = eval_expr state r in
-      (Null_val.eval_binop vl op vr, Addr.Abstract.union aaddrl aaddrr)
+      let state', (vl, aaddrl) = eval_expr state l in
+      let state'', (vr, aaddrr) = eval_expr state' r in
+      (state'', (Null_val.eval_binop vl op vr, Addr.Abstract.union aaddrl aaddrr))
   | Expr.Unop { op; e } ->
-      let v, aaddr = eval_expr state e in
-      (Null_val.eval_unop op v, aaddr)
+      let state', (v, aaddr) = eval_expr state e in
+      (state', (Null_val.eval_unop op v, aaddr))
   | Expr.Deref { rcvr; field } ->
       let rcvr_state = Env.find env rcvr in
       (* TODO(archerd): check the state of the obj? update it to NotNull (this would require changing the signiture of the function)? *)
@@ -197,30 +207,31 @@ let rec eval_expr (state : t) : Ast.Expr.t -> Null_val.t * Addr.Abstract.t =
               |> List.map ~f:(fun addr -> Heap.find heap addr field)
               |> List.filter_opt)
         in
-        let common_state =
+        let common_value =
           List.reduce field_states ~f:(fun (null_acc, aaddr_acc) (null_new, aaddr_new) ->
               (Null_val.join null_acc null_new, Addr.Abstract.union aaddr_acc aaddr_new))
         in
-        Option.value common_state ~default:(Null_val.Top, Addr.Abstract.empty)
+        let state' =
+          match rcvr_state with
+          | None ->
+              Some
+                (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr:Addr.Abstract.empty env, heap)
+          | Some (Null_val.NotNull, aaddr) | Some (Null_val.Top, aaddr) ->
+              Some (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr env, heap)
+          | Some (Null_val.Bot, _) | Some (Null_val.Null, _) -> None
+        in
+        (state', Option.value common_value ~default:(Null_val.Top, Addr.Abstract.empty))
   | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _ | Expr.Method_ref _
   | Expr.Class_lit _ ->
-      (Null_val.Top, Addr.Abstract.empty)
+      (state, (Null_val.Top, Addr.Abstract.empty))
 (* failwith "expression not handled by this basic environment functor" *)
 
-(* TODO(archerd): could iterate over the aaddr instead of the map for efficiency *)
 let weak_update (heap : Heap.t) update_aaddr field (nullness, aaddr) =
   Set.fold update_aaddr ~init:heap ~f:(fun heap addr ->
       Heap.join_at_key ~key:(addr, field) ~nullness ~aaddr heap)
 
-(* Map.fold *)
-(*   ~f:(fun ~key:(addr, f) ~data:(data_nullness, data_aaddr) acc -> *)
-(*     if Addr.Abstract.mem aaddr addr && String.equal field f then *)
-(*       Map.set acc ~key:(addr, f) *)
-(*         ~data:(Null_val.join data_nullness new_nullness, Addr.Abstract.union data_aaddr new_aaddr) *)
-(*     else Map.add_exn acc ~key:(addr, f) ~data:(data_nullness, data_aaddr)) *)
-(*   ~init:Heap.empty heap *)
-
-let _strong_update (heap : Heap.t) aaddr field (new_nullness, new_aaddr) =
+(* TODO(archerd): this function is probably wrong, do not use *)
+let _strong_update_do_not_use (heap : Heap.t) aaddr field (new_nullness, new_aaddr) =
   Map.fold
     ~f:(fun ~key:(addr, f) ~data:(data_nullness, data_aaddr) acc ->
       if Addr.Abstract.mem aaddr addr && String.equal field f then
@@ -236,48 +247,55 @@ let rec interpret stmt (phi : t) : t =
       | Assign { lhs; rhs = Expr.Var v } when Map.mem env v ->
           Some (Map.set env ~key:lhs ~data:(Map.find_exn env v), heap)
       | Assign { lhs; rhs } ->
-          let nullness, aaddr = eval_expr phi rhs in
-          Some (Env.join_at_key env ~key:lhs ~nullness ~aaddr, heap)
+          let phi', (nullness, aaddr) = eval_expr phi rhs in
+          Option.map phi' ~f:(fun (env', heap') ->
+              (Env.join_at_key env' ~key:lhs ~nullness ~aaddr, heap'))
       | Assume (Binop { l; op = Binop.NEq; r = Expr.Lit Lit.Null }) ->
           (* assume l != null *)
-          if Null_val.is_null_or_bot (fst (eval_expr phi l)) then None else Some (env, heap)
+          if Null_val.is_null_or_bot (fst @@ snd (eval_expr phi l)) then None else Some (env, heap)
       | Assume (Unop { op = Unop.Not; e = Binop { l; op = Binop.Eq; r = Expr.Lit Lit.Null } }) ->
           (* assume !(l == null) *)
-          if Null_val.is_null_or_bot (fst (eval_expr phi l)) then None else Some (env, heap)
+          if Null_val.is_null_or_bot (fst @@ snd (eval_expr phi l)) then None else Some (env, heap)
       | Assume (Binop { l; op = Binop.Eq; r = Expr.Lit Lit.Null }) ->
           (* assume l == null *)
-          if Null_val.is_null_or_top (fst (eval_expr phi l)) then Some (env, heap) else None
+          if Null_val.is_null_or_top (fst @@ snd (eval_expr phi l)) then Some (env, heap) else None
       | Assume (Unop { op = Unop.Not; e = Binop { l; op = Binop.NEq; r = Expr.Lit Lit.Null } }) ->
           (* assume !(l != null) *)
-          if Null_val.is_null_or_top (fst (eval_expr phi l)) then Some (env, heap) else None
+          if Null_val.is_null_or_top (fst @@ snd (eval_expr phi l)) then Some (env, heap) else None
       | Assume e -> (
-          match Null_val.truthiness (fst (eval_expr phi e)) with
-          | `T | `Either -> Some (env, heap)
+          let phi', e_value = eval_expr phi e in
+          match Null_val.truthiness (fst e_value) with
+          | `T | `Either -> phi'
           | `F | `Neither -> None)
-      | Skip -> Some (env, heap)
-      | Expr _ -> Some (env, heap)
-      | Write { rcvr; field; rhs } -> (
+      | Skip -> phi
+      | Expr e -> fst (eval_expr phi e)
+      | Write { rcvr; field; rhs } ->
           if
+            String.equal rcvr "this"
             (* TODO(archerd): the handling of this receivers assumes that the field is not shadowed by a local variable,
              * which may not always be the case *)
-            String.equal rcvr "this"
           then interpret (Stmt.Assign { lhs = field; rhs }) phi
           else
-            let nullness, aaddr = eval_expr phi rhs in
             let rcvr_state = Env.find env rcvr in
-            let new_heap =
+            let phi' =
               match rcvr_state with
-              (* TODO(archerd): figure out the correct thing to do in the None case... *)
-              | None ->
-                  Printf.printf "Variable lookup for write failed: %s.%s\n" rcvr field;
-                  heap
-              | Some (_, rcvr_aaddr) -> weak_update heap rcvr_aaddr field (nullness, aaddr)
+              | Some (Null_val.NotNull, _) | None -> Some (env, heap)
+              | Some (Null_val.Top, aaddr) ->
+                  Some (Env.set env ~key:rcvr ~nullness:Null_val.NotNull ~aaddr, heap)
+              | Some (Null_val.Null, _) | Some (Null_val.Bot, _) -> None
             in
-            match rcvr_state with
-            | Some (Null_val.NotNull, _) | None -> Some (env, new_heap)
-            | Some (Null_val.Top, aaddr) ->
-                Some (Env.set env ~key:rcvr ~nullness:Null_val.Top ~aaddr, new_heap)
-            | Some (Null_val.Null, _) | Some (Null_val.Bot, _) -> None)
+            let phi'', (rhs_nullness, rhs_aaddr) = eval_expr phi' rhs in
+            Option.map phi'' ~f:(fun (env'', heap'') ->
+                let new_heap =
+                  match rcvr_state with
+                  | None ->
+                      (* TODO(archerd): figure out the correct thing to do in the None case... *)
+                      Printf.printf "Variable lookup for write failed: %s.%s\n" rcvr field;
+                      heap
+                  | Some (_, rcvr_aaddr) ->
+                      weak_update heap'' rcvr_aaddr field (rhs_nullness, rhs_aaddr)
+                in
+                (env'', new_heap))
       | Call _ -> failwith "should be handled by the call function?"
       | Array_write _ ->
           Some (env, heap)
@@ -303,7 +321,7 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) ~fields : t =
       match callsite with
       | Stmt.Call { rcvr; actuals; _ } | Stmt.Exceptional_call { rcvr; actuals; _ } ->
           let rcvr_nullness =
-            (* TODO(archerd): could be more precise in the null case *)
+            (* TODO(archerd): could be more precise in the null case, but in the return function *)
             Option.value_map (Env.find caller_env rcvr) ~default:Null_val.NotNull ~f:fst
           in
           if Null_val.is_null_or_bot rcvr_nullness then bottom ()
@@ -328,15 +346,17 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) ~fields : t =
                 |> Map.to_alist
                 |> List.map ~f:(fun ((_, field), data) -> (field, data))
             in
-            let callee_env =
+            (* TODO(archerd): the caller_state' needs to be propagated somewhere... outside of this function *)
+            let caller_state', callee_env =
               List.(
-                fold (zip_exn callee.formals actuals) ~init:Env.empty
-                  ~f:(fun env (formal, actual) ->
-                    let nullness, aaddr = eval_expr caller_state actual in
-                    Env.join_at_key env ~key:formal ~nullness ~aaddr))
-              |> fun env ->
-              List.fold rcvr_field_bindings ~init:env ~f:(fun acc (field, (nullness, aaddr)) ->
-                  Env.join_at_key acc ~key:field ~nullness ~aaddr)
+                fold (zip_exn callee.formals actuals) ~init:(caller_state, Env.empty)
+                  ~f:(fun (state, env) (formal, actual) ->
+                    let state', (nullness, aaddr) = eval_expr state actual in
+                    (state', Env.join_at_key env ~key:formal ~nullness ~aaddr)))
+              |> fun (state, env) ->
+              ( state,
+                List.fold rcvr_field_bindings ~init:env ~f:(fun acc (field, (nullness, aaddr)) ->
+                    Env.join_at_key acc ~key:field ~nullness ~aaddr) )
             in
             (* project the caller heap down to the fields of formal parameters *)
             (* TODO(archerd): Possible extension: track everything linked to by these entries, and everything in the heap *)
@@ -347,7 +367,8 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) ~fields : t =
             let _param_fields_heap =
               Map.filter_keys caller_heap ~f:(fun (addr, _) -> Set.mem param_fields_addrs addr)
             in
-            Some (callee_env, Heap.project caller_heap callee_env)
+            Option.map caller_state' ~f:(fun (_, caller_heap') ->
+                (callee_env, Heap.project caller_heap' callee_env))
       | s -> failwith (Format.asprintf "error: %a is not a callsite" Stmt.pp s))
 
 let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : t)
@@ -372,7 +393,9 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                      | None -> (
                          match Map.find caller_env rcvr with
                          | Some (_, aaddr) -> `AAddr aaddr
-                         | None -> Format.printf "return from `None: %s.%s to %a\n" rcvr meth Method_id.pp caller.method_id;
+                         | None ->
+                             Format.printf "return from `None: %s.%s to %a\n" rcvr meth Method_id.pp
+                               caller.method_id;
                              `None)
                  in
                  let callee_instance_fields =
@@ -381,10 +404,22 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                      Declared_fields.lookup_instance fields ~package:callee.method_id.package
                        ~class_name:callee.method_id.class_name
                  in
+                 let add_instance_fields_to_heap heap =
+                   Set.fold callee_instance_fields ~init:heap ~f:(fun heap fld ->
+                       let fld_val = Env.find return_env fld in
+                       Option.value_map fld_val ~default:heap ~f:(fun (fld_nullness, fld_aaddr) ->
+                           match rcvr_aaddr with
+                           | `AAddr aaddr ->
+                               weak_update heap aaddr fld (fld_nullness, fld_aaddr)
+                               (* Set.fold aaddr ~init:heap ~f:(fun heap addr -> *)
+                               (*     Map.set heap ~key:(addr, fld) ~data:(fld_nullness, fld_aaddr)) *)
+                           | `This | `Static | `None -> heap))
+                 in
                  let heap =
                    Map.merge_skewed caller_heap return_heap
                      ~combine:(fun ~key:_ (n1, a1) (n2, a2) ->
                        (Null_val.join n1 n2, Addr.Abstract.union a1 a2))
+                   |> add_instance_fields_to_heap
                  in
                  let _heap_strict =
                    (* transfer the return value fields *)
@@ -399,16 +434,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                          ~combine:(fun ~key:_ (n1, aaddr1) (n2, aaddr2) ->
                            (Null_val.join n1 n2, Addr.Abstract.union aaddr1 aaddr2)))
                    (* transfer the instance fields to the receiver's fields *)
-                   |> fun heap ->
-                   Set.fold callee_instance_fields ~init:heap ~f:(fun heap fld ->
-                       let fld_val = Env.find return_env fld in
-                       Option.value_map fld_val ~default:heap ~f:(fun (fld_nullness, fld_aaddr) ->
-                           match rcvr_aaddr with
-                           | `AAddr aaddr ->
-                               weak_update heap aaddr fld (fld_nullness, fld_aaddr)
-                               (* Set.fold aaddr ~init:heap ~f:(fun heap addr -> *)
-                               (*     Map.set heap ~key:(addr, fld) ~data:(fld_nullness, fld_aaddr)) *)
-                           | `This | `Static | `None -> heap))
+                   |> add_instance_fields_to_heap
                  in
                  (* (1) bind the receiver's abstract address if needed
                         and the instance fields for a this receiver, then
@@ -539,8 +565,8 @@ let approximate_missing_callee ~(caller_state : t) ~callsite : t =
   @@ Option.bind caller_state ~f:(fun (caller_env, caller_heap) ->
          match callsite with
          (* unknown constructor -- just bind the address and ignore the rest *)
-         | Ast.Stmt.Call { lhs = Some lhs; rcvr = _; meth ; actuals = _; alloc_site = Some a } ->
-           Format.printf "Approximating missing callee %s" meth ;
+         | Ast.Stmt.Call { lhs = Some lhs; rcvr; meth; actuals = _; alloc_site = Some a } ->
+             Format.printf "Approximating missing callee %s.%s\n" rcvr meth;
              let env =
                Env.set caller_env ~key:lhs ~nullness:Null_val.NotNull
                  ~aaddr:(Addr.Abstract.singleton a)
@@ -565,9 +591,10 @@ let approximate_missing_callee ~(caller_state : t) ~callsite : t =
          | Ast.Stmt.Call { lhs; rcvr; meth = _; actuals; alloc_site = None } ->
              (* let () = Printf.printf "approximating method %s\n" meth in *)
              (* for a call to an unknown function `x = o.foo(y1,y2,,...)`, we forget any constraints on:
-                (1) fields of rcvr o [work needed]
+                (1) fields of rcvr o [work needed when o is this]
                 (2) fields of actuals y_i
-                (3) address or value of lhs
+                    (2.5) reachable fields from rcvr and actuals
+                (3) address and value of lhs
                 conservatively assuming that receiver and actual fields are modified by the call
              *)
              let affected_vars =
@@ -575,24 +602,27 @@ let approximate_missing_callee ~(caller_state : t) ~callsite : t =
                |> if String.equal rcvr "this" then Fn.id else fun l -> rcvr :: l
              in
              let affected_addrs =
-               Env.get_addrs affected_vars caller_env
-               |> List.append
-                    (List.concat
-                       (List.filter_map actuals ~f:(function
-                         | Expr.Var _ -> None
-                         | expr -> Some (Set.to_list @@ snd @@ (eval_expr caller_state) expr))))
+               Set.add_list
+                 (Env.get_addrs affected_vars caller_env
+                 |> List.append
+                      (List.concat
+                         (List.filter_map actuals ~f:(function
+                           | Expr.Var _ -> None
+                           | expr -> Some (Set.to_list @@ snd @@ snd @@ eval_expr caller_state expr))))
+                 )
+                 Addr.Abstract.empty
              in
 
              let env =
-               Env.forget (Option.to_list lhs) caller_env
+               Env.vars_to_top (Option.to_list lhs) caller_env
                |>
-               if String.equal rcvr "this" then Env.forget []
+               if String.equal rcvr "this" then Env.vars_to_top []
                  (* TODO(archerd): should forget the fields of the current object,
                   * which are stored as local variables,
                   * so the fields need to be retrieved so they can be deleted. *)
                else Fn.id
              in
-             let heap = forget_addrs caller_heap affected_addrs in
+             let heap = Heap.reachable_to_top affected_addrs caller_heap in
              Some (env, heap)
          (* TODO(archerd): implement more Ast.Stmt.Call cases *)
          | Ast.Stmt.Exceptional_call _ -> caller_state
