@@ -23,7 +23,7 @@ module Mode = struct
       | Batch -> "batch")
 end
 
-module RE = Random_edits.Make (Domain.Unit_dom)
+module RE = Random_edits
 
 let rec apply_n_times ~n ~init ~f =
   if n <= 0 then init else (apply_n_times [@tailcall]) ~n:(pred n) ~init:(f init n) ~f
@@ -47,8 +47,8 @@ let run =
         flag "demand" no_arg
           ~doc:"demand-driven analysis: analyze only as needed to respond to queries"
       and qpe =
-        flag "qpe" (optional_with_default 5 int)
-          ~doc:"<X> If \"-demand\" flag is enabled, issue X queries between each edit.  Default 5."
+        flag "qpe" (optional_with_default 3 int)
+          ~doc:"<X> If \"-demand\" flag is enabled, issue X queries between each edit.  Default 3."
       in
       fun () ->
         let mode =
@@ -79,7 +79,6 @@ let run =
         Gc.set gc_settings;
 
         Random.init seed;
-        let module RE = Random_edits.Make (Domain.Array_bounds) in
         let g = RE.init () in
 
         let issue_demand_queries init =

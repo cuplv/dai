@@ -1,0 +1,10 @@
+#!/usr/bin/env zsh
+
+SEED=$1
+N=$2
+./_build/default/src/synthetic_benchmarks/exec.exe $N -seed $SEED
+./_build/default/src/synthetic_benchmarks/exec.exe $N -seed $SEED -i
+./_build/default/src/synthetic_benchmarks/exec.exe $N -seed $SEED -d
+./_build/default/src/synthetic_benchmarks/exec.exe $N -seed $SEED -d -i
+./scripts/average_queries out/log/dd_seed$SEED\_n$N\_qpe5.log
+./scripts/average_queries out/log/incr_dd_seed$SEED\_n$N\_qpe5.log

@@ -653,3 +653,10 @@ let approximate_missing_callee ~caller_state ~callsite =
 
 (** deferred to end of this file to avoid colliding with Dai.Import.(<=) *)
 let ( <= ) = implies
+
+let of_alist dims =
+  let man = Itv.get_man () in
+  let vars = Array.of_list_map dims ~f:(fst3 >> Var.of_string) in
+  let bindings = Array.of_list_map dims ~f:(fun (_, inf, sup) -> Interval.of_float inf sup) in
+  let env = Environment.make [||] vars in
+  (Addr_map.empty, Abstract1.of_box man env vars bindings)

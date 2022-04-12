@@ -668,10 +668,12 @@ module Make (Dom : Abstract.Dom) = struct
         match Ref.(name r1, name r2) with
         | Name.Loc _, Name.Iterate _ -> r1
         | Name.Iterate _, Name.Loc _ -> r2
-        | _ ->
+        | Name.Iterate (ic, _), Name.Iterate (ic', _) ->
+            if List.(length ic < length ic') then r1 else r2
+        | n, n' ->
             failwith
-              (Format.asprintf "error: malformed ref names at loop-head location %a" Cfg.Loc.pp loc)
-        )
+              (Format.asprintf "error: malformed ref names (%a, %a) at loop-head location %a"
+                 Name.pp n Name.pp n' Cfg.Loc.pp loc))
     | _ -> failwith "error: multiple refs found at given location"
 
   let is_solved loc daig = not @@ Ref.is_empty @@ ref_at_loc_exn ~loc daig

@@ -284,7 +284,8 @@ module Make (Dom : Abstract.Dom) = struct
       caller_entry_state ~callsite:(callsite, nm) caller_state =
     let open Option.Monad_infix in
     let callees = Callgraph.callees ~callsite ~caller_method:caller.method_id ~cg:cg.forward in
-    if List.is_empty callees then (*failwith "no missing callees in synthetic benchmarks"*)
+    if List.is_empty callees then
+      (*failwith "no missing callees in synthetic benchmarks"*)
       Some (Dom.approximate_missing_callee ~caller_state ~callsite)
     else
       let is_exc =
@@ -494,12 +495,12 @@ module Make (Dom : Abstract.Dom) = struct
   let rec loc_only_query ~(fn : Cfg.Fn.t) ~(loc : Cfg.Loc.t) ~(cg : Callgraph.t)
       ~(fields : Declared_fields.t) ~(entrypoints : Cfg.Fn.t list) (dsg : t) : Dom.t list * t =
     let callers = Callgraph.callers ~callee_method:fn.method_id ~reverse_cg:cg.reverse in
-    if List.is_empty callers then (
+    if List.is_empty callers then
       (*NOTE(benno): we can just query with \top as entry here soundly, but I want to know if it's happening a lot because it indicates some callgraphissues*)
-      if not @@ List.mem entrypoints fn ~equal:Cfg.Fn.equal then
-        Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;
+      (* if not @@ List.mem entrypoints fn ~equal:Cfg.Fn.equal then
+         Format.printf "warning: non-entrypoint function %a has no callers\n" Cfg.Fn.pp fn;*)
       let res, dsg = query dsg ~fn ~entry_state:(Dom.init ()) ~loc ~cg ~fields in
-      ([ res ], dsg))
+      ([ res ], dsg)
     else
       let rec_callers, nonrec_callers =
         List.partition_tf callers ~f:(Callgraph.is_mutually_recursive cg.scc fn)

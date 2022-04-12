@@ -8,5 +8,5 @@ def grouped(iterator, n):
     return zip(*args)
 
 with open(sys.argv[1], "r") as infile, open(sys.argv[1] + ".avgs", "w") as outfile:
-    for group in grouped(infile, 5):
+    for group in grouped(infile, 3):
         outfile.write(str(statistics.mean([float(x) for x in group])) + "\n")
