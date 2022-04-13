@@ -173,7 +173,6 @@ let forget_used_tmp_vars stmt (state : t) : t =
   let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
   forget_vars used_tmps state
 
-(* TODO(archerd): pass on state *)
 let rec eval_expr (state : t) : Ast.Expr.t -> t * (Null_val.t * Addr.Abstract.t) =
   let env, heap =
     Option.value_exn state
@@ -184,8 +183,13 @@ let rec eval_expr (state : t) : Ast.Expr.t -> t * (Null_val.t * Addr.Abstract.t)
   function
   | Expr.Var v -> (
       match Env.find env v with
-      | Some value -> (state, value)
-      | None -> (state, (Null_val.Top, Addr.Abstract.empty)))
+      | Some value ->
+          (state, value)
+          (* TODO(archerd): this: figure out how to handle the environment
+           *                    maybe just treat like a this.v if not found in the environment? *)
+      | None ->
+          eval_expr state (Ast.Expr.Deref { rcvr = "this"; field = v })
+          (* | None -> (state, (Null_val.Top, Addr.Abstract.empty)) *))
   | Expr.Lit l -> (state, (Null_val.of_lit l, Addr.Abstract.empty))
   | Expr.Binop { l; op; r } ->
       let state', (vl, aaddrl) = eval_expr state l in
@@ -199,28 +203,28 @@ let rec eval_expr (state : t) : Ast.Expr.t -> t * (Null_val.t * Addr.Abstract.t)
       (* TODO(archerd): check the state of the obj? update it to NotNull (this would require changing the signiture of the function)? *)
       (* TODO(archerd): the handling of this receivers assumes that the field is not shadowed by a local variable/argument,
        * which may not always be the case *)
-      if String.equal rcvr "this" then eval_expr state (Expr.Var field)
-      else
-        let field_states =
-          Option.value_map rcvr_state ~default:[] ~f:(function _, aaddr ->
-              aaddr |> Set.to_list
-              |> List.map ~f:(fun addr -> Heap.find heap addr field)
-              |> List.filter_opt)
-        in
-        let common_value =
-          List.reduce field_states ~f:(fun (null_acc, aaddr_acc) (null_new, aaddr_new) ->
-              (Null_val.join null_acc null_new, Addr.Abstract.union aaddr_acc aaddr_new))
-        in
-        let state' =
-          match rcvr_state with
-          | None ->
-              Some
-                (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr:Addr.Abstract.empty env, heap)
-          | Some (Null_val.NotNull, aaddr) | Some (Null_val.Top, aaddr) ->
-              Some (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr env, heap)
-          | Some (Null_val.Bot, _) | Some (Null_val.Null, _) -> None
-        in
-        (state', Option.value common_value ~default:(Null_val.Top, Addr.Abstract.empty))
+      (* if String.equal rcvr "this" then eval_expr state (Expr.Var field) *)
+      (* else *)
+      let field_states =
+        Option.value_map rcvr_state ~default:[] ~f:(function _, aaddr ->
+            aaddr |> Set.to_list
+            |> List.map ~f:(fun addr -> Heap.find heap addr field)
+            |> List.filter_opt)
+      in
+      let common_value =
+        List.reduce field_states ~f:(fun (null_acc, aaddr_acc) (null_new, aaddr_new) ->
+            (Null_val.join null_acc null_new, Addr.Abstract.union aaddr_acc aaddr_new))
+      in
+      let state' =
+        match rcvr_state with
+        | None ->
+            Printf.printf "variable lookup for dereference failed: %s.%s\n" rcvr field;
+            Some (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr:Addr.Abstract.empty env, heap)
+        | Some (Null_val.NotNull, aaddr) | Some (Null_val.Top, aaddr) ->
+            Some (Env.set ~key:rcvr ~nullness:Null_val.NotNull ~aaddr env, heap)
+        | Some (Null_val.Bot, _) | Some (Null_val.Null, _) -> None
+      in
+      (state', Option.value common_value ~default:(Null_val.Top, Addr.Abstract.empty))
   | Expr.Array_access _ | Expr.Array_literal _ | Expr.Array_create _ | Expr.Method_ref _
   | Expr.Class_lit _ ->
       (state, (Null_val.Top, Addr.Abstract.empty))
@@ -239,17 +243,21 @@ let _strong_update_do_not_use (heap : Heap.t) aaddr field (new_nullness, new_aad
       else Map.add_exn acc ~key:(addr, f) ~data:(data_nullness, data_aaddr))
     ~init:Heap.empty heap
 
-let rec interpret stmt (phi : t) : t =
+let (*rec*) interpret stmt (phi : t) : t =
   Option.bind phi ~f:(fun (env, heap) ->
       forget_used_tmp_vars stmt
       @@
       match stmt with
       | Assign { lhs; rhs = Expr.Var v } when Map.mem env v ->
           Some (Map.set env ~key:lhs ~data:(Map.find_exn env v), heap)
-      | Assign { lhs; rhs } ->
-          let phi', (nullness, aaddr) = eval_expr phi rhs in
-          Option.map phi' ~f:(fun (env', heap') ->
-              (Env.join_at_key env' ~key:lhs ~nullness ~aaddr, heap'))
+      | Assign { lhs; rhs } -> (
+          (* TODO(archerd): this: the check here is not good needs to be improved. *)
+          let lhs_value = Env.find env lhs in
+          match lhs_value with
+          | None (* -> interpret (Write { rcvr = "this"; field = lhs; rhs }) phi *) | Some _ ->
+              let phi', (nullness, aaddr) = eval_expr phi rhs in
+              Option.map phi' ~f:(fun (env', heap') ->
+                  (Env.join_at_key env' ~key:lhs ~nullness ~aaddr, heap')))
       | Assume (Binop { l; op = Binop.NEq; r = Expr.Lit Lit.Null }) ->
           (* assume l != null *)
           if Null_val.is_null_or_bot (fst @@ snd (eval_expr phi l)) then None else Some (env, heap)
@@ -270,32 +278,32 @@ let rec interpret stmt (phi : t) : t =
       | Skip -> phi
       | Expr e -> fst (eval_expr phi e)
       | Write { rcvr; field; rhs } ->
-          if
-            String.equal rcvr "this"
-            (* TODO(archerd): the handling of this receivers assumes that the field is not shadowed by a local variable,
-             * which may not always be the case *)
-          then interpret (Stmt.Assign { lhs = field; rhs }) phi
-          else
-            let rcvr_state = Env.find env rcvr in
-            let phi' =
-              match rcvr_state with
-              | Some (Null_val.NotNull, _) | None -> Some (env, heap)
-              | Some (Null_val.Top, aaddr) ->
-                  Some (Env.set env ~key:rcvr ~nullness:Null_val.NotNull ~aaddr, heap)
-              | Some (Null_val.Null, _) | Some (Null_val.Bot, _) -> None
-            in
-            let phi'', (rhs_nullness, rhs_aaddr) = eval_expr phi' rhs in
-            Option.map phi'' ~f:(fun (env'', heap'') ->
-                let new_heap =
-                  match rcvr_state with
-                  | None ->
-                      (* TODO(archerd): figure out the correct thing to do in the None case... *)
-                      Printf.printf "Variable lookup for write failed: %s.%s\n" rcvr field;
-                      heap
-                  | Some (_, rcvr_aaddr) ->
-                      weak_update heap'' rcvr_aaddr field (rhs_nullness, rhs_aaddr)
-                in
-                (env'', new_heap))
+          (* if *)
+          (*   String.equal rcvr "this" *)
+          (*   (1* TODO(archerd): the handling of this receivers assumes that the field is not shadowed by a local variable, *)
+          (*    * which may not always be the case *1) *)
+          (* then interpret (Stmt.Assign { lhs = field; rhs }) phi *)
+          (* else *)
+          let rcvr_state = Env.find env rcvr in
+          let phi' =
+            match rcvr_state with
+            | Some (Null_val.NotNull, _) | None -> Some (env, heap)
+            | Some (Null_val.Top, aaddr) ->
+                Some (Env.set env ~key:rcvr ~nullness:Null_val.NotNull ~aaddr, heap)
+            | Some (Null_val.Null, _) | Some (Null_val.Bot, _) -> None
+          in
+          let phi'', (rhs_nullness, rhs_aaddr) = eval_expr phi' rhs in
+          Option.map phi'' ~f:(fun (env'', heap'') ->
+              let new_heap =
+                match rcvr_state with
+                | None ->
+                    (* TODO(archerd): figure out the correct thing to do in the None case... *)
+                    Printf.printf "Variable lookup for write failed: %s.%s\n" rcvr field;
+                    heap
+                | Some (_, rcvr_aaddr) ->
+                    weak_update heap'' rcvr_aaddr field (rhs_nullness, rhs_aaddr)
+              in
+              (env'', new_heap))
       | Call _ -> failwith "should be handled by the call function?"
       | Array_write _ ->
           Some (env, heap)
@@ -318,57 +326,70 @@ let arrayify_varargs (callee : Cfg.Fn.t) actuals formals (phi : t) : Expr.t list
 
 let call ~(callee : Cfg.Fn.t) ~callsite ~(caller_state : t) ~fields : t =
   Option.bind caller_state ~f:(fun (caller_env, caller_heap) ->
+      let constructor_alloc =
+        match callsite with Stmt.Call { alloc_site; _ } -> alloc_site | _ -> None
+      in
       match callsite with
-      | Stmt.Call { rcvr; actuals; _ } | Stmt.Exceptional_call { rcvr; actuals; _ } ->
-          let rcvr_nullness =
-            (* TODO(archerd): could be more precise in the null case, but in the return function *)
-            Option.value_map (Env.find caller_env rcvr) ~default:Null_val.NotNull ~f:fst
+      | Stmt.Call { rcvr; actuals; meth; _ } | Stmt.Exceptional_call { rcvr; actuals; meth; _ } ->
+          let rcvr_nullness, rcvr_aaddr =
+            (* TODO(archerd): could be more precise in the top case, but in the return function *)
+            Option.value (Env.find caller_env rcvr) ~default:(Null_val.NotNull, Addr.Abstract.empty)
+          in
+          let rcvr_aaddr =
+            Option.value_map constructor_alloc ~default:rcvr_aaddr ~f:Addr.Abstract.singleton
           in
           if Null_val.is_null_or_bot rcvr_nullness then bottom ()
           else
-            let actuals, caller_state =
+            let actuals, caller_state' =
               if List.(length actuals = length callee.formals) then (actuals, caller_state)
-              else arrayify_varargs callee actuals (List.length callee.formals) caller_state
+              else (
+                Printf.printf "Call using varargs to %s.%s (%i formals, %i actuals)\n" rcvr meth
+                  (List.length callee.formals) (List.length actuals);
+                arrayify_varargs callee actuals (List.length callee.formals) caller_state)
             in
-            (* re-scope the env to include only the formal parameters and rebind receiver fields to callee-local variables *)
-            (* TODO(archerd): Possible extension: track everything linked to by these entries *)
-            let rcvr_field_bindings =
-              if String.equal rcvr "this" then
-                let ({ package; class_name; _ } : Method_id.t) = callee.method_id in
-                Declared_fields.lookup ~package ~class_name fields |> fun { instance; _ } ->
-                List.filter_map (Set.to_list instance) ~f:(fun field ->
-                    Option.map (Env.find caller_env field) ~f:(fun data -> (field, data)))
-              else
-                let rcvr_aaddr =
-                  Map.find caller_env rcvr |> Option.value_map ~default:Addr.Abstract.empty ~f:snd
+            Option.bind caller_state' ~f:(fun (caller_env', _caller_heap') ->
+                (* re-scope the env to include only the formal parameters and rebind receiver fields to callee-local variables *)
+                let _rcvr_field_bindings =
+                  if String.equal rcvr "this" then
+                    let ({ package; class_name; _ } : Method_id.t) = callee.method_id in
+                    Declared_fields.lookup ~package ~class_name fields |> fun { instance; _ } ->
+                    List.filter_map (Set.to_list instance) ~f:(fun field ->
+                        Option.map (Env.find caller_env' field) ~f:(fun data -> (field, data)))
+                  else
+                    let rcvr_aaddr =
+                      Map.find caller_env' rcvr
+                      |> Option.value_map ~default:Addr.Abstract.empty ~f:snd
+                    in
+                    Map.filter_keys caller_heap ~f:(fun (addr, _) -> Set.mem rcvr_aaddr addr)
+                    |> Map.to_alist
+                    |> List.map ~f:(fun ((_, field), data) -> (field, data))
                 in
-                Map.filter_keys caller_heap ~f:(fun (addr, _) -> Set.mem rcvr_aaddr addr)
-                |> Map.to_alist
-                |> List.map ~f:(fun ((_, field), data) -> (field, data))
-            in
-            (* TODO(archerd): the caller_state' needs to be propagated somewhere... outside of this function *)
-            let caller_state', callee_env =
-              List.(
-                fold (zip_exn callee.formals actuals) ~init:(caller_state, Env.empty)
-                  ~f:(fun (state, env) (formal, actual) ->
-                    let state', (nullness, aaddr) = eval_expr state actual in
-                    (state', Env.join_at_key env ~key:formal ~nullness ~aaddr)))
-              |> fun (state, env) ->
-              ( state,
-                List.fold rcvr_field_bindings ~init:env ~f:(fun acc (field, (nullness, aaddr)) ->
-                    Env.join_at_key acc ~key:field ~nullness ~aaddr) )
-            in
-            (* project the caller heap down to the fields of formal parameters *)
-            (* TODO(archerd): Possible extension: track everything linked to by these entries, and everything in the heap *)
-            let param_fields_addrs =
-              Map.data callee_env |> List.map ~f:snd
-              |> List.fold ~init:(Set.empty (module Addr)) ~f:Set.union
-            in
-            let _param_fields_heap =
-              Map.filter_keys caller_heap ~f:(fun (addr, _) -> Set.mem param_fields_addrs addr)
-            in
-            Option.map caller_state' ~f:(fun (_, caller_heap') ->
-                (callee_env, Heap.project caller_heap' callee_env))
+                (* TODO(archerd): the caller_state'' needs to be propagated somewhere... outside of this function *)
+                let caller_state'', callee_env =
+                  List.(
+                    fold (zip_exn callee.formals actuals) ~init:(caller_state', Env.empty)
+                      ~f:(fun (state, env) (formal, actual) ->
+                        let state', (nullness, aaddr) = eval_expr state actual in
+                        (state', Env.join_at_key env ~key:formal ~nullness ~aaddr)))
+                  |> fun (state, env) ->
+                  ( state,
+                    if callee.method_id.static then Env.forget [ "this" ] env
+                    else Env.set env ~key:"this" ~nullness:rcvr_nullness ~aaddr:rcvr_aaddr
+                      (* List.fold rcvr_field_bindings ~init:env *)
+                      (*   ~f:(fun acc (field, (nullness, aaddr)) -> *)
+                      (*     Env.join_at_key acc ~key:field ~nullness ~aaddr) *) )
+                in
+                (* project the caller heap down to the fields of formal parameters *)
+                (* TODO(archerd): Possible extension: track everything linked to by these entries, and everything in the heap *)
+                let _param_fields_heap =
+                  let param_fields_addrs =
+                    Map.data callee_env |> List.map ~f:snd
+                    |> List.fold ~init:(Set.empty (module Addr)) ~f:Set.union
+                  in
+                  Map.filter_keys caller_heap ~f:(fun (addr, _) -> Set.mem param_fields_addrs addr)
+                in
+                Option.map caller_state'' ~f:(fun (_, caller_heap'') ->
+                    (callee_env, Heap.project caller_heap'' callee_env)))
       | s -> failwith (Format.asprintf "error: %a is not a callsite" Stmt.pp s))
 
 let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : t)
@@ -383,6 +404,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                     * [`AAddr aaddr], indicating a receiver with abstract address [aaddr]; or
                     * [`Static], indicating a static call
                     * [`None], TODO(archerd): edge case to deal with
+                                                currently sending to `AAddr, which seems to be the right thing most of the time...
                  *)
                  let rcvr_aaddr =
                    if callee.method_id.static then `Static
@@ -396,7 +418,14 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                          | None ->
                              Format.printf "return from `None: %s.%s to %a\n" rcvr meth Method_id.pp
                                caller.method_id;
-                             `None)
+                             (* `None *)
+                             `AAddr Addr.Abstract.empty)
+                 in
+                 let heap =
+                   Map.merge_skewed caller_heap return_heap
+                     ~combine:(fun ~key:_ (n1, a1) (n2, a2) ->
+                       (Null_val.join n1 n2, Addr.Abstract.union a1 a2))
+                   (* |> add_instance_fields_to_heap *)
                  in
                  let callee_instance_fields =
                    if callee.method_id.static then String.Set.empty
@@ -414,12 +443,6 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                                (* Set.fold aaddr ~init:heap ~f:(fun heap addr -> *)
                                (*     Map.set heap ~key:(addr, fld) ~data:(fld_nullness, fld_aaddr)) *)
                            | `This | `Static | `None -> heap))
-                 in
-                 let heap =
-                   Map.merge_skewed caller_heap return_heap
-                     ~combine:(fun ~key:_ (n1, a1) (n2, a2) ->
-                       (Null_val.join n1 n2, Addr.Abstract.union a1 a2))
-                   |> add_instance_fields_to_heap
                  in
                  let _heap_strict =
                    (* transfer the return value fields *)
@@ -442,13 +465,13 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                  let env =
                    (* (1) *)
                    (match rcvr_aaddr with
-                   | `This ->
-                       Set.fold callee_instance_fields ~init:caller_env ~f:(fun env fld ->
-                           let fld_val = Env.find return_env fld in
-                           Option.value_map fld_val ~default:env
-                             ~f:(fun (fld_nullness, fld_aaddr) ->
-                               Env.join_at_key env ~key:fld ~nullness:fld_nullness ~aaddr:fld_aaddr))
-                   | `Static | `None -> caller_env
+                   (* | `This -> *)
+                   (*     Set.fold callee_instance_fields ~init:caller_env ~f:(fun env fld -> *)
+                   (*         let fld_val = Env.find return_env fld in *)
+                   (*         Option.value_map fld_val ~default:env *)
+                   (*           ~f:(fun (fld_nullness, fld_aaddr) -> *)
+                   (*             Env.join_at_key env ~key:fld ~nullness:fld_nullness ~aaddr:fld_aaddr)) *)
+                   | `This | `Static | `None -> caller_env
                    | `AAddr rcvr_aaddr ->
                        if String.equal "<init>" meth && Option.is_some lhs then
                          Env.set caller_env ~key:(Option.value_exn lhs) ~nullness:Null_val.NotNull
@@ -588,8 +611,8 @@ let approximate_missing_callee ~(caller_state : t) ~callsite : t =
              (* we (unsoundly) assume that any call `o.setFoo(x)` method is equivalent to `o.foo = x` *)
              let field = String.uncapitalize (String.chop_prefix_exn meth ~prefix:"set") in
              interpret Ast.(Stmt.Write { rcvr; field; rhs }) caller_state
-         | Ast.Stmt.Call { lhs; rcvr; meth = _; actuals; alloc_site = None } ->
-             (* let () = Printf.printf "approximating method %s\n" meth in *)
+         | Ast.Stmt.Call { lhs; rcvr; meth; actuals; alloc_site = None } ->
+             let () = Printf.printf "approximating method %s.%s\n" rcvr meth in
              (* for a call to an unknown function `x = o.foo(y1,y2,,...)`, we forget any constraints on:
                 (1) fields of rcvr o [work needed when o is this]
                 (2) fields of actuals y_i
