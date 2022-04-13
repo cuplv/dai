@@ -44,6 +44,8 @@ csv:
 
 N=3000
 
+run_synthetics: run_synthetic_300 run_synthetic_301 run_synthetic_302 run_synthetic_303 run_synthetic_304 run_synthetic_305 run_synthetic_306 run_synthetic_307 run_synthetic_308 run_synthetic_309 run_synthetic_310 run_synthetic_311 run_synthetic_312 run_synthetic_313 run_synthetic_314 run_synthetic_315 run_synthetic_316 run_synthetic_317 run_synthetic_318 run_synthetic_319 run_synthetic_320 run_synthetic_321 run_synthetic_322 run_synthetic_323 run_synthetic_324 run_synthetic_325 run_synthetic_326 run_synthetic_327 run_synthetic_328 run_synthetic_329 run_synthetic_330 run_synthetic_331 run_synthetic_332 run_synthetic_333
+
 run_synthetic_300:
 	./run_synthetic 300 $(N)
 
