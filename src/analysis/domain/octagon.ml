@@ -71,6 +71,11 @@ let implies l r =
   let l, r = combine_envs l r in
   Abstract1.is_leq (get_man ()) l r
 
+(* Do not eta-reduce!  Will break lazy manager allocation *)
+let meet l r =
+  let l, r = combine_envs l r in
+  Abstract1.meet (get_man ()) l r
+
 let ( <= ) = implies
 
 let pp fs oct = Format.fprintf fs @@ if is_bot oct then "bottom" else "non-bottom octagon"
@@ -217,9 +222,12 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
   | Unop { op = Not; e } -> meet_with_op oct Tcons0.EQ e (Lit (Int 0L))
   | _ -> oct
 
-(*let eval_texpr oct =
-  let env = Abstract1.env oct in
-  Texpr1.of_expr env >> Abstract1.bound_texpr (get_man ()) oct*)
+let eval_texpr oct =
+  (fun e ->
+    try Texpr1.of_expr (Abstract1.env oct) e
+    with _ ->
+      failwith (Format.asprintf "error in Texpr1.of_expr; expr = %a\n" Texpr1.print_expr e))
+  >> Abstract1.bound_texpr (get_man ()) oct
 
 let extend_env_by_uses stmt oct =
   let env = Abstract1.env oct in
@@ -258,7 +266,7 @@ let interpret stmt oct =
             (* lhs was constrained, quantify that out *)
             Abstract1.forget_array man oct [| lhs |] false
           else (* lhs was unconstrained, treat as a `skip`*) oct)
-  | Array_write _ | Exceptional_call _ -> failwith "todo"
+  | Array_write _ | Exceptional_call _ -> failwith "todo1"
 
 let sanitize oct = oct
 
@@ -269,15 +277,20 @@ let show oct =
 let hash seed oct =
   try seeded_hash seed @@ Abstract1.hash (get_man ()) oct with Apron.Manager.Error _ -> seed
 
-let compare _l _r = failwith "todo"
+let compare l r =
+  let l, r = combine_envs l r in
+  let man = get_man () in
+  try Abstract1.(if is_eq man l r then 0 else if is_leq man l r then -1 else 1)
+  with Apron.Manager.Error { exn = _; funid = _; msg } ->
+    failwith ("Apron error in Octagon#compare: " ^ msg)
 
 let hash_fold_t h oct = Ppx_hash_lib.Std.Hash.fold_int h (hash 0 oct)
 
-let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo"
+let call ~callee:_ ~callsite:_ ~caller_state:_ = failwith "todo3"
 
-let return ~callee:_ ~caller:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo"
+let return ~callee:_ ~caller:_ ~callsite:_ ~caller_state:_ ~return_state:_ = failwith "todo4"
 
-let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
+let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo5"
 
 (*let handle_return ~caller_state ~return_state ~callsite ~callee_defs:_ =
   match callsite with
@@ -300,3 +313,37 @@ let approximate_missing_callee ~caller_state:_ ~callsite:_ = failwith "todo"
       with Apron.Manager.Error _ -> caller_state )
   | _ -> failwith "malformed callsite"
 *)
+
+let filter_env (oct : t) ~(f : string -> bool) =
+  let env = Abstract1.env oct in
+  let _, fp_vars = Environment.vars env in
+  let removed_vars = Array.filter fp_vars ~f:(Var.to_string >> f >> not) in
+  let new_env = Environment.remove env removed_vars in
+  Abstract1.change_environment (get_man ()) oct new_env false
+
+let forget vars oct =
+  let new_env = Environment.remove (Abstract1.env oct) vars in
+  Abstract1.change_environment (get_man ()) oct new_env false
+
+let lookup oct var =
+  let man = get_man () in
+  if Environment.mem_var (Abstract1.env oct) var then Abstract1.bound_variable man oct var
+  else Interval.top
+
+let assign oct var texpr =
+  let man = get_man () in
+  let env =
+    let old_env = Abstract1.env oct in
+    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
+  in
+  let oct = Abstract1.change_environment man oct env false in
+  Abstract1.assign_texpr man oct var Texpr1.(of_expr env texpr) None
+
+let weak_assign oct var texpr =
+  let man = get_man () in
+  let env =
+    let old_env = Abstract1.env oct in
+    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
+  in
+  let oct = Abstract1.change_environment man oct env true in
+  Abstract1.join man oct (assign oct var texpr)

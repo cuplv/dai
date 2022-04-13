@@ -1,4 +1,4 @@
-module G : module type of Analysis.Dsg.Make (Domain.Array_bounds)
+module G : module type of Analysis.Dsg.Make (Domain.Oct_array_bounds)
 
 val init : unit -> G.t
 

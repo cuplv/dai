@@ -13,7 +13,7 @@ let sample_seq_exn xs =
   let n = Random.int (Seq.length xs) in
   Seq.nth_exn xs n
 
-module G = Analysis.Dsg.Make (Domain.Array_bounds)
+module G = Analysis.Dsg.Make (Domain.Oct_array_bounds)
 module D = G.D
 module N = Cfg.G.Node
 module E = Cfg.G.Edge
@@ -173,7 +173,7 @@ let gen_entry_state () =
   let sup = inf +. Random.float_range 0. 20. in
   let sup' = inf' +. Random.float_range 0. 20. in
   let sup'' = inf'' +. Random.float_range 0. 20. in
-  Domain.Array_bounds.of_alist [ ("a0", inf, sup); ("a1", inf', sup'); ("a2", inf'', sup'') ]
+  Domain.Oct_array_bounds.of_alist [ ("a0", inf, sup); ("a1", inf', sup'); ("a2", inf'', sup'') ]
 
 let add_fn dsg : G.t =
   let method_name = fn_of_int !functions in
@@ -332,7 +332,7 @@ let exit_query dsg =
     let loc = fn.exit in
     let cg = !callgraph in
     let fields = Declared_fields.empty in
-    let entry_state = Domain.Array_bounds.init () in
+    let entry_state = Domain.Oct_array_bounds.init () in
     G.query ~fn ~loc ~cg ~fields ~entry_state dsg
   in
   dsg
