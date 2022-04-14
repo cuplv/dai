@@ -1,0 +1,7 @@
+#!/bin/sh
+
+DAI=./_build/default/src/synthetic_benchmarks/exec.exe
+N=2500
+JOBS=24
+
+parallel -j $JOBS ::: $DAI "$DAI -d" "$DAI -i" "$DAI -d -i" ::: $N ::: -s ::: $@
