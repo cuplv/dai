@@ -13,6 +13,16 @@ let sample_seq_exn xs =
   let n = Random.int (Seq.length xs) in
   Seq.nth_exn xs n
 
+let rng_state = Splittable_random.State.of_int (Caml.Random.int 1000)
+
+let query_sample_list_exn xs =
+  let n = Splittable_random.int rng_state ~lo:0 ~hi:(List.length xs - 1) in
+  List.nth_exn xs n
+
+let query_sample_seq_exn xs =
+  let n = Splittable_random.int rng_state ~lo:0 ~hi:(Seq.length xs - 1) in
+  Seq.nth_exn xs n
+
 module G = Analysis.Dsg.Make (Domain.Oct_array_bounds)
 module D = G.D
 module N = Cfg.G.Node
@@ -167,12 +177,13 @@ let dummy_edit_result : Tree_diff.cfg_edit_result =
   }
 
 let gen_entry_state () =
-  let inf = Random.float_range (-10.) 10. in
-  let inf' = Random.float_range (-10.) 10. in
-  let inf'' = Random.float_range (-10.) 10. in
-  let sup = inf +. Random.float_range 0. 20. in
-  let sup' = inf' +. Random.float_range 0. 20. in
-  let sup'' = inf'' +. Random.float_range 0. 20. in
+  let randfloat lo hi = Splittable_random.float rng_state ~lo ~hi in
+  let inf = randfloat (-10.) 10. in
+  let inf' = randfloat (-10.) 10. in
+  let inf'' = randfloat (-10.) 10. in
+  let sup = inf +. randfloat 0. 20. in
+  let sup' = inf' +. randfloat 0. 20. in
+  let sup'' = inf'' +. randfloat 0. 20. in
   Domain.Oct_array_bounds.of_alist [ ("a0", inf, sup); ("a1", inf', sup'); ("a2", inf'', sup'') ]
 
 let add_fn dsg : G.t =
@@ -316,9 +327,9 @@ let random_edit dsg =
 
 let random_query dsg =
   let _, dsg =
-    let fn = Fn.Map.keys dsg |> sample_list_exn in
+    let fn = Fn.Map.keys dsg |> query_sample_list_exn in
     let cfg, _ = Fn.Map.find_exn dsg fn in
-    let loc = Cfg.G.nodes cfg |> sample_seq_exn in
+    let loc = Cfg.G.nodes cfg |> query_sample_seq_exn in
     let cg = !callgraph in
     let fields = Declared_fields.empty in
     let entry_state = gen_entry_state () in
