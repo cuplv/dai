@@ -91,6 +91,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let dsg = G.init ~cfgs in
     let fns = G.fns dsg in
     let cg = Callgraph.deserialize ~fns (Src_file.of_file cg) in
+    let () = Declared_fields.set_current_fields fields in
     let parse = { src_dir; trees; loc_map; fields; cha } in
     { dsg; cg; parse }
 
@@ -154,6 +155,7 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
     let cg = Callgraph.deserialize ~fns (Src_file.of_file cg) in
     (* TODO: handle added fields and CHA edges in edited files; add corresponding Tree_diff.edit's
        and expose functions there to use here to apply diffs to our fields/cha structures *)
+    let () = Declared_fields.set_current_fields fields in
     let parse = { src_dir = next_dir; trees; loc_map; fields; cha } in
     Format.printf "\n[EXPERIMENT][INFO] dirtying\n";
     G.print_stats Format.std_formatter dsg;

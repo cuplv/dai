@@ -80,3 +80,11 @@ let deserialize m : t =
     | _ -> failwith ("malformed serialized method: " ^ m)
   in
   { package; class_name; method_name; static; arg_types }
+
+let current_method_id = ref []
+
+let set_current_method_id (method_id : t) = current_method_id := method_id :: !current_method_id
+
+let clear_current_method_id () = current_method_id := List.tl_exn !current_method_id
+
+let get_current_method_id () = List.hd !current_method_id

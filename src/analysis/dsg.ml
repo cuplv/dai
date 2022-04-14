@@ -334,7 +334,11 @@ module Make (Dom : Abstract.Dom) = struct
           callees
           ~f:(fun acc_result callee ->
             acc_result >>= fun acc_poststate ->
+            Method_id.set_current_method_id caller.method_id;
+            (* Format.printf "method id set for call to D.call in summarize_with_callgraph with fn %a\n" Method_id.pp caller.method_id; *)
             let callee_entry_state = Dom.call ~callee ~callsite ~caller_state ~fields in
+            (* Format.printf "method id cleared for call to D.call in summarize_with_callgraph\n"; *)
+            Method_id.clear_current_method_id ();
             (* four cases:
                (1) callee entry state is bottom, so no effect on return state
                (2) this is a recursive call and we already have an exactly-matching summary, so no widening needed
@@ -401,7 +405,12 @@ module Make (Dom : Abstract.Dom) = struct
           | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
         in
         let callee_entry_state =
-          Dom.call ~callee ~callsite ~caller_state ~fields
+          Method_id.set_current_method_id caller_method;
+          (* Format.printf "method id set for call to D.call in callee_subqueries_of_summ_qry with fn %a\n" Method_id.pp caller_method; *)
+          let result = Dom.call ~callee ~callsite ~caller_state ~fields in
+          (* Format.printf "method id cleared for call to D.call in callee_subqueries_of_summ_qry\n"; *)
+          Method_id.clear_current_method_id ();
+          result
           |>
           if Callgraph.methods_mutually_recursive cg.scc caller_method callee.method_id then
             Dom.widen caller_entry_state
@@ -423,12 +432,21 @@ module Make (Dom : Abstract.Dom) = struct
     let issue_root_query h =
       let d, h = materialize_daig ~fn ~entry_state h in
       let res, d =
-        try D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn entry_state) loc d
+        try
+          Method_id.set_current_method_id fn.method_id;
+          (* Format.printf "method id set for call to D.get_by_loc in query(beginning) with fn %a\n" Method_id.pp fn.method_id; *)
+          let result =
+            D.get_by_loc ~summarizer:(summarize_with_callgraph h fields cg fn entry_state) loc d
+          in
+          (* Format.printf "method id cleared for call to D.get_by_loc in query(beginning)\n" ; *)
+          Method_id.clear_current_method_id ();
+          result
         with D.Ref_not_found (`By_loc l) ->
           Format.(fprintf err_formatter)
             "Location %a not found in fn %a with (exit: %a; exc_exit: %a)" Cfg.Loc.pp l Cfg.Fn.pp fn
             Cfg.Loc.pp fn.exit Cfg.Loc.pp fn.exc_exit;
           D.dump_dot d ~filename:(abs_of_rel_path "refnotfound.daig.dot");
+          Method_id.clear_current_method_id ();
           failwith "ref not found"
       in
       D.assert_wf d;
@@ -460,10 +478,14 @@ module Make (Dom : Abstract.Dom) = struct
               let callee_daig, dsg = materialize_daig ~fn:qry.fn ~entry_state:qry.entry_state dsg in
               let daig_qry_result, dsg, new_callee_daig =
                 let res, new_callee_daig =
+                  Method_id.set_current_method_id qry.fn.method_id;
+                  (* Format.printf "method id set for call to D.get_by_loc in query(Summ_qry) with fn %a\n" Method_id.pp qry.fn.method_id; *)
                   D.get_by_loc
                     ~summarizer:(summarize_with_callgraph dsg fields cg qry.fn qry.entry_state)
                     (Q.exit_loc qry) callee_daig
                 in
+                (* Format.printf "method id cleared for call to D.get_by_loc in query(Summ_qry)\n"; *)
+                Method_id.clear_current_method_id ();
                 D.assert_wf new_callee_daig;
                 (res, set_daig dsg new_callee_daig qry.fn qry.entry_state, new_callee_daig)
               in
@@ -549,10 +571,12 @@ module Make (Dom : Abstract.Dom) = struct
                 let caller_states, dsg =
                   loc_only_query ~fn:caller ~loc:caller_loc ~cg ~fields ~entrypoints dsg
                 in
+                Method_id.set_current_method_id fn.method_id;
                 let acc_entry_states =
                   List.fold caller_states ~init:acc_entry_states ~f:(fun acc caller_state ->
                       Set.add acc (Dom.call ~callee:fn ~callsite ~caller_state ~fields))
                 in
+                Method_id.clear_current_method_id ();
                 (acc_entry_states, dsg)))
       in
       match rec_callers with
@@ -717,22 +741,28 @@ let%test "apply edit to SRH'96 example" =
 open Make (Domain.Null_dom)
 
 let%test "Nullability tests" =
+  print_string "STARTING Nullability TESTS\n";
   let ({ cfgs; fields; _ } : Cfg_parser.prgm_parse_result) =
     Cfg_parser.parse_file_exn (abs_of_rel_path "test_cases/java/Nullability.java")
   in
+  Declared_fields.set_current_fields fields;
   let dsg : t = init ~cfgs in
   let fns = Cfg.Fn.Map.keys dsg in
   let main_fn =
     List.find_exn fns ~f:(fun (fn : Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
   in
+  print_string "starting materialize_daig\n";
   let _, dsg = materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
+  print_string "ending materialize_daig\n";
   let cg =
     Callgraph.deserialize ~fns
       (Src_file.of_file @@ abs_of_rel_path "test_cases/nullability.callgraph")
   in
+  print_string "starting query\n";
   let _exit_state, dsg =
     query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
   in
+  print_string "ending query\n";
   let _ = dump_dot ~filename:(abs_of_rel_path "solved_nullability.dsg.dot") dsg in
   let daigs : (Cfg.Fn.t * D.t) list =
     Cfg.Fn.Map.fold dsg ~init:[] ~f:(fun ~key:fn ~data:(_, daigs) acc ->
