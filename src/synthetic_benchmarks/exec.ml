@@ -59,7 +59,7 @@ let run =
           | false, false -> Mode.Batch
         in
         Format.printf "[INFO] initializing experiment in %a mode with seed %i\n" Mode.pp mode seed;
-
+        Format.print_flush ();
         let fs_log =
           let logfile =
             Format.asprintf "out/log/%a_seed%i_n%i%s.log" Mode.pp_short mode seed n

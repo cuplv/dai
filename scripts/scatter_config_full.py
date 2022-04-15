@@ -62,7 +62,7 @@ plt.rc('xtick',labelsize='large')
 plt.rc('ytick',labelsize='large')
 
 #linear axes
-plt.axis([0,2000,0,2000])
+plt.axis([0,3000,0,10000])
 
 
 plt.ylabel(r"Analysis Time (ms)")

@@ -180,11 +180,9 @@ let gen_entry_state () =
   let randfloat lo hi = Splittable_random.float rng_state ~lo ~hi in
   let inf = randfloat (-10.) 10. in
   let inf' = randfloat (-10.) 10. in
-  let inf'' = randfloat (-10.) 10. in
   let sup = inf +. randfloat 0. 20. in
   let sup' = inf' +. randfloat 0. 20. in
-  let sup'' = inf'' +. randfloat 0. 20. in
-  Domain.Oct_array_bounds.of_alist [ ("a0", inf, sup); ("a1", inf', sup'); ("a2", inf'', sup'') ]
+  Domain.Oct_array_bounds.of_alist [ ("a0", inf, sup); ("a1", inf', sup') ]
 
 let add_fn dsg : G.t =
   let method_name = fn_of_int !functions in
@@ -193,7 +191,7 @@ let add_fn dsg : G.t =
   let fn : Fn.t =
     {
       method_id;
-      formals = [ "a0"; "a1"; "a2" ];
+      formals = [ "a0"; "a1" ];
       locals = [];
       entry = Cfg.Loc.fresh ();
       exit = Cfg.Loc.fresh ();
@@ -271,7 +269,7 @@ let add_call_at at_loc cfg (caller : Fn.t) dsg =
         lhs = Some (gen_arith_ident caller);
         rcvr = "this";
         meth = callee_name;
-        actuals = [ gen_arith_expr caller; gen_arith_expr caller; gen_arith_expr caller ];
+        actuals = [ gen_arith_expr caller; gen_arith_expr caller ];
         alloc_site = None;
       }
   in
