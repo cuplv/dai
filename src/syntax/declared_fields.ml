@@ -44,3 +44,9 @@ let add_cid ~class_id ~fields df =
 let add ~package ~class_name ~fields : t -> t =
   let class_id = String.(concat ~sep:"." package ^ "." ^ class_name) in
   add_cid ~class_id ~fields
+
+let current_fields = ref empty
+
+let set_current_fields (fields : t) = current_fields := fields
+
+let get_current_fields () = !current_fields

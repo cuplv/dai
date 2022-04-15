@@ -391,7 +391,7 @@ module Make (Dom : Abstract.Dom) = struct
     edges_btwn_impl [ src ] G.Edge.Set.empty
 
   (* remove all nodes and edges between ~src and ~dst, including associated statements (which are not strictly-speaking on path between src and dst) *)
-  let remove_daig_region (daig : G.t) ~(src : G.node) ~(dst : G.node) : G.t =
+  let remove_daig_region (daig : G.t) ~(exc_exit : G.node) ~(src : G.node) ~(dst : G.node) : G.t =
     (* traverse graph from [frontier] until reaching [dst], gathering all non-[dst] nodes along the way as well as associated statement nodes. *)
     let rec daig_region_impl (frontier : G.node list) (accum : G.Node.Set.t) =
       match frontier with
@@ -411,7 +411,9 @@ module Make (Dom : Abstract.Dom) = struct
           daig_region_impl f a
     in
     (* removing a node also removes all incident edges.  Therefore we also remove edges only when they are directly from [src] to [dst], since neither node is to be removed in that case.*)
-    let nodes_to_remove = daig_region_impl [ src ] G.Node.Set.empty in
+    let nodes_to_remove =
+      daig_region_impl [ src ] G.Node.Set.empty |> Set.filter ~f:(Ref.equal exc_exit >> not)
+    in
     Set.fold nodes_to_remove ~init:daig ~f:(flip G.Node.remove) |> fun daig ->
     Sequence.fold (G.Node.inputs dst daig) ~init:daig ~f:(fun daig e ->
         if G.Node.equal src @@ G.Edge.src e then G.Edge.remove e daig else daig)
@@ -1053,6 +1055,19 @@ module Make (Dom : Abstract.Dom) = struct
             Dom.interpret binding astate)
     | _ -> failwith "malformed callsite"
 
+  let assert_wf g =
+    Sequence.iter (G.nodes g) ~f:(fun rc ->
+        if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
+          Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
+          assert false)
+        else if
+          let is_non_empty = not (Ref.is_empty rc) in
+          let has_empty_pred = Sequence.exists (G.Node.preds rc g) ~f:Ref.is_empty in
+          is_non_empty && has_empty_pred
+        then (
+          Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
+          assert false))
+
   let get_by_ref_impl summarizer daig = function
     | Ref.AState { state = Some phi; name = _ } -> (Result phi, daig)
     | Ref.AState _ as r -> (
@@ -1088,6 +1103,93 @@ module Make (Dom : Abstract.Dom) = struct
     | _ ->
         dump_dot daig ~filename:(abs_of_rel_path "nopred.dot");
         failwith (Format.asprintf "No predecessor state for %a" Name.pp nm)
+
+  let is_transfer_only edges =
+    match Seq.to_list edges with
+    | [ e1; e2 ] -> Comp.equal (G.Edge.label e1) `Transfer && Comp.equal (G.Edge.label e2) `Transfer
+    | _ -> false
+
+  let max_prejoin_idx edges =
+    if Seq.for_all edges ~f:(G.Edge.label >> Comp.equal `Join) then
+      Seq.fold edges ~init:None ~f:(fun acc edge ->
+          match Ref.name (G.Edge.src edge) with
+          | Name.(Prod (Idx i, _)) -> ( match acc with None -> Some i | Some j -> Some (max i j))
+          | _ -> failwith "malformed DAIG join point")
+    else None
+
+  let insert_prejoin_ref pj_ref to_ref edges daig =
+    let open G.Edge in
+    Seq.fold edges ~init:daig ~f:(fun daig edge ->
+        insert (create (src edge) pj_ref (label edge)) (remove edge daig))
+    |> insert (create pj_ref to_ref `Join)
+
+  let increment_prejoin_indices ~by:x to_ref edges daig =
+    let open G.Edge in
+    let edges = Seq.to_list edges in
+    List.sort edges ~compare:(fun e1 e2 ->
+        match (Ref.name (src e1), Ref.name (src e2)) with
+        | Name.(Prod (Idx i1, _)), Name.(Prod (Idx i2, _)) -> i2 - i1
+        | _ -> failwith "malformed prejoin refs")
+    |> List.fold ~init:daig ~f:(fun daig edge ->
+           let new_pj =
+             match src edge with
+             | Ref.AState { state; name = Name.(Prod (Idx i, nm)) } ->
+                 Ref.AState { state; name = Name.(Prod (Idx (i + x), nm)) }
+             | r -> failwith (Format.asprintf "malformed prejoin ref %a" Name.pp (Ref.name r))
+           in
+           Seq.fold
+             (G.Node.inputs (src edge) daig)
+             ~init:daig
+             ~f:(fun daig e -> insert (create (src e) new_pj (label e)) (remove e daig))
+           |> G.Node.remove (src edge)
+           |> insert (create new_pj to_ref `Join))
+
+  let patch_exc_returns (exc_exit : Cfg.Loc.t) ~old_daig new_daig =
+    try
+      let new_exn_ref = ref_at_loc_exn ~loc:exc_exit new_daig in
+      let old_exn_ref = ref_at_loc_exn ~loc:exc_exit old_daig in
+      let new_edges_to_exn = G.Node.inputs new_exn_ref new_daig in
+      let old_edges_to_exn = G.Node.inputs old_exn_ref old_daig in
+      match
+        ( is_transfer_only new_edges_to_exn,
+          is_transfer_only old_edges_to_exn,
+          max_prejoin_idx new_edges_to_exn,
+          max_prejoin_idx old_edges_to_exn )
+      with
+      | true, true, None, None ->
+          let to_ref_0 =
+            Ref.AState { state = None; name = Name.(Prod (Idx 0, Ref.name old_exn_ref)) }
+          in
+          let to_ref_1 =
+            Ref.AState { state = None; name = Name.(Prod (Idx 1, Ref.name old_exn_ref)) }
+          in
+          let new_daig' = insert_prejoin_ref to_ref_0 old_exn_ref new_edges_to_exn new_daig in
+          let old_daig' = insert_prejoin_ref to_ref_1 old_exn_ref old_edges_to_exn old_daig in
+          (new_daig', old_daig')
+      | true, false, None, Some i ->
+          let to_ref_i_plus_one =
+            Ref.AState { state = None; name = Name.(Prod (Idx (i + 1), Ref.name old_exn_ref)) }
+          in
+          let new_daig' =
+            insert_prejoin_ref to_ref_i_plus_one old_exn_ref new_edges_to_exn new_daig
+          in
+          (new_daig', old_daig)
+      | false, true, Some i, None ->
+          let to_ref_i_plus_one =
+            Ref.AState { state = None; name = Name.(Prod (Idx (i + 1), Ref.name old_exn_ref)) }
+          in
+          let old_daig' =
+            insert_prejoin_ref to_ref_i_plus_one old_exn_ref new_edges_to_exn old_daig
+          in
+          (new_daig, old_daig')
+      | false, false, Some _, Some i ->
+          assert_wf new_daig;
+          let new_daig' =
+            increment_prejoin_indices ~by:(i + 1) old_exn_ref new_edges_to_exn new_daig
+          in
+          (new_daig', old_daig)
+      | _ -> (new_daig, old_daig)
+    with Ref_not_found _ -> (new_daig, old_daig)
 
   let apply_edit ~daig ~(cfg_edit : Frontend.Tree_diff.cfg_edit_result) ~(fn : Cfg.Fn.t) =
     let open Frontend.Tree_diff in
@@ -1168,7 +1270,10 @@ module Make (Dom : Abstract.Dom) = struct
         let to_ref = ref_at_loc_exn ~loc:to_loc daig in
         Ref.dirty to_ref;
         let dirtied_daig = dirty_from to_ref daig in
-        let removed_region_daig = remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref in
+        let exc_exit = ref_at_loc_exn ~loc:fn.exc_exit dirtied_daig in
+        let removed_region_daig =
+          remove_daig_region dirtied_daig ~exc_exit ~src:from_ref ~dst:to_ref
+        in
         let cfg = Graph.create (module Cfg.G) ~edges:cfg_edit.added_edges () in
         (* (1) remove DAIG region between [from_loc] and [to_loc]
            (2) construct a new DAIG segment for that region and union it into the old DAIG
@@ -1178,52 +1283,12 @@ module Make (Dom : Abstract.Dom) = struct
             ~loop_iteration_ctx:(Name.iter_ctx (Ref.name from_ref))
             ~extra_back_edges:[] ~exit:(to_ref, to_loc) ()
         in
-
-        let new_edges_to_ref = G.Node.inputs to_ref new_daig_segment |> Seq.to_list in
-        let old_edges_to_ref = G.Node.inputs to_ref removed_region_daig |> Seq.to_list in
-        let is_transfer_only edges =
-          match edges with
-          | [ e1; e2 ] ->
-              Comp.equal (G.Edge.label e1) `Transfer && Comp.equal (G.Edge.label e2) `Transfer
-          | _ -> false
+        let new_daig_segment, removed_region_daig =
+          patch_exc_returns fn.exc_exit ~old_daig:removed_region_daig new_daig_segment
         in
-        let max_prejoin_idx edges =
-          if List.for_all edges ~f:(G.Edge.label >> Comp.equal `Join) then
-            List.fold edges ~init:None ~f:(fun acc edge ->
-                match Ref.name (G.Edge.src edge) with
-                | Name.(Prod (Idx i, nm)) -> (
-                    assert (Name.equal nm (Ref.name to_ref));
-                    match acc with None -> Some i | Some j -> Some (max i j))
-                | _ -> failwith "malformed DAIG join point")
-          else None
-        in
-        let insert_prejoin_ref pj_ref edges daig =
-          let open G.Edge in
-          List.fold edges ~init:daig ~f:(fun daig edge ->
-              insert (create (src edge) pj_ref (label edge)) (remove edge daig))
-          |> insert (create pj_ref to_ref `Join)
-        in
-        let increment_prejoin_indices ~by:x edges daig =
-          let open G.Edge in
-          List.sort edges ~compare:(fun e1 e2 ->
-              match (Ref.name (src e1), Ref.name (src e2)) with
-              | Name.(Prod (Idx i1, _)), Name.(Prod (Idx i2, _)) -> i2 - i1
-              | _ -> failwith "malformed prejoin refs")
-          |> List.fold ~init:daig ~f:(fun daig edge ->
-                 let new_pj =
-                   match src edge with
-                   | Ref.AState { state; name = Name.(Prod (Idx i, nm)) } ->
-                       Ref.AState { state; name = Name.(Prod (Idx (i + x), nm)) }
-                   | r -> failwith (Format.asprintf "malformed prejoin ref %a" Name.pp (Ref.name r))
-                 in
-                 Seq.fold
-                   (G.Node.inputs (src edge) daig)
-                   ~init:daig
-                   ~f:(fun daig e -> insert (create (src e) new_pj (label e)) (remove e daig))
-                 |> remove edge
-                 |> insert (create new_pj to_ref `Join))
-        in
-        if List.is_empty new_edges_to_ref || List.is_empty old_edges_to_ref then
+        let new_edges_to_ref = G.Node.inputs to_ref new_daig_segment in
+        let old_edges_to_ref = G.Node.inputs to_ref removed_region_daig in
+        if Seq.is_empty new_edges_to_ref || Seq.is_empty old_edges_to_ref then
           Graph.union (module G) new_daig_segment removed_region_daig
         else
           match
@@ -1240,10 +1305,10 @@ module Make (Dom : Abstract.Dom) = struct
                 Ref.AState { state = None; name = Name.(Prod (Idx 1, Ref.name to_ref)) }
               in
               let new_daig_segment =
-                insert_prejoin_ref to_ref_0 new_edges_to_ref new_daig_segment
+                insert_prejoin_ref to_ref_0 to_ref new_edges_to_ref new_daig_segment
               in
               let removed_region_daig =
-                insert_prejoin_ref to_ref_1 old_edges_to_ref removed_region_daig
+                insert_prejoin_ref to_ref_1 to_ref old_edges_to_ref removed_region_daig
               in
               Graph.union (module G) new_daig_segment removed_region_daig
           | true, false, None, Some i ->
@@ -1251,7 +1316,7 @@ module Make (Dom : Abstract.Dom) = struct
                 Ref.AState { state = None; name = Name.(Prod (Idx (i + 1), Ref.name to_ref)) }
               in
               let new_daig_segment =
-                insert_prejoin_ref to_ref_i_plus_one new_edges_to_ref new_daig_segment
+                insert_prejoin_ref to_ref_i_plus_one to_ref new_edges_to_ref new_daig_segment
               in
               Graph.union (module G) new_daig_segment removed_region_daig
           | false, true, Some i, None ->
@@ -1259,12 +1324,12 @@ module Make (Dom : Abstract.Dom) = struct
                 Ref.AState { state = None; name = Name.(Prod (Idx (i + 1), Ref.name to_ref)) }
               in
               let removed_region_daig =
-                insert_prejoin_ref to_ref_i_plus_one new_edges_to_ref removed_region_daig
+                insert_prejoin_ref to_ref_i_plus_one to_ref new_edges_to_ref removed_region_daig
               in
               Graph.union (module G) new_daig_segment removed_region_daig
           | false, false, Some _, Some i ->
               let new_daig_segment =
-                increment_prejoin_indices ~by:(i + 1) new_edges_to_ref new_daig_segment
+                increment_prejoin_indices ~by:(i + 1) to_ref new_edges_to_ref new_daig_segment
               in
               Graph.union (module G) new_daig_segment removed_region_daig
           | _ -> failwith "unexpected case: modifying statement , got weird mix of edges to exit")
@@ -1310,8 +1375,9 @@ module Make (Dom : Abstract.Dom) = struct
            NB: Special case when [to_loc] == [fn.exit], to preserve function-exit location: just replace the region by Skip instead of collapsing the two locations into one
         *)
         let dirtied_daig = dirty_from to_ref daig in
+        let exc_exit = ref_at_loc_exn ~loc:fn.exc_exit dirtied_daig in
         let removed_daig =
-          remove_daig_region dirtied_daig ~src:from_ref ~dst:to_ref
+          remove_daig_region dirtied_daig ~exc_exit ~src:from_ref ~dst:to_ref
           |>
           if Cfg.Loc.equal to_loc fn.exit then
             let stmt_ref = Ref.Stmt { name = Name.Edge (from_loc, to_loc); stmt = Ast.Stmt.Skip } in
@@ -1324,19 +1390,6 @@ module Make (Dom : Abstract.Dom) = struct
           List.fold new_succ_edges ~init:d ~f:(flip G.Edge.insert)
         in
         List.fold stmts_to_rename ~init:rebased_daig ~f:rename_stmt
-
-  let assert_wf g =
-    Sequence.iter (G.nodes g) ~f:(fun rc ->
-        if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
-          Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
-          assert false)
-        else if
-          let is_non_empty = not (Ref.is_empty rc) in
-          let has_empty_pred = Sequence.exists (G.Node.preds rc g) ~f:Ref.is_empty in
-          is_non_empty && has_empty_pred
-        then (
-          Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
-          assert false))
 
   let total_astate_refs = G.nodes >> Seq.count ~f:Ref.is_astate
 
