@@ -8,9 +8,10 @@
 
 num_stats = 6
 def processFile(pathToFile):
+    # print(f"procesing {pathToFile}")
     with open(pathToFile) as f:
         isIncremental = 'incr' in pathToFile
-        lines = [line.strip() for line in f.readlines()]
+        lines = [line.strip() for line in f.readlines() if "SUMMARIES" not in line]
         run_time = float(lines[-2].split()[-1])
         stats = [int(stat.split(',')[0]) for stat in lines[-1].split()[-num_stats:]]
         # stats is a list of ints, representing |D*|, |Delta|, |unique procedures rho in D*|, total cells, and nonempty cells after analysis, and number of self loops in Delta
@@ -41,7 +42,7 @@ def percent(mode, file_prefix):
 
 
 def citeProgram(prog):
-    return f"\cite{{bugswarm{prog.split('-')[-1]}}}"
+    return f"\citetalias{{bugswarm{prog.split('-')[-1]}}}"
 
 
 def averageDict(dictionary):
@@ -69,10 +70,15 @@ def strTime(ms_time):
 
 
 postfixes = [".batch", ".incr", ".dd", ".ddincr"]
-runs = [f"run{i}/" for i in range(1, 11)]
+# runs = [f"run{i}/" for i in range(1, 11)]
+runs = ["log/"]
 num_runs = len(runs)
+excluded_programs = \
+        []
+    # ["tananaev-traccar-188473749", "tananaev-traccar-255051211"]
 with open('experiment_inputs/query_artifacts') as f:
-    programs = [line.strip() for line in f.readlines()]
+    programs = [line.strip() for line in f.readlines() ]
+    programs = [program for program in programs if program not in excluded_programs]
     num_programs = len(programs)
 
 locs = readFile('linesOfSourceCode')
@@ -104,7 +110,8 @@ for program in programs:
         total_of_percents[run_mode] = total_of_percents[run_mode] + percent(run_mode, fprefix)
         num_varphi = stats[4]-stats[-1]
         total_of_absStates[run_mode] = total_of_absStates[run_mode] + num_varphi
-        output = output + f" & {num_varphi}"
+        if run_mode == postfixes[0]:
+            output = output + f" & {num_varphi}"
         if run_mode != postfixes[0]:
             output = output + f" & {strPercent(percent(run_mode, fprefix))}"
         output = output + f' & {strTime(average)}'
@@ -115,7 +122,8 @@ print('\midrule')
 
 output = f'average & {averageDict(locs)/1000:.1f} & {averageDict(edited_locs):.0f} & {averageDict(callgraph_sizes):.0f}'
 for mode in postfixes:
-    output = output + f' & {total_of_absStates[mode]/num_programs:.0f}'
+    if mode == postfixes[0]:
+        output = output + f' & {total_of_absStates[mode]/num_programs:.0f}'
     if mode != postfixes[0]:
         output = output + f' & {strPercent(total_of_percents[mode]/num_programs)}'
     output = output + f' & {strTime(total_of_averages[mode]/num_programs)}'

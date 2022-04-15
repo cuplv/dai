@@ -1,0 +1,14 @@
+#!/bin/sh
+echo "RUNNING ANALYSIS CONFIGS ON $1"
+echo "BATCH"
+./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -null | grep EXPERIMENT > $2/$1.batch
+
+echo "INCREMENTAL"
+./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -incr -null | grep EXPERIMENT > $2/$1.incr
+
+if test -f "experiment_inputs/$1/query"; then
+    echo "DEMAND-DRIVEN"
+./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(cat experiment_inputs/$1/query)" -null | grep EXPERIMENT > $2/$1.dd
+    echo "DEMAND-DRIVEN and INCREMENTAL"
+./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(cat experiment_inputs/$1/query)" -incr -null | grep EXPERIMENT > $2/$1.ddincr
+fi
