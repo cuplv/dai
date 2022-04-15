@@ -1188,7 +1188,7 @@ module Make (Dom : Abstract.Dom) = struct
             increment_prejoin_indices ~by:(i + 1) old_exn_ref new_edges_to_exn new_daig
           in
           (new_daig', old_daig)
-      | _ -> failwith "unexpected case: modifying statement , got weird mix of edges to exit"
+      | _ -> (new_daig, old_daig)
     with Ref_not_found _ -> (new_daig, old_daig)
 
   let apply_edit ~daig ~(cfg_edit : Frontend.Tree_diff.cfg_edit_result) ~(fn : Cfg.Fn.t) =
