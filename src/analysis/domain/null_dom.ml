@@ -553,7 +553,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                    else Fn.id
                  in
                  (env, heap)
-             | Ast.Stmt.Exceptional_call { rcvr; meth = _; actuals = _ } ->
+             | Ast.Stmt.Exceptional_call { rcvr; meth; actuals = _ } ->
                  (* [rcvr_aaddr] is one of:
                     * [`This], indicating an absent or "this" receiver;
                     * [`AAddr aaddr], indicating a receiver with abstract address [aaddr]; or
@@ -563,7 +563,32 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                    if callee.method_id.static then `Static
                    else if String.equal rcvr "this" then `This
                    else
-                     match Map.find caller_env rcvr with Some a -> `AAddr (snd a) | None -> `None
+                     match Map.find caller_env rcvr with
+                     | Some a -> `AAddr (snd a)
+                     | None ->
+                         let ({ package; class_name; _ } : Method_id.t) = caller.method_id in
+                         let instance_fields =
+                           Declared_fields.lookup ~package ~class_name
+                             (Declared_fields.get_current_fields ())
+                           |> fun { instance; _ } -> instance
+                         in
+                         if Set.mem instance_fields rcvr then (
+                           Method_id.set_current_method_id caller.method_id;
+                           let _caller_state, (_, aaddr) =
+                             eval_expr caller_state (Ast.Expr.Deref { rcvr = "this"; field = rcvr })
+                           in
+                           Method_id.clear_current_method_id ();
+                           `AAddr aaddr)
+                         else (
+                           Format.printf "return from `None: %s.%s to %a\n" rcvr meth Method_id.pp
+                             caller.method_id;
+                           (* `None *)
+                           `AAddr Addr.Abstract.empty)
+                 in
+                 let heap =
+                   Map.merge_skewed caller_heap return_heap
+                     ~combine:(fun ~key:_ (n1, a1) (n2, a2) ->
+                       (Null_val.join n1 n2, Addr.Abstract.union a1 a2))
                  in
                  let callee_instance_fields =
                    if callee.method_id.static then String.Set.empty
@@ -571,7 +596,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                      Declared_fields.lookup_instance fields ~package:callee.method_id.package
                        ~class_name:callee.method_id.class_name
                  in
-                 let heap =
+                 let _heap_strict =
                    (* transfer the return value fields *)
                    (match Map.find return_env Cfg.exc_retvar with
                    | None -> caller_heap
@@ -598,16 +623,20 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite ~(caller_state : 
                  let env =
                    (* (1) *)
                    (match rcvr_aaddr with
-                   | `This ->
-                       Set.fold callee_instance_fields ~init:caller_env ~f:(fun env fld ->
-                           let fld_val = Env.find return_env fld in
-                           Option.value_map fld_val ~default:env
-                             ~f:(fun (fld_nullness, fld_aaddr) ->
-                               Env.join_at_key env ~key:fld ~nullness:fld_nullness ~aaddr:fld_aaddr))
-                   | `Static | `None -> caller_env
+                   (* | `This -> *)
+                   (*     Set.fold callee_instance_fields ~init:caller_env ~f:(fun env fld -> *)
+                   (*         let fld_val = Env.find return_env fld in *)
+                   (*         Option.value_map fld_val ~default:env *)
+                   (*           ~f:(fun (fld_nullness, fld_aaddr) -> *)
+                   (*             Env.join_at_key env ~key:fld ~nullness:fld_nullness ~aaddr:fld_aaddr)) *)
+                   | `This | `Static | `None -> caller_env
                    | `AAddr rcvr_aaddr ->
                        Env.join_at_key caller_env ~key:rcvr ~nullness:Null_val.NotNull
                          ~aaddr:rcvr_aaddr)
+                   (* (1* (2) *1) *)
+                   (* |> (match Map.find return_env Cfg.exc_retvar with *)
+                   (*     | Some (retval_nullness, retval_aaddr) when Option.is_some lhs -> Fn.id *)
+                   (*     | _ -> Fn.id) *)
                    (* transfer the static fields to the receiver if they share a class *)
                    |>
                    if Cfg.Fn.is_same_class callee caller then fun env ->
