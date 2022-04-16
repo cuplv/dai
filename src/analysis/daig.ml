@@ -993,32 +993,49 @@ module Make (Dom : Abstract.Dom) = struct
                   failwith
                     (Format.asprintf "fix always has two inputs (by construction); got: %a <- (%a)"
                        Name.pp (Ref.name r) (List.pp ", " Name.pp) (List.map ~f:Ref.name preds)))
-          | `Transfer_after_fix loop_head -> (
+          | `Transfer_after_fix loop_head as comp -> (
+              let evaluate_taf s phi daig =
+                get_fixedpoint_wrt ~loop_head ~ref_cell:phi summarizer daig >>= fun phi_fp daig ->
+                let phi_edge =
+                  G.Node.inputs r daig |> Sequence.find_exn ~f:(G.Edge.src >> Ref.is_astate)
+                in
+                let daig =
+                  G.Edge.remove phi_edge daig
+                  |> G.Edge.(insert (create phi_fp (dst phi_edge) (label phi_edge)))
+                in
+                match Ref.stmt_exn s with
+                | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
+                    let res =
+                      match summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi_fp) with
+                      | Some phi_prime -> Result phi_prime
+                      | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi_fp }
+                    in
+                    (res, daig)
+                | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi_fp)), daig)
+              in
               match preds with
-              | [ s; phi ] -> (
-                  get_fixedpoint_wrt ~loop_head ~ref_cell:phi summarizer daig >>= fun phi_fp daig ->
-                  let phi_edge =
-                    G.Node.inputs r daig |> Sequence.find_exn ~f:(G.Edge.src >> Ref.is_astate)
+              | [ s; phi ] -> evaluate_taf s phi daig
+              | [ (Ref.Stmt { stmt = _; name } as s) ] ->
+                  (* this is a hack -- dirtying dropped a transfer-after-fix edge it shouldn't have,
+                     but we can just reconstruct it here *)
+                  let pred_loc =
+                    Name.(
+                      match name with
+                      | Edge (l, _) | Prod (Idx _, Edge (l, _)) -> l
+                      | _ -> failwith "malformed stmt name")
                   in
-                  let daig =
-                    G.Edge.remove phi_edge daig
-                    |> G.Edge.(insert (create phi_fp (dst phi_edge) (label phi_edge)))
-                  in
-                  match Ref.stmt_exn s with
-                  | (Ast.Stmt.Call _ as callsite) | (Ast.Stmt.Exceptional_call _ as callsite) ->
-                      let res =
-                        match
-                          summarizer ~callsite:(callsite, Ref.name r) (Ref.astate_exn phi_fp)
-                        with
-                        | Some phi_prime -> Result phi_prime
-                        | None -> Summ_qry { callsite; caller_state = Ref.astate_exn phi_fp }
-                      in
-                      (res, daig)
-                  | stmt -> (Result (Dom.interpret stmt (Ref.astate_exn phi_fp)), daig))
-              (*                  (Result (Dom.interpret (Ref.stmt_exn s) (Ref.astate_exn phi_fp)), daig)*)
+                  let phi = ref_at_loc_exn ~loc:pred_loc daig in
+                  let daig = G.Edge.(insert (create phi r comp) daig) in
+                  evaluate_taf s phi daig
               | _ ->
-                  failwith
-                    "malformed DCG: transfer function must have one Stmt and one AState input") )
+                  dump_dot ~filename:(abs_of_rel_path "malformed.dot") daig;
+                  let msg =
+                    Format.asprintf "malformed DCG at loop_head TAF %a; inputs: %a" Cfg.Loc.pp
+                      loop_head
+                      (List.pp "                  " Ref.pp)
+                      preds
+                  in
+                  failwith msg) )
         (* write result to the queried ref-cell and return *)
         >>| fun result ->
         phi.state <- Some result;
@@ -1055,18 +1072,18 @@ module Make (Dom : Abstract.Dom) = struct
             Dom.interpret binding astate)
     | _ -> failwith "malformed callsite"
 
-  let assert_wf g =
-    Sequence.iter (G.nodes g) ~f:(fun rc ->
-        if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
-          Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
-          assert false)
-        else if
-          let is_non_empty = not (Ref.is_empty rc) in
-          let has_empty_pred = Sequence.exists (G.Node.preds rc g) ~f:Ref.is_empty in
-          is_non_empty && has_empty_pred
-        then (
-          Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
-          assert false))
+  let assert_wf _g = ()
+  (* Sequence.iter (G.nodes g) ~f:(fun rc ->
+       if Ref.is_empty rc && (Int.equal 0 @@ Seq.length @@ G.Node.preds rc g) then (
+         Format.(fprintf err_formatter) "empty ref with no preds: %a" Name.pp (Ref.name rc);
+         assert false)
+       else if
+         let is_non_empty = not (Ref.is_empty rc) in
+         let has_empty_pred = Sequence.exists (G.Node.preds rc g) ~f:Ref.is_empty in
+         is_non_empty && has_empty_pred
+       then (
+         Format.(fprintf err_formatter) "nonempty ref with empty pred: %a\n" Name.pp (Ref.name rc);
+         assert false))*)
 
   let get_by_ref_impl summarizer daig = function
     | Ref.AState { state = Some phi; name = _ } -> (Result phi, daig)
