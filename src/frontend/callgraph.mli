@@ -42,3 +42,5 @@ val reverse : fns:Cfg.Fn.t list -> forward_t -> reverse_t
 val callers : callee_method:Method_id.t -> reverse_cg:reverse_t -> Cfg.Fn.t list
 
 val dump_dot : filename:string -> forward_t -> unit
+
+val print_scc_stats : scc -> unit

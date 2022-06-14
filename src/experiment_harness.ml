@@ -187,7 +187,9 @@ module DSG_wrapper (Dom : Abstract.Dom) : S = struct
       "\n[EXPERIMENT] exhaustive analysis took: %.3f\n"
       (1000. *. (systime () -. st));
     G.print_stats Format.std_formatter dsg;
-    G.print_summaries Format.std_formatter dsg ~num_summaries:100;
+    if Option.is_some g.cg.scc then Callgraph.print_scc_stats (Option.value_exn g.cg.scc)
+    else Format.print_string "[EXPERIMENT] no scc\n";
+    (* G.print_summaries Format.std_formatter dsg ~num_summaries:100; *)
     (* G.dump_dot dsg ~filename:(abs_of_rel_path "solved_experiement.dsg.dot") ~num_daigs:100; *)
     { dsg; cg = g.cg; parse = g.parse }
 

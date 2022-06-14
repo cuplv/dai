@@ -152,6 +152,20 @@ let filter ~fns file =
 let dump_dot ~filename (cg : forward_t) : unit =
   Graph.to_dot (module G) (to_graph cg) ~filename ~string_of_node:(Format.asprintf "\"%s\"")
 
+let print_scc_stats (scc : scc) =
+  Format.print_string "[EXPERIMENT][CALLGRAPH] scc stats\n";
+  Format.printf "[EXPERIMENT][CALLGRAPH] %i groups\n" (Graphlib.Std.Partition.number_of_groups scc);
+  let group_sizes =
+    Regular.Std.Seq.map (Graphlib.Std.Partition.groups scc) ~f:(fun group ->
+        Graphlib.Std.Group.enum group |> Regular.Std.Seq.length)
+  in
+  Format.printf "[EXPERIMENT][CALLGRAPH] min/max: %i/%i\n"
+    (Option.value_exn (Regular.Std.Seq.max_elt group_sizes ~compare:(fun a b -> b - a)))
+    (Option.value_exn (Regular.Std.Seq.max_elt group_sizes ~compare:(fun a b -> a - b)));
+  Format.printf "[EXPERIMENT][CALLGRAPH] sum: %i\n"
+    (Regular.Std.Seq.fold group_sizes ~init:0 ~f:( + ))
+(* Regular.Std.Seq.iter group_sizes ~f:(Format.printf "[CALLGRAPH][GROUP] size: %i") *)
+
 let%test "procedures example" =
   let src_file = Src_file.of_file (abs_of_rel_path "test_cases/procedures.callgraph") in
   let fns =
