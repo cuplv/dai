@@ -154,16 +154,25 @@ let dump_dot ~filename (cg : forward_t) : unit =
 
 let print_scc_stats (scc : scc) =
   Format.print_string "[EXPERIMENT][CALLGRAPH] scc stats\n";
-  Format.printf "[EXPERIMENT][CALLGRAPH] %i groups\n" (Graphlib.Std.Partition.number_of_groups scc);
+  let num_of_sccs = Graphlib.Std.Partition.number_of_groups scc in
   let group_sizes =
     Regular.Std.Seq.map (Graphlib.Std.Partition.groups scc) ~f:(fun group ->
         Graphlib.Std.Group.enum group |> Regular.Std.Seq.length)
   in
-  Format.printf "[EXPERIMENT][CALLGRAPH] min/max: %i/%i\n"
-    (Option.value_exn (Regular.Std.Seq.max_elt group_sizes ~compare:(fun a b -> b - a)))
-    (Option.value_exn (Regular.Std.Seq.max_elt group_sizes ~compare:(fun a b -> a - b)));
-  Format.printf "[EXPERIMENT][CALLGRAPH] sum: %i\n"
-    (Regular.Std.Seq.fold group_sizes ~init:0 ~f:( + ))
+  let total_num_methods = Float.of_int (Regular.Std.Seq.fold group_sizes ~init:0 ~f:( + )) in
+  let largest_scc_size =
+    Option.value_exn (Regular.Std.Seq.max_elt group_sizes ~compare:(fun a b -> a - b))
+  in
+  Format.printf "[EXPERIMENT][CALLGRAPH][STAT] %i groups\n" num_of_sccs;
+  Format.printf "[EXPERIMENT][CALLGRAPH][STAT] max (max/total): %i (%f)\n" largest_scc_size
+    (Float.of_int largest_scc_size /. total_num_methods);
+  Format.printf "[EXPERIMENT][CALLGRAPH][STAT] sum(average): %f(%f)\n" total_num_methods
+    (total_num_methods /. Float.of_int num_of_sccs);
+  Format.printf "[EXPERIMENT][CALLGRAPH][STAT] num w/size>1: %i\n"
+    (Regular.Std.Seq.length (Regular.Std.Seq.filter group_sizes ~f:(fun a -> a > 1)));
+  Regular.Std.Seq.iter
+    (Regular.Std.Seq.filter group_sizes ~f:(fun a -> a > 1))
+    ~f:(Format.printf "[EXPERIMENT][CALLGRAPH][GROUP] size: %i\n")
 (* Regular.Std.Seq.iter group_sizes ~f:(Format.printf "[CALLGRAPH][GROUP] size: %i") *)
 
 let%test "procedures example" =
