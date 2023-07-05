@@ -27,7 +27,7 @@ let analyze =
              [src_dir] as the pre-edit and [edit-dir] as the post-edit version"
       and prev_cg =
         flag "prev-callgraph" (optional string)
-          ~doc:"<cg> path toserialized callgraph for src_dir program version"
+          ~doc:"<cg> path to serialized callgraph for src_dir program version"
       and next_cg =
         flag "next-callgraph" (optional string)
           ~doc:"<cg> path to serialized callgraph for next_dir program version"
