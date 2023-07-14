@@ -423,7 +423,7 @@ module Make (Dom : Abstract.Dom) = struct
   let ref_by_name nm = G.nodes >> Seq.find ~f:(Ref.name >> Name.equal nm)
 
   let ref_by_name_exn nm g =
-    match ref_by_name nm g with Some r -> r | None -> raise (Ref_not_found (`By_name nm))
+    match ref_by_name nm g with Some r -> r | None -> raise_notrace (Ref_not_found (`By_name nm))
 
   (** Directly implements the DAIG Encoding procedure of PLDI'21; OCaml variables are labelled by LaTeX equivalents where applicable
       [extra_back_edges] and [loop_iteration_ctx] are extensions to support DAIG construction for partial programs;
@@ -665,7 +665,7 @@ module Make (Dom : Abstract.Dom) = struct
     >> Seq.to_list
     >> function
     | [ r ] -> r
-    | [] -> raise (Ref_not_found (`By_loc loc))
+    | [] -> raise_notrace (Ref_not_found (`By_loc loc))
     | [ r1; r2 ] -> (
         match Ref.(name r1, name r2) with
         | Name.Loc _, Name.Iterate _ -> r1
@@ -704,6 +704,7 @@ module Make (Dom : Abstract.Dom) = struct
       | Name.(Iterate (ic, Loc l)) -> (List.find_exn ic ~f:(snd >> Cfg.Loc.equal l) |> fst, l)
       | _ -> failwith "Current iterate [curr_iter] must be an iterate."
     in
+    if curr_idx > 50 then failwith "more than 50 iterations is suspect";
     let fixpoint = ref_by_name_exn (Name.unset_iterate loop_head (Ref.name curr_iter)) daig in
     let prev_iter =
       ref_by_name_exn (Name.set_iterate (curr_idx - 1) loop_head (Ref.name curr_iter)) daig
