@@ -2,6 +2,11 @@
 
 DAI=./_build/default/src/synthetic_benchmarks/exec.exe
 N=2500
-JOBS=24
+JOBS=6
+
+# NOTE the following are just for chameleon cloud machines in the setup for TOPLAS revisions...
+DAI_ROOT=/home/cc/code/dai/
+LD_LIBRARY_PATH=/home/cc/.opam/dai/share/apron/lib:/home/cc
+DAI=/home/cc/dai-synth
 
 parallel -j $JOBS ::: $DAI "$DAI -d" "$DAI -i" "$DAI -d -i" ::: $N ::: -s ::: $@
