@@ -1,14 +1,15 @@
 #!/bin/sh
 echo "RUNNING ANALYSIS CONFIGS ON $1"
-echo "BATCH"
-./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph  | grep EXPERIMENT > $2/$1.batch
 
+echo "BATCH"
+/usr/bin/time -o $2/$1.batch.time ./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph  | grep EXPERIMENT > $2/$1.batch
 echo "INCREMENTAL"
-./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -incr  | grep EXPERIMENT > $2/$1.incr
+/usr/bin/time -o $2/$1.incr.time ./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -incr  | grep EXPERIMENT > $2/$1.incr
 
 if test -f "experiment_inputs/$1/query"; then
     echo "DEMAND-DRIVEN"
-./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" | grep EXPERIMENT > $2/$1.dd
+/usr/bin/time -o $2/$1.dd.time ./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" | grep EXPERIMENT > $2/$1.dd
     echo "DEMAND-DRIVEN and INCREMENTAL"
-./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" -incr | grep EXPERIMENT > $2/$1.ddincr
+/usr/bin/time -o $2/$1.ddincr.time ./dai _bugswarm/$1/fail -edit _bugswarm/$1/pass -prev experiment_inputs/$1/fail/callgraph -next experiment_inputs/$1/pass/callgraph -demand "$(<experiment_inputs/$1/query)" -incr | grep EXPERIMENT > $2/$1.ddincr
 fi
+
