@@ -287,7 +287,8 @@ let edges_btwn (cfg : G.t) ~(src : G.node) ~(dst : G.node) : G.Edge.Set.t =
   in
   edges_btwn_impl [ src ] G.Edge.Set.empty
 
-let dump_dot_intraproc ?print ~filename (cfg : t) =
+let dump_dot_intraproc (exc_exit_node : Loc.t) ?print ~filename (cfg : t) =
+  let cfg = G.Node.remove exc_exit_node cfg in
   let output_fd =
     if Option.is_some print then Unix.stdout else Unix.openfile ~mode:[ Unix.O_WRONLY ] "/dev/null"
   in

@@ -241,7 +241,7 @@ module Make (Dom : Abstract.Dom) = struct
       List.fold daigs ~init:0 ~f:(fun sum daig -> sum + D.nonempty_astate_refs daig)
     in
     let total_deps : int = Dep.count () in
-    Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i, %i, %i\n" (List.length daigs) total_deps
+    Format.fprintf fs "[EXPERIMENT][STATS] %i, %i, %i, %i, %i, %i@." (List.length daigs) total_deps
       procedures total_astates nonemp_astates self_loops
 
   let materialize_daig ~(fn : Cfg.Fn.t) ~(entry_state : Dom.t) (dsg : t) =
@@ -255,7 +255,9 @@ module Make (Dom : Abstract.Dom) = struct
         let (daig as data) = D.of_cfg ~entry_state ~cfg ~fn in
         (try D.assert_wf daig
          with _ ->
-           Cfg.dump_dot_intraproc ~filename:(abs_of_rel_path "assertwf_fail.cfg.dot") cfg;
+           Cfg.dump_dot_intraproc fn.exc_exit
+             ~filename:(abs_of_rel_path "assertwf_fail.cfg.dot")
+             cfg;
            D.dump_dot ~filename:(abs_of_rel_path "assertwf_fail.daig.dot") daig;
            failwith (Format.asprintf "assertwf_fail: %a" Cfg.Fn.pp fn));
         let daigs = Map.add_exn daigs ~key:entry_state ~data in
