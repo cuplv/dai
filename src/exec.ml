@@ -60,7 +60,8 @@ let analyze =
             (module Experiment_harness.DSG_wrapper (Domain.Unit_dom) : Experiment_harness.S)
           else if null_dom then
             (module Experiment_harness.DSG_wrapper (Domain.Null_dom) : Experiment_harness.S)
-          else (module Experiment_harness.DSG_wrapper (Domain.Array_bounds) : Experiment_harness.S)
+          else
+            (module Experiment_harness.DSG_wrapper (Domain.Oct_array_bounds) : Experiment_harness.S)
         in
         if Option.is_some filter_cg then
           let fns = Harness.(init src_dir |> fns) in

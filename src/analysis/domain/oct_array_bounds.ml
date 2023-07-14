@@ -79,59 +79,59 @@ let apron_var_of_field addr field = Var.of_string (Format.asprintf "__dai_%a.%s"
 
 let apron_var_of_array_len addr = Var.of_string (Format.asprintf "__dai_%a.len" Addr.pp addr)
 
-let project_fields itv addrs =
-  Octagon.filter_env itv
+let project_fields oct addrs =
+  Octagon.filter_env oct
     ~f:
       (String.chop_prefix ~prefix:"__dai_alloc_"
       >> Option.exists
            ~f:(String.take_while ~f:Char.is_digit >> Int.of_string >> Addr.of_int >> Set.mem addrs)
       )
 
-let forget_vars vars (am, itv) =
+let forget_vars vars (am, oct) =
   let new_am =
     let vars_to_forget = Map.keys am |> List.filter ~f:(Set.mem vars) in
     Addr_map.forget vars_to_forget am
   in
-  let new_itv =
+  let new_oct =
     let vars_to_forget =
-      Abstract1.env itv |> Environment.vars |> snd
+      Abstract1.env oct |> Environment.vars |> snd
       |> Array.filter ~f:(Var.to_string >> fun v -> Set.mem vars v)
     in
-    Octagon.forget vars_to_forget itv
+    Octagon.forget vars_to_forget oct
   in
-  (new_am, new_itv)
+  (new_am, new_oct)
 
 let forget_used_tmp_vars stmt state =
   let used_tmps = Ast.Stmt.uses stmt |> Set.filter ~f:(String.is_prefix ~prefix:"__dai_tmp") in
   forget_vars used_tmps state
 
-let texpr_of_expr (am, itv) expr =
+let texpr_of_expr (am, oct) expr =
   let man = Octagon.get_man () in
   let join_intervals (itv1 : Interval.t) (itv2 : Interval.t) =
     let inf = if Scalar.cmp itv1.inf itv2.inf < 0 then itv1.inf else itv2.inf in
     let sup = if Scalar.cmp itv1.sup itv2.sup > 0 then itv1.sup else itv2.sup in
     Interval.of_infsup inf sup
   in
-  let handle_array_or_field_expr itv = function
+  let handle_array_or_field_expr oct = function
     | Ast.Expr.Deref { rcvr; field = "length" } ->
         Map.find am rcvr >>= fun aaddr ->
         if Set.is_empty aaddr then None
         else
           Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
               let len = apron_var_of_array_len addr in
-              if Environment.mem_var (Abstract1.env itv) len then
-                join_intervals acc (Abstract1.bound_variable man itv len)
+              if Environment.mem_var (Abstract1.env oct) len then
+                join_intervals acc (Abstract1.bound_variable man oct len)
               else acc)
           |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))
     | Ast.Expr.Deref { rcvr; field } ->
         ( Map.find am rcvr >>| fun aaddr ->
           Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
               let field_var = apron_var_of_field addr field in
-              join_intervals acc (Octagon.lookup itv field_var)) )
+              join_intervals acc (Octagon.lookup oct field_var)) )
         >>| fun interval -> Texpr1.Cst (Coeff.Interval interval)
         (*      Map.find am rcvr >>= fun aaddr -> *)
         (*
-        Octagon.texpr_of_expr ~fallback:handle_array_expr itv field >>| Octagon.eval_texpr itv
+        Octagon.texpr_of_expr ~fallback:handle_array_expr oct field >>| Octagon.eval_texpr oct
         >>= fun { inf; sup } ->
         Map.find am rcvr_ident >>= fun aaddr ->
         if Scalar.is_infty inf < 0 || Scalar.is_infty sup > 0 then
@@ -150,8 +150,8 @@ let texpr_of_expr (am, itv) expr =
           List.fold (range min_idx max_idx) ~init:Interval.bottom ~f:(fun a idx ->
               Addr.Abstract.fold aaddr ~init:a ~f:(fun a addr ->
                   let av = apron_var_of_array_cell addr idx in
-                  if Environment.mem_var (Abstract1.env itv) av then
-                    let value = Abstract1.bound_variable man itv av in
+                  if Environment.mem_var (Abstract1.env oct) av then
+                    let value = Abstract1.bound_variable man oct av in
                     join_intervals a value
                   else a))
           |> fun v -> Some (Texpr1.Cst (Coeff.Interval v))*)
@@ -164,22 +164,22 @@ let texpr_of_expr (am, itv) expr =
         | Some aaddr ->
             Set.fold aaddr ~init:Interval.bottom ~f:(fun acc addr ->
                 let v = apron_var_of_array_cell addr idx in
-                if Environment.mem_var (Abstract1.env itv) v then
-                  join_intervals acc (Octagon.lookup itv v)
+                if Environment.mem_var (Abstract1.env oct) v then
+                  join_intervals acc (Octagon.lookup oct v)
                 else acc)
             |> fun v -> Some (Texpr1.Cst (Coeff.Interval v)))
     | _ -> None
   in
-  Octagon.texpr_of_expr itv ~fallback:handle_array_or_field_expr expr
+  Octagon.texpr_of_expr oct ~fallback:handle_array_or_field_expr expr
 
-let extend_env_by_uses stmt (am, itv) =
-  let env = Abstract1.env itv in
+let extend_env_by_uses stmt (am, oct) =
+  let env = Abstract1.env oct in
   let man = Octagon.get_man () in
   Ast.Stmt.uses stmt
   |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
   |> Set.to_array |> Array.map ~f:Var.of_string
   |> Environment.add env [||]
-  |> fun new_env -> (am, Abstract1.change_environment man itv new_env false)
+  |> fun new_env -> (am, Octagon.change_environment man oct new_env false)
 
 open Ast
 
@@ -192,101 +192,103 @@ let interpret stmt phi =
       (temporary variables are added by Dai.Frontend.Cfg_parser to extract complicated Java expressions to equivalent sequences of simpler statements;
          e.g. `x[y] = foo(bar(o.f));` parses to `tmp1 = o.f; tmp2 = bar(tmp1); tmp3 = foo(tmp2); x[y] = tmp3;`
          each such temp variable is used exactly once so can be forgotten after that use) *)
-  let am, itv = extend_env_by_uses stmt phi in
+  let am, oct = extend_env_by_uses stmt phi in
   forget_used_tmp_vars stmt
   @@
   (* transfer functions for non-procedure-call statements *)
   match stmt with
   | Assign { lhs; rhs = Expr.Var v } when Map.mem am v ->
-      (Map.set am ~key:lhs ~data:(Map.find_exn am v), itv)
-  | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } ->
+      (Map.set am ~key:lhs ~data:(Map.find_exn am v), oct)
+  | Assign { lhs; rhs = Expr.Array_literal { elts; alloc_site } } -> (
       let am = Addr_map.add am ~key:lhs ~addr:alloc_site in
       let len = List.length elts in
-      let itv =
-        Octagon.assign itv
+      let oct =
+        Octagon.assign oct
           (apron_var_of_array_len alloc_site)
           Texpr1.(Cst (Coeff.Scalar (Scalar.of_int len)))
       in
 
       ( am,
-        List.foldi elts ~init:([], []) ~f:(fun i (acc_vs, acc_itvs) elt ->
-            match texpr_of_expr (am, itv) elt >>| Octagon.eval_texpr itv with
-            | Some elt_itv ->
+        List.foldi elts ~init:([], []) ~f:(fun i (acc_vs, acc_octs) elt ->
+            match texpr_of_expr (am, oct) elt >>| Octagon.eval_texpr oct with
+            | Some elt_oct ->
                 let v = apron_var_of_array_cell alloc_site (Int64.of_int i) in
-                (v :: acc_vs, elt_itv :: acc_itvs)
-            | _ -> (acc_vs, acc_itvs))
-        |> fun (vs, itvs) ->
+                (v :: acc_vs, elt_oct :: acc_octs)
+            | _ -> (acc_vs, acc_octs))
+        |> fun (vs, octs) ->
         let vs = Array.of_list vs in
-        let itvs = Array.of_list itvs in
+        let octs = Array.of_list octs in
 
         let new_env = Environment.make [||] vs in
-        let old_env = Abstract1.env itv in
-        let env = Environment.lce old_env new_env in
-        let itv = Abstract1.change_environment man itv env false in
-        Abstract1.meet man itv @@ Abstract1.of_box man env vs itvs )
+        let old_env = Abstract1.env oct in
+        let lce = Environment.lce old_env new_env in
+        let oct = Octagon.change_environment man oct lce false in
+        try Abstract1.meet man oct @@ Abstract1.of_box man (Abstract1.env oct) vs octs
+        with Apron.Manager.Error { exn = _; funid = _; msg } ->
+          failwith ("Apron Manager Error: " ^ msg) ))
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
-      match texpr_of_expr (am, itv) rhs with
-      | Some texpr -> (am, Octagon.assign itv lhs texpr)
+      match texpr_of_expr (am, oct) rhs with
+      | Some texpr -> (am, Octagon.assign oct lhs texpr)
       | None ->
-          if Environment.mem_var (Abstract1.env itv) lhs then
+          if Environment.mem_var (Abstract1.env oct) lhs then
             (* lhs was constrained, quantify that out *)
-            (am, Abstract1.forget_array man itv [| lhs |] false)
-          else (* lhs was unconstrained, treat as a `skip`*) (am, itv))
+            (am, Abstract1.forget_array man oct [| lhs |] false)
+          else (* lhs was unconstrained, treat as a `skip`*) (am, oct))
   (* let new_env =
        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
      in
-     let itv_new_env = Abstract1.change_environment man itv new_env true in
-     match texpr_of_expr (am, itv) rhs with
+     let oct_new_env = Abstract1.change_environment man oct new_env true in
+     match texpr_of_expr (am, oct) rhs with
      | Some rhs_texpr ->
-         (am, Abstract1.assign_texpr man itv_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None)
+         (am, Abstract1.assign_texpr man oct_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None)
      | None ->
          if Environment.mem_var env lhs then
            (* lhs was constrained, quantify that out *)
-           (am, Abstract1.forget_array man itv [| lhs |] false)
-         else (* lhs was unconstrained, treat as a `skip`*) (am, itv)*)
+           (am, Abstract1.forget_array man oct [| lhs |] false)
+         else (* lhs was unconstrained, treat as a `skip`*) (am, oct)*)
   | Assume e ->
-      (am, Octagon.meet_with_constraint ~fallback:(fun itv e -> texpr_of_expr (am, itv) e) itv e)
-  | Skip -> (am, itv)
+      (am, Octagon.meet_with_constraint ~fallback:(fun oct e -> texpr_of_expr (am, oct) e) oct e)
+  | Skip -> (am, oct)
   | Expr _ -> failwith "todo: Oct_array_bounds#interpret Expr"
   | Write { rcvr; field; rhs } ->
-      let itv =
+      let oct =
         match Map.find am rcvr with
-        | None -> itv
+        | None -> oct
         | Some aaddr ->
-            Set.fold aaddr ~init:itv ~f:(fun itv addr ->
+            Set.fold aaddr ~init:oct ~f:(fun oct addr ->
                 let v = apron_var_of_field addr field in
-                match texpr_of_expr (am, itv) rhs with
-                | Some texpr -> Octagon.weak_assign itv v texpr
+                match texpr_of_expr (am, oct) rhs with
+                | Some texpr -> Octagon.weak_assign oct v texpr
                 | None ->
-                    if Environment.mem_var (Abstract1.env itv) v then
+                    if Environment.mem_var (Abstract1.env oct) v then
                       (* lhs was constrained, quantify that out *)
-                      Abstract1.forget_array man itv [| v |] false
-                    else (* lhs was unconstrained, treat as a `skip`*) itv)
+                      Abstract1.forget_array man oct [| v |] false
+                    else (* lhs was unconstrained, treat as a `skip`*) oct)
       in
 
-      (am, itv)
+      (am, oct)
   | Array_write { rcvr; idx; rhs } ->
-      let itv =
+      let oct =
         match Map.find am rcvr with
-        | None -> itv
+        | None -> oct
         | Some aaddr ->
             let apply_write =
-              match texpr_of_expr (am, itv) rhs with
-              | Some texpr -> fun itv v -> Octagon.weak_assign itv v texpr
+              match texpr_of_expr (am, oct) rhs with
+              | Some texpr -> fun oct v -> Octagon.weak_assign oct v texpr
               | None ->
-                  fun itv v ->
-                    if Environment.mem_var (Abstract1.env itv) v then
-                      Abstract1.forget_array man itv [| v |] false
-                    else itv
+                  fun oct v ->
+                    if Environment.mem_var (Abstract1.env oct) v then
+                      Abstract1.forget_array man oct [| v |] false
+                    else oct
             in
             let idx_interval =
-              match texpr_of_expr (am, itv) idx with
+              match texpr_of_expr (am, oct) idx with
               | None -> Interval.top
-              | Some texpr -> Octagon.eval_texpr itv texpr
+              | Some texpr -> Octagon.eval_texpr oct texpr
             in
             let affected_vars =
-              Environment.vars (Abstract1.env itv)
+              Environment.vars (Abstract1.env oct)
               |> snd
               |> Array.filter ~f:(fun v ->
                      match array_cell_of_apron_var v with
@@ -301,9 +303,9 @@ let interpret stmt phi =
                                "index larger than 32-bit int max seems fishy. sound to return true \
                                 here."))
             in
-            Array.fold affected_vars ~init:itv ~f:(fun itv v -> apply_write itv v)
+            Array.fold affected_vars ~init:oct ~f:(fun oct v -> apply_write oct v)
       in
-      (am, itv)
+      (am, oct)
   | Call _ | Exceptional_call _ -> failwith "unreachable, calls interpreted by [call] instead"
 
 let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
@@ -328,13 +330,13 @@ let array_accesses : Stmt.t -> (Expr.t * Expr.t) list =
 (** Some(true/false) indicates [idx] is definitely in/out-side of [addr]'s bounds;
     None indicates it could be either
 *)
-let is_in_bounds addr (idx : Interval.t) itv =
-  let env = Abstract1.env itv in
+let is_in_bounds addr (idx : Interval.t) oct =
+  let env = Abstract1.env oct in
   let arr_len = apron_var_of_array_len addr in
   if not (Environment.mem_var env arr_len) then None
   else
     let len_itv =
-      Texpr1.of_expr env (Texpr1.Var arr_len) |> Abstract1.bound_texpr (Octagon.get_man ()) itv
+      Texpr1.of_expr env (Texpr1.Var arr_len) |> Abstract1.bound_texpr (Octagon.get_man ()) oct
     in
     let min_len, max_len = (len_itv.inf, len_itv.sup) in
     let zero = Scalar.of_int 0 in
@@ -344,16 +346,16 @@ let is_in_bounds addr (idx : Interval.t) itv =
 
 (** Lift [is_in_bounds] to take a receiver variable and index expression,
     and return a value of the same form as [is_in_bounds] *)
-let is_safe (var : string) (idx : Ast.Expr.t) ((am, itv) : t) =
+let is_safe (var : string) (idx : Ast.Expr.t) ((am, oct) : t) =
   if not @@ Map.mem am var then (
     Format.(fprintf std_formatter) "WARNING: No array address information available for %s\n" var;
     None)
   else
     Map.find am var >>= fun aaddr ->
-    texpr_of_expr (am, itv) idx >>| Octagon.eval_texpr itv >>= fun idx ->
+    texpr_of_expr (am, oct) idx >>| Octagon.eval_texpr oct >>= fun idx ->
     assert (not @@ Set.is_empty aaddr);
     Set.to_list aaddr
-    |> List.map ~f:(fun a -> is_in_bounds a idx itv)
+    |> List.map ~f:(fun a -> is_in_bounds a idx oct)
     |> List.reduce_exn ~f:(fun x y ->
            match (x, y) with Some a, Some b when Bool.equal a b -> Some a | _ -> None)
 
@@ -372,12 +374,12 @@ let arrayify_varargs (callee : Cfg.Fn.t) actuals formals phi : Expr.t list * t =
   (List.take actuals (formals - 1) @ [ Expr.Var tmp_var ], phi')
 
 let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
-  let caller_am, caller_itv = extend_env_by_uses callsite caller_state in
+  let caller_am, caller_oct = extend_env_by_uses callsite caller_state in
   match callsite with
   | Ast.Stmt.Call { rcvr; actuals; _ } | Ast.Stmt.Exceptional_call { rcvr; actuals; _ } ->
-      let actuals, (caller_am, caller_itv) =
-        if List.(length actuals = length callee.formals) then (actuals, (caller_am, caller_itv))
-        else arrayify_varargs callee actuals (List.length callee.formals) (caller_am, caller_itv)
+      let actuals, (caller_am, caller_oct) =
+        if List.(length actuals = length callee.formals) then (actuals, (caller_am, caller_oct))
+        else arrayify_varargs callee actuals (List.length callee.formals) (caller_am, caller_oct)
       in
       (* re-scope the address map to include only the formal parameters *)
       let callee_am =
@@ -390,20 +392,20 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
             | _ -> am)
       in
       (* project the caller state's interval down to just formal parameters and fields thereof and rebind receiver fields to callee-local variables *)
-      let callee_itv =
-        let param_fields_itv =
+      let callee_oct =
+        let param_fields_oct =
           Map.data callee_am
           |> List.fold ~init:(Set.empty (module Addr)) ~f:Set.union
-          |> project_fields caller_itv
+          |> project_fields caller_oct
         in
         let param_bindings =
           List.(filter_map (zip_exn callee.formals actuals)) ~f:(fun (f, a) ->
-              texpr_of_expr caller_state a >>| Octagon.eval_texpr caller_itv
+              texpr_of_expr caller_state a >>| Octagon.eval_texpr caller_oct
               >>| pair (Var.of_string f))
         in
-        let params_itv =
-          List.fold param_bindings ~init:param_fields_itv ~f:(fun itv (formal, bound) ->
-              Octagon.assign itv formal Texpr1.(Cst (Coeff.Interval bound)))
+        let params_oct =
+          List.fold param_bindings ~init:param_fields_oct ~f:(fun oct (formal, bound) ->
+              Octagon.assign oct formal Texpr1.(Cst (Coeff.Interval bound)))
         in
         let rcvr_field_bindings =
           if String.equal rcvr "this" then
@@ -411,12 +413,12 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
             Declared_fields.lookup ~package ~class_name fields |> fun { instance; _ } ->
             Set.fold instance ~init:[] ~f:(fun acc var_str ->
                 let var = Var.of_string var_str in
-                if Environment.mem_var (Abstract1.env caller_itv) var then
-                  (var, Octagon.lookup caller_itv var) :: acc
+                if Environment.mem_var (Abstract1.env caller_oct) var then
+                  (var, Octagon.lookup caller_oct var) :: acc
                 else acc)
           else
             let rcvr_aaddr = Map.find caller_am rcvr |> Option.value ~default:Addr.Abstract.empty in
-            Abstract1.env caller_itv |> Environment.vars |> snd
+            Abstract1.env caller_oct |> Environment.vars |> snd
             |> Array.fold ~init:[] ~f:(fun acc var ->
                    match String.chop_prefix (Var.to_string var) ~prefix:"__dai_alloc_" with
                    | Some var_str
@@ -425,17 +427,17 @@ let call ~(callee : Cfg.Fn.t) ~callsite ~caller_state ~fields =
                        let fld_name =
                          String.(index_exn var_str '.' |> Int.succ |> drop_prefix var_str)
                        in
-                       (Var.of_string fld_name, Octagon.lookup caller_itv var) :: acc
+                       (Var.of_string fld_name, Octagon.lookup caller_oct var) :: acc
                    | _ -> acc)
         in
-        List.fold ~init:params_itv rcvr_field_bindings ~f:(fun itv (var, value) ->
-            Octagon.assign itv var Texpr1.(Cst (Coeff.Interval value)))
+        List.fold ~init:params_oct rcvr_field_bindings ~f:(fun oct (var, value) ->
+            Octagon.assign oct var Texpr1.(Cst (Coeff.Interval value)))
       in
-      (callee_am, callee_itv)
+      (callee_am, callee_oct)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
-    ~caller_state:(caller_amap, caller_itv) ~return_state:(return_amap, return_itv) ~fields =
+    ~caller_state:(caller_amap, caller_oct) ~return_state:(return_amap, return_oct) ~fields =
   forget_used_tmp_vars callsite
   @@
   match callsite with
@@ -463,53 +465,53 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
       in
       let retvar = Var.of_string Cfg.retvar in
       let return_val =
-        if Environment.mem_var (Abstract1.env return_itv) retvar then
-          Abstract1.bound_variable man return_itv retvar
+        if Environment.mem_var (Abstract1.env return_oct) retvar then
+          Abstract1.bound_variable man return_oct retvar
         else Interval.top
       in
       (* (1) transfer constraints on the return value (and its fields) to the lhs of the callsite, then
          (2) transfer constraints on instance fields at the callee return to equivalent constraints on the receiver's fields
          (3) transfer constraints on static fields at the callee return to equivalents on the receiver, if they share a class
       *)
-      let itv =
+      let oct =
         (* (1) *)
         ((match lhs with
          | Some lhs ->
-             Octagon.assign caller_itv (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
-         | None -> caller_itv)
+             Octagon.assign caller_oct (Var.of_string lhs) Texpr1.(Cst (Coeff.Interval return_val))
+         | None -> caller_oct)
         |>
         match Map.find return_amap Cfg.retvar with
         | None -> Fn.id
         | Some retval_aaddr ->
-            let retval_fields_itv = project_fields return_itv retval_aaddr in
-            Octagon.meet retval_fields_itv)
+            let retval_fields_oct = project_fields return_oct retval_aaddr in
+            Octagon.meet retval_fields_oct)
         (* (2) *)
-        |> fun itv ->
-        Set.fold callee_instance_fields ~init:itv ~f:(fun itv fld ->
+        |> fun oct ->
+        Set.fold callee_instance_fields ~init:oct ~f:(fun oct fld ->
             let fld_var = Var.of_string fld in
-            if Environment.mem_var (Abstract1.env return_itv) fld_var then
-              let fld_val = Octagon.lookup return_itv fld_var in
+            if Environment.mem_var (Abstract1.env return_oct) fld_var then
+              let fld_val = Octagon.lookup return_oct fld_var in
               match rcvr_aaddr with
               | `This ->
-                  Octagon.assign itv (Var.of_string fld) Texpr1.(Cst (Coeff.Interval fld_val))
+                  Octagon.assign oct (Var.of_string fld) Texpr1.(Cst (Coeff.Interval fld_val))
               | `AAddr aaddr ->
-                  Set.fold aaddr ~init:itv ~f:(fun itv addr ->
-                      Octagon.assign itv (apron_var_of_field addr fld)
+                  Set.fold aaddr ~init:oct ~f:(fun oct addr ->
+                      Octagon.assign oct (apron_var_of_field addr fld)
                         Texpr1.(Cst (Coeff.Interval fld_val)))
-              | `Static | `None -> itv
-            else itv)
+              | `Static | `None -> oct
+            else oct)
         (* (3) *)
         |>
-        if Cfg.Fn.is_same_class callee caller then fun itv ->
+        if Cfg.Fn.is_same_class callee caller then fun oct ->
           let static_fields =
             Declared_fields.lookup_static fields ~package:callee.method_id.package
               ~class_name:callee.method_id.class_name
           in
-          Set.fold static_fields ~init:itv ~f:(fun itv fld ->
+          Set.fold static_fields ~init:oct ~f:(fun oct fld ->
               let fld_var = Var.of_string fld in
-              let fld_val = Octagon.lookup return_itv fld_var in
-              if Interval.is_top fld_val then itv
-              else Octagon.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
+              let fld_val = Octagon.lookup return_oct fld_var in
+              if Interval.is_top fld_val then oct
+              else Octagon.assign oct fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
         else Fn.id
       in
       (* (1) bind the receiver's abstract address if needed, then
@@ -529,7 +531,7 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
             Addr_map.set ~key:(Option.value_exn lhs) ~aaddr:retval_aaddr
         | _ -> Fn.id
       in
-      (amap, itv)
+      (amap, oct)
   | Ast.Stmt.Exceptional_call { rcvr; meth = _; actuals = _ } ->
       (* [rcvr_aaddr] is one of:
          * [`This], indicating an absent or "this" receiver;
@@ -553,35 +555,35 @@ let return ~(callee : Cfg.Fn.t) ~(caller : Cfg.Fn.t) ~callsite
         | Some aaddr -> Addr_map.set caller_amap ~key:Cfg.exc_retvar ~aaddr
         | _ -> caller_amap
       in
-      let itv =
-        Set.fold callee_instance_fields ~init:caller_itv ~f:(fun itv fld ->
+      let oct =
+        Set.fold callee_instance_fields ~init:caller_oct ~f:(fun oct fld ->
             let fld_var = Var.of_string fld in
-            if Environment.mem_var (Abstract1.env return_itv) fld_var then
-              let fld_val = Octagon.lookup return_itv fld_var in
+            if Environment.mem_var (Abstract1.env return_oct) fld_var then
+              let fld_val = Octagon.lookup return_oct fld_var in
               match rcvr_aaddr with
               | `This ->
-                  Octagon.assign itv (Var.of_string fld) Texpr1.(Cst (Coeff.Interval fld_val))
+                  Octagon.assign oct (Var.of_string fld) Texpr1.(Cst (Coeff.Interval fld_val))
               | `AAddr aaddr ->
-                  Set.fold aaddr ~init:itv ~f:(fun itv addr ->
-                      Octagon.assign itv (apron_var_of_field addr fld)
+                  Set.fold aaddr ~init:oct ~f:(fun oct addr ->
+                      Octagon.assign oct (apron_var_of_field addr fld)
                         Texpr1.(Cst (Coeff.Interval fld_val)))
-              | `Static | `None -> itv
-            else itv)
+              | `Static | `None -> oct
+            else oct)
         (* (3) *)
         |>
-        if Cfg.Fn.is_same_class callee caller then fun itv ->
+        if Cfg.Fn.is_same_class callee caller then fun oct ->
           let static_fields =
             Declared_fields.lookup_static fields ~package:callee.method_id.package
               ~class_name:callee.method_id.class_name
           in
-          Set.fold static_fields ~init:itv ~f:(fun itv fld ->
+          Set.fold static_fields ~init:oct ~f:(fun oct fld ->
               let fld_var = Var.of_string fld in
-              let fld_val = Octagon.lookup return_itv fld_var in
-              if Interval.is_top fld_val then itv
-              else Octagon.assign itv fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
+              let fld_val = Octagon.lookup return_oct fld_var in
+              if Interval.is_top fld_val then oct
+              else Octagon.assign oct fld_var Texpr1.(Cst (Coeff.Interval fld_val)))
         else Fn.id
       in
-      (amap, itv)
+      (amap, oct)
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 
 let noop_library_methods : String.Set.t =
@@ -604,9 +606,9 @@ let approximate_missing_callee ~caller_state ~callsite =
   match callsite with
   (* unknown constructor -- just bind the address and ignore the rest *)
   | Ast.Stmt.Call { lhs = Some lhs; rcvr = _; meth = _; actuals = _; alloc_site = Some a } ->
-      let caller_am, caller_itv = caller_state in
+      let caller_am, caller_oct = caller_state in
       let am = Addr_map.set caller_am ~key:lhs ~aaddr:(Addr.Abstract.singleton a) in
-      (am, caller_itv)
+      (am, caller_oct)
   (* unknown constructor, value being discarded -- no-op*)
   | Ast.Stmt.Call { lhs = None; alloc_site = Some _; _ } -> caller_state
   (* call to assumed-no-op library methods -- no-op*)
@@ -630,7 +632,7 @@ let approximate_missing_callee ~caller_state ~callsite =
          (3) address or value of lhs
          conservatively assuming that receiver and actual fields are modified by the call
       *)
-      let caller_am, caller_itv = caller_state in
+      let caller_am, caller_oct = caller_state in
       let affected_vars =
         rcvr :: List.filter_map actuals ~f:(function Expr.Var v -> Some v | _ -> None)
       in
@@ -639,18 +641,18 @@ let approximate_missing_callee ~caller_state ~callsite =
         |> List.map ~f:(Format.asprintf "__dai_%a" Addr.pp)
       in
       let am = Addr_map.forget (Option.to_list lhs) caller_am in
-      let itv =
+      let oct =
         let vars_to_forget =
-          Abstract1.env caller_itv |> Environment.vars |> snd
+          Abstract1.env caller_oct |> Environment.vars |> snd
           |> Array.filter
                ~f:
                  ( Var.to_string >> fun v ->
                    Option.exists lhs ~f:(String.equal v)
                    || List.exists affected_addrs ~f:(fun prefix -> String.is_prefix v ~prefix) )
         in
-        Octagon.forget vars_to_forget caller_itv
+        Octagon.forget vars_to_forget caller_oct
       in
-      (am, itv)
+      (am, oct)
   | Ast.Stmt.Exceptional_call _ -> caller_state
   | s -> failwith (Format.asprintf "error: %a is not a callsite" Ast.Stmt.pp s)
 

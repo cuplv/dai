@@ -33,18 +33,32 @@ open Syntax
 
 type t = Oct.t Abstract1.t
 
+(* "magic" constant bounding the dimensionality of octagons *)
+let max_env_size = 5
+
 let man = lazy (Oct.manager_alloc ())
 
 let get_man () = Lazy.force man
+
+let change_environment man oct new_env weak : t =
+  (* let new_env_size = Environment.size new_env in
+     let env =
+       if new_env_size > max_env_size then
+         let _, vars = Environment.vars new_env in
+         let truncated_vars = Array.sub vars ~pos:0 ~len:max_env_size in
+         Environment.make [||] truncated_vars
+       else new_env
+       in*)
+  Abstract1.change_environment man oct new_env weak
 
 let combine_envs x y =
   let man = get_man () in
   let x = Abstract1.minimize_environment man x in
   let y = Abstract1.minimize_environment man y in
   let new_env = Environment.lce (Abstract1.env x) (Abstract1.env y) in
-  pair
-    (Abstract1.change_environment man x new_env false)
-    (Abstract1.change_environment man y new_env false)
+  let x' = change_environment man x new_env false in
+  let y' = change_environment man y new_env false in
+  (x', y')
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let join l r =
@@ -56,7 +70,7 @@ let join l r =
    treating [l] as the accumulated result of previous joins/widens and [r] as the newest element of that sequence *)
 let widen l r =
   let l, r = combine_envs l r in
-  Abstract1.widening (get_man ()) r l
+  Abstract1.widening (get_man ()) l r
 
 (* Do not eta-reduce!  Will break lazy manager allocation *)
 let equal l r =
@@ -78,7 +92,13 @@ let meet l r =
 
 let ( <= ) = implies
 
-let pp fs oct = Format.fprintf fs @@ if is_bot oct then "bottom" else "non-bottom octagon"
+let pp fs oct =
+  if is_bot oct then Format.fprintf fs "bottom"
+  else
+    let env = Abstract1.env oct in
+    Format.fprintf fs "non-bottom octagon {{%a}} with env {{%a}}" Abstract1.print oct
+      (fun fs env -> Environment.print fs env)
+      env
 
 let sexp_of_t _ = failwith "Unimplemented"
 
@@ -93,12 +113,12 @@ let init = top
 (* given a boolean operation : [Tcons0.typ] and two operands, construct a Tcons1 encoding the constraint *)
 let mk_tcons env op l r =
   (* add tiny constant to right hand side to avoid float comparison wonkiness*)
-  let r =
-    if op = Tcons0.SUP then
-      Texpr1.Binop
-        (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Zero)
-    else r
-  in
+  (* let r =
+     if op = Tcons0.SUP then
+       Texpr1.Binop
+         (Texpr1.Add, r, Texpr1.Cst (Coeff.s_of_float 0.000001), Texpr1.Double, Texpr1.Zero)
+     else r
+     in*)
   let l_minus_r = Texpr1.Binop (Texpr1.Sub, l, r, Texpr1.Double, Texpr1.Zero) in
   Tcons1.make (Texpr1.of_expr env l_minus_r) op
 
@@ -127,7 +147,10 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) oct =
   let mk_arith_binop op l r = Some (Texpr1.Binop (op, l, r, Texpr1.Double, Texpr0.Zero)) in
   let mk_bool_binop i op l r = Some (mk_bool_binop i op l r) in
   function
-  | Expr.Var v -> Some (Texpr1.Var (Var.of_string v))
+  | Expr.Var v ->
+      let env = Abstract1.env oct in
+      let apron_var = Var.of_string v in
+      if Environment.mem_var env apron_var then Some (Texpr1.Var apron_var) else None
   | Expr.Lit (Int i) -> Some (Texpr1.Cst (Coeff.s_of_float (Float.of_int64 i)))
   | Expr.Lit (Float f) -> Some (Texpr1.Cst (Coeff.s_of_float f))
   | Expr.Lit (Bool b) -> Some (Texpr1.Cst (Coeff.s_of_float (if b then 1. else 0.)))
@@ -147,6 +170,22 @@ let rec texpr_of_expr ?(fallback = fun _ _ -> None) oct =
       | Ge -> mk_bool_binop oct Tcons0.SUPEQ l r
       | Lt -> mk_bool_binop oct Tcons0.SUP r l
       | Le -> mk_bool_binop oct Tcons0.SUPEQ r l
+      | And | Or -> Some (Texpr1.Cst (Coeff.i_of_float 0. 1.))
+      | BAnd | BOr | BXor ->
+          (* sending bitwise arihmetic to top because APRON does not support it *)
+          Some (Texpr1.Cst (Coeff.Interval Interval.top))
+      | LShift ->
+          (* IR expression `l >> r` becomes APRON expression `l * (2^r)` *)
+          let two_to_the_r = Texpr1.(Binop (Pow, Cst (Coeff.s_of_int 2), r, Double, Zero)) in
+          Some Texpr1.(Binop (Mul, l, two_to_the_r, Double, Zero))
+      | URShift | RShift ->
+          (* IR expression `l >> r` becomes APRON expression `l / (2^r)` *)
+          (* todo: mess with sign for unsigned shift --- this isn't quite right for negative values of [l] *)
+          let two_to_the_r = Texpr1.(Binop (Pow, Cst (Coeff.s_of_int 2), r, Double, Zero)) in
+          Some Texpr1.(Binop (Div, l, two_to_the_r, Double, Zero))
+      | Instanceof ->
+          (* result of instanceof is a bool; from interval's perspective, either a 0 or 1 *)
+          Some (Texpr1.Cst (Coeff.Interval (Interval.of_int 0 1)))
       | _ ->
           Format.fprintf Format.err_formatter "Binary op %a has no APRON equivalent\n" Binop.pp op;
           None)
@@ -186,24 +225,25 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
           Abstract1.meet_tcons_array man oct tcons_array)
     |> Option.value ~default:oct
   in
+  let flip_binop =
+    let open Ast.Binop in
+    function
+    | And -> Some Or
+    | Or -> Some And
+    | Eq -> Some NEq
+    | NEq -> Some Eq
+    | Gt -> Some Le
+    | Lt -> Some Ge
+    | Ge -> Some Lt
+    | Le -> Some Gt
+    | _ -> None
+  in
   function
-  | Unop { op = Not; e = Binop { l; op; r } } ->
+  | Unop { op = Not; e = Binop { l; op; r } } when Option.is_some (flip_binop op) ->
       (* apply demorgans to push negations out to leaves of boolean operators; flip equalities/inequalities *)
-      let open Ast.Binop in
-      let flipped_op =
-        match op with
-        | And -> Or
-        | Or -> And
-        | Eq -> NEq
-        | NEq -> Eq
-        | Gt -> Le
-        | Lt -> Ge
-        | Ge -> Lt
-        | Le -> Gt
-        | op -> failwith (Format.asprintf "unrecognized binary operator %a" pp op)
-      in
       let new_l = if op = And || op = Or then Unop { op = Not; e = l } else l in
       let new_r = if op = And || op = Or then Unop { op = Not; e = r } else r in
+      let flipped_op = Option.value_exn (flip_binop op) in
       meet_with_constraint ~fallback oct (Binop { l = new_l; op = flipped_op; r = new_r })
   | Binop { l; op = And; r } ->
       let l = meet_with_constraint ~fallback oct l in
@@ -222,26 +262,27 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) oct =
   | Unop { op = Not; e } -> meet_with_op oct Tcons0.EQ e (Lit (Int 0L))
   | _ -> oct
 
-let eval_texpr oct =
-  (fun e ->
-    try Texpr1.of_expr (Abstract1.env oct) e
-    with _ ->
-      failwith (Format.asprintf "error in Texpr1.of_expr; expr = %a\n" Texpr1.print_expr e))
-  >> Abstract1.bound_texpr (get_man ()) oct
+let eval_texpr oct expr =
+  try
+    let texpr = Texpr1.of_expr (Abstract1.env oct) expr in
+    Abstract1.bound_texpr (get_man ()) oct texpr
+  with _ -> Apron.Interval.top
 
 let extend_env_by_uses stmt oct =
   let env = Abstract1.env oct in
-  let man = get_man () in
-  (* adding RETVAR here is a hack -- not sure why, but apron complains down the line if RETVAR
-     is not in the env, including throwing an error if you try to add it explicitly. *)
-  let new_uses =
-    Ast.Stmt.uses stmt |> flip Set.add Cfg.retvar
-    |> Set.filter ~f:(Var.of_string >> Environment.mem_var env >> not)
-  in
-  if Set.is_empty new_uses then oct
+  if Environment.size env >= max_env_size then oct
   else
-    new_uses |> Set.to_array |> Array.map ~f:Var.of_string |> Environment.add env [||]
-    |> fun new_env -> Abstract1.change_environment man oct new_env true
+    let man = get_man () in
+    (* adding RETVAR here is a hack -- not sure why, but apron complains down the line if RETVAR
+       is not in the env, including throwing an error if you try to add it explicitly. *)
+    let new_uses =
+      Set.add (Ast.Stmt.uses stmt) Cfg.retvar
+      |> Set.filter ~f:(fun var_str -> not @@ Environment.mem_var env (Var.of_string var_str))
+    in
+    if Set.is_empty new_uses then oct
+    else
+      new_uses |> Set.to_array |> Array.map ~f:Var.of_string |> Environment.add env [||]
+      |> fun new_env -> change_environment man oct new_env true
 
 let interpret stmt oct =
   let open Ast.Stmt in
@@ -253,19 +294,20 @@ let interpret stmt oct =
   | Assign { lhs; rhs } -> (
       let lhs = Var.of_string lhs in
       let env = Abstract1.env oct in
-      let new_env =
-        if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
-      in
-      let oct_new_env = Abstract1.change_environment man oct new_env false in
-
-      match texpr_of_expr oct rhs with
-      | Some rhs_texpr ->
-          Abstract1.assign_texpr man oct_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None
-      | None ->
-          if Environment.mem_var env lhs then
-            (* lhs was constrained, quantify that out *)
-            Abstract1.forget_array man oct [| lhs |] false
-          else (* lhs was unconstrained, treat as a `skip`*) oct)
+      if Environment.size env >= max_env_size then oct
+      else
+        let new_env =
+          if Environment.mem_var env lhs then env else Environment.add env [||] [| lhs |]
+        in
+        let oct_new_env = change_environment man oct new_env false in
+        match texpr_of_expr oct rhs with
+        | Some rhs_texpr ->
+            Abstract1.assign_texpr man oct_new_env lhs (Texpr1.of_expr new_env rhs_texpr) None
+        | None ->
+            if Environment.mem_var env lhs then
+              (* lhs was constrained, quantify that out *)
+              Abstract1.forget_array man oct [| lhs |] false
+            else (* lhs was unconstrained, treat as a `skip`*) oct)
   | Array_write _ | Exceptional_call _ -> failwith "todo1"
 
 let sanitize oct = oct
@@ -319,11 +361,11 @@ let filter_env (oct : t) ~(f : string -> bool) =
   let _, fp_vars = Environment.vars env in
   let removed_vars = Array.filter fp_vars ~f:(Var.to_string >> f >> not) in
   let new_env = Environment.remove env removed_vars in
-  Abstract1.change_environment (get_man ()) oct new_env false
+  change_environment (get_man ()) oct new_env false
 
 let forget vars oct =
   let new_env = Environment.remove (Abstract1.env oct) vars in
-  Abstract1.change_environment (get_man ()) oct new_env false
+  change_environment (get_man ()) oct new_env false
 
 let lookup oct var =
   let man = get_man () in
@@ -332,18 +374,18 @@ let lookup oct var =
 
 let assign oct var texpr =
   let man = get_man () in
-  let env =
-    let old_env = Abstract1.env oct in
-    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
-  in
-  let oct = Abstract1.change_environment man oct env false in
-  Abstract1.assign_texpr man oct var Texpr1.(of_expr env texpr) None
+  let old_env = Abstract1.env oct in
+  if Environment.size old_env >= max_env_size then oct
+  else
+    let env = Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |]) in
+    let oct = change_environment man oct env false in
+    Abstract1.assign_texpr man oct var Texpr1.(of_expr env texpr) None
 
 let weak_assign oct var texpr =
   let man = get_man () in
-  let env =
-    let old_env = Abstract1.env oct in
-    Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |])
-  in
-  let oct = Abstract1.change_environment man oct env true in
-  Abstract1.join man oct (assign oct var texpr)
+  let old_env = Abstract1.env oct in
+  if Environment.size old_env >= max_env_size then oct
+  else
+    let env = Environment.(if mem_var old_env var then old_env else add old_env [||] [| var |]) in
+    let oct = change_environment man oct env true in
+    Abstract1.join man oct (assign oct var texpr)

@@ -5,6 +5,8 @@ include Abstract.Dom with type t = Oct.t Abstract1.t
 
 val get_man : unit -> Oct.t Manager.t
 
+val change_environment : Oct.t Manager.t -> t -> Environment.t -> bool -> t
+
 val texpr_of_expr :
   ?fallback:(t -> Ast.Expr.t -> Texpr1.expr option) -> t -> Ast.Expr.t -> Texpr1.expr option
 

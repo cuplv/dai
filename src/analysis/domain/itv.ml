@@ -286,7 +286,7 @@ let rec meet_with_constraint ?(fallback = fun _ _ -> None) itv =
   function
   | Unop { op = Not; e = Binop { l; op; r } } when Option.is_some (flip_binop op) ->
       (* flip equalities/disequalities/inequalities, and apply demorgan's where possible *)
-      let flipped_op = flip_binop op |> fun x -> Option.value_exn x in
+      let flipped_op = Option.value_exn (flip_binop op) in
       let new_l = if op = And || op = Or then Unop { op = Not; e = l } else l in
       let new_r = if op = And || op = Or then Unop { op = Not; e = r } else r in
       meet_with_constraint ~fallback itv (Binop { l = new_l; op = flipped_op; r = new_r })
