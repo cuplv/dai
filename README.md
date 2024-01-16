@@ -3,7 +3,7 @@
 _Incremental_ and _demand-driven_ abstract interpretation framework in OCaml
 
 DAI requires:
- * OCaml version 4.09.0+
+ * OCaml version 4.09.0+ (definitely works with 4.13.1)
  * OPAM version 2.0.7+
  * Dune version 2.5.1+
  * System packages: libgmp-dev libmpfr-dev (for APRON numerical domains)
