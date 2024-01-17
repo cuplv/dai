@@ -19,7 +19,8 @@ Build with `make build`.
 - use `git clone --recursive` or run `git submodule update --init` after
   regular cloning of https://github.com/semgrep/ocaml-tree-sitter-languages
 - run `core/scripts/install-tree-sitter-lib` to install tree-sitter library
-- go to `core/src/run` and update `Src_file.ml` and `Src_file.mli` with
+- apply [`build-aux/public-lines.patch`](build-aux/public-lines.patch) to `core`
+  or go to `core/src/run` and update `Src_file.ml` and `Src_file.mli` with
   `let lines x = x.lines` and `val lines : t -> string array`, respectively
 - according to instructions [here](https://github.com/semgrep/ocaml-tree-sitter-languages),
   run `make setup`, and then `make` and `make install`
