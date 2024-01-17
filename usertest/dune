@@ -1,0 +1,5 @@
+(library
+ (name usertest)
+ (libraries dai frontend analysis domain syntax)
+ (inline_tests)
+ (preprocess (pps ppx_inline_test)))

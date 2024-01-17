@@ -1,5 +1,7 @@
 # Demanded Abstract Interpretation with Queries
 
+## Build
+
 _Incremental_ and _demand-driven_ abstract interpretation framework in OCaml
 
 DAI requires:
@@ -9,6 +11,7 @@ DAI requires:
  * System packages: libgmp-dev libmpfr-dev (for APRON numerical domains)
  * [Adapton](https://github.com/plum-umd/adapton.ocaml) version 0.1-dev (pinned as a local OPAM package via `make install`, per its README)
  * **[UPD]** Tree sitter for Java (see instructions below)
+ * **[UPD]** Graphviz (for processing `.dot` files)
 
 Build with `make build`.
 
@@ -25,3 +28,15 @@ Build with `make build`.
 
 **Note.** Compared to the forked repo, in file `src/frontend/dune`,
 the library `tree_sitter_java` is replaced with `tree-sitter-lang.java`.
+
+## Experiment with DAI
+
+A few simple examples are in [`usertest`](usertest/): file 
+[`usertest.ml`](usertest/usertest.ml) runs interval and array-bounds analyses
+(currently, both ignore function calls).
+Analyzed graphs are stored in `.dot` files.
+- To run those examples, simply run `./run_usertest.sh`: the script
+  builds the project, runs tests from [`usertest`](usertest/),
+  and converts analyzed graphs to a visual representation in `.ps` files
+  using Graphviz.
+- The resulting graphs can be found in `_build/default/`.
