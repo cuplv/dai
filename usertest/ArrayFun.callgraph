@@ -1,0 +1,2 @@
+CALLER: static ArrayFun#main(java.lang.String[])
+	CALLEE: static ArrayFun#sum(int,int)

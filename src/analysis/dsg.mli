@@ -22,6 +22,12 @@ module Make (Dom : Abstract.Dom) : sig
 
   val print_stats : t pp
 
+  val materialize_daig :
+    fn:Cfg.Fn.t ->
+    entry_state:Dom.t ->
+    t ->
+    D.t * t
+
   val apply_edit : cha:Class_hierarchy.t -> diff:Tree_diff.t -> Loc_map.t -> t -> Loc_map.t * t
   (** apply a syntactic edit to a DSG, updating a Loc_map in the process *)
 

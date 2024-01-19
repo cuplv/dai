@@ -1,5 +1,5 @@
-class ArrayFun {
-		int sum(int x, int y) {
+public class ArrayFun {
+		static int sum(int x, int y) {
 				return x + y;
 		}
 

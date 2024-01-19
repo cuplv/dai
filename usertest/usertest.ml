@@ -21,6 +21,26 @@ module Test (Dom : Domain.Abstract.Dom) = struct
 		         ~filename:(abs_of_rel_path ("analyzed_" ^ fname_ ^ fn.method_id.method_name ^ ".dot"))
 		         analyzed_daig);
 		true
+		
+	(* JB: this code is mostly copied from src/analysis/dsg.ml *)
+	let test_interprocedural fname = 
+		let ({ cfgs; fields; _ } : Frontend.Cfg_parser.prgm_parse_result) =
+		  Frontend.Cfg_parser.parse_file_exn (abs_of_rel_path (dname ^ fname ^ ".java"))
+		in
+		let dsg : Dsg.t = Dsg.init ~cfgs in
+		let fns = Syntax.Cfg.Fn.Map.keys dsg in
+		let main_fn =
+		  List.find_exn fns ~f:(fun (fn : Syntax.Cfg.Fn.t) -> String.equal "main" fn.method_id.method_name)
+		in
+		let _, dsg = Dsg.materialize_daig ~fn:main_fn ~entry_state:(Dom.init ()) dsg in
+		let cg =
+		  Frontend.Callgraph.deserialize ~fns (Frontend.Src_file.of_file @@ abs_of_rel_path (dname ^ fname ^ ".callgraph"))
+		in
+		let _exit_state, dsg =
+		  Dsg.query ~fn:main_fn ~entry_state:(Dom.init ()) ~loc:main_fn.exit ~cg ~fields dsg
+		in
+		let _ = Dsg.dump_dot ~filename:(abs_of_rel_path ("solved_" ^ fname ^ ".dsg.dot")) dsg in
+		true
 end
 
 (* Domain modules we've tried:
@@ -39,6 +59,9 @@ let%test "User test: simple for-loop with intervals" =
   
 let%test "User test: simple static arrays with array bounds" =
   TestArrBounds.test_simple "ArrayFun"
+  
+let%test "User test: interprocedural array bounds" =
+  TestArrBounds.test_interprocedural "ArrayFun"
 
 (* JB: I can't figure out where to get a callgraph.
 It seems that tests in src/analysis/dsg.ml rely on existing .callgraph files. *)

@@ -10,4 +10,7 @@ set -o xtrace # to print out commands
 for fname in $dir/analyzed_*.dot; do
 		dot -Tps $fname -o "${fname%.dot}.ps"
 done
+for fname in $dir/solved*.dot; do
+		dot -Tps $fname -o "${fname%.dot}.ps"
+done
 

@@ -37,6 +37,13 @@ the library `tree_sitter_java` is replaced with `tree-sitter-lang.java`.
 - `git apply ../build.gradle.patch`
 - `./gradlew compileJava`
 
+From `usertest`: `javac ArrayFun.java`, `jar cfe ArrayFun.jar ArrayFun ArrayFun.class`,
+(make sure the resulting jar is good by `java -jar ArrayFun.jar`
+which should fail with array out of bounds).
+
+From WALA-callgraph: 
+`./run.py ArrayFun ../usertest/ArrayFun.callgraph ../usertest/ArrayFun.jar`
+
 ## Experiment with DAI
 
 A few simple examples are in [`usertest`](usertest/): file 
