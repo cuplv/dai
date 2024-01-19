@@ -30,6 +30,13 @@ Build with `make build`.
 **Note.** Compared to the forked repo, in file `src/frontend/dune`,
 the library `tree_sitter_java` is replaced with `tree-sitter-lang.java`.
 
+## Building callgraphs
+- `git submodule init && git submodule update`
+- `cd WALA-callgraph`
+- Ensure you have Java 8 or 11 installed, with gradle 7.6
+- `git apply ../build.gradle.patch`
+- `./gradlew compileJava`
+
 ## Experiment with DAI
 
 A few simple examples are in [`usertest`](usertest/): file 
