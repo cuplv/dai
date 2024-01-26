@@ -42,7 +42,7 @@ From `usertest`: `javac ArrayFun.java`, `jar cfe ArrayFun.jar ArrayFun ArrayFun.
 which should fail with array out of bounds).
 
 From WALA-callgraph: 
-`./run.py ArrayFun ../usertest/ArrayFun.callgraph ../usertest/ArrayFun.jar`
+`./run.py ../usertest/ArrayFun.callgraph ../usertest/ArrayFun.jar`
 
 ## Experiment with DAI
 
